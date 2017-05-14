@@ -52,7 +52,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-using std::ostringstream;
 using std::string;
 using std::unique_ptr;
 using std::vector;
@@ -91,9 +90,10 @@ class GameCubePrivate : public RomDataPrivate
 
 			// High byte: Image format.
 			DISC_FORMAT_RAW  = (0 << 8),	// Raw image. (ISO, GCM)
-			DISC_FORMAT_WBFS = (1 << 8),	// WBFS image. (Wii only)
-			DISC_FORMAT_CISO = (2 << 8),	// CISO image.
-			DISC_FORMAT_TGC  = (3 << 8),	// TGC (embedded disc image) (GCN only?)
+			DISC_FORMAT_TGC  = (1 << 8),	// TGC (embedded disc image) (GCN only?)
+			DISC_FORMAT_WBFS = (2 << 8),	// WBFS image. (Wii only)
+			DISC_FORMAT_CISO = (3 << 8),	// CISO image.
+			DISC_FORMAT_WIA  = (4 << 8),	// WIA image. (Header only!)
 			DISC_FORMAT_UNKNOWN = (0xFF << 8),
 			DISC_FORMAT_MASK = (0xFF << 8),
 		};
@@ -272,7 +272,7 @@ int GameCubePrivate::loadWiiPartitionTables(void)
 	if (wiiVgTblLoaded) {
 		// Partition tables have already been loaded.
 		return 0;
-	} else if (!this->file || !this->file->isOpen()) {
+	} else if (!this->file || !this->file->isOpen() || !this->discReader) {
 		// File isn't open.
 		return -EBADF;
 	} else if ((discType & DISC_SYSTEM_MASK) != DISC_SYSTEM_WII) {
@@ -584,6 +584,65 @@ vector<const char*> GameCubePrivate::gcnRegionToGameTDB(unsigned int gcnRegion, 
 			break;
 
 		default:
+			// Invalid gcnRegion. Use the game ID by itself.
+			// (Usually happens if we can't read BI2.bin,
+			// e.g. in WIA images.)
+			bool addEN = false;
+			switch (idRegion) {
+				case 'E':	// USA
+					ret.push_back("US");
+					break;
+				case 'P':	// Europe (PAL)
+					addEN = true;
+					break;
+				case 'J':	// Japan
+					ret.push_back("JA");
+					break;
+				case 'W':	// Taiwan
+					ret.push_back("ZHTW");
+					break;
+				case 'K':	// South Korea
+				case 'T':	// South Korea with Japanese language
+				case 'Q':	// South Korea with English language
+					ret.push_back("KO");
+					break;
+				case 'C':	// China (unofficial?)
+					ret.push_back("ZHCN");
+					break;
+
+				/** PAL regions **/
+				case 'D':	// Germany
+					ret.push_back("DE");
+					addEN = true;
+					break;
+				case 'F':	// France
+					ret.push_back("FR");
+					addEN = true;
+					break;
+				case 'H':	// Netherlands
+					ret.push_back("NL");
+					addEN = true;
+					break;
+				case 'I':	// Italy
+					ret.push_back("NL");
+					addEN = true;
+					break;
+				case 'R':	// Russia
+					ret.push_back("RU");
+					addEN = true;
+					break;
+				case 'S':	// Spain
+					ret.push_back("ES");
+					addEN = true;
+					break;
+				case 'U':	// Australia
+					ret.push_back("AU");
+					addEN = true;
+					break;
+			}
+			if (addEN) {
+				ret.push_back("EN");
+			}
 			break;
 	}
 
@@ -955,6 +1014,7 @@ GameCube::GameCube(IRpFile *file)
 {
 	// This class handles disc images.
 	RP_D(GameCube);
+	d->className = "GameCube";
 	d->fileType = FTYPE_DISC_IMAGE;
 
 	if (!d->file) {
@@ -984,12 +1044,6 @@ GameCube::GameCube(IRpFile *file)
 			case GameCubePrivate::DISC_FORMAT_RAW:
 				d->discReader = new DiscReader(d->file);
 				break;
-			case GameCubePrivate::DISC_FORMAT_WBFS:
-				d->discReader = new WbfsReader(d->file);
-				break;
-			case GameCubePrivate::DISC_FORMAT_CISO:
-				d->discReader = new CisoGcnReader(d->file);
-				break;
 			case GameCubePrivate::DISC_FORMAT_TGC: {
 				d->fileType = FTYPE_EMBEDDED_DISC_IMAGE;
 
@@ -999,6 +1053,17 @@ GameCube::GameCube(IRpFile *file)
 				d->discReader = new DiscReader(d->file, gcm_offset, -1);
 				break;
 			}
+			case GameCubePrivate::DISC_FORMAT_WBFS:
+				d->discReader = new WbfsReader(d->file);
+				break;
+			case GameCubePrivate::DISC_FORMAT_CISO:
+				d->discReader = new CisoGcnReader(d->file);
+				break;
+			case GameCubePrivate::DISC_FORMAT_WIA:
+				// TODO: Implement WiaReader.
+				// For now, only the header will be readable.
+				d->discReader = nullptr;
+				break;
 			case GameCubePrivate::DISC_FORMAT_UNKNOWN:
 			default:
 				d->fileType = FTYPE_UNKNOWN;
@@ -1011,6 +1076,21 @@ GameCube::GameCube(IRpFile *file)
 	if (!d->isValid) {
 		// Nothing else to do here.
 		return;
+	}
+
+	if (!d->discReader) {
+		// No WiaReader yet. If this is WIA,
+		// retrieve the header from header[].
+		if ((d->discType & GameCubePrivate::DISC_FORMAT_MASK) == GameCubePrivate::DISC_FORMAT_WIA) {
+			// GCN/Wii header starts at 0x58.
+			memcpy(&d->discHeader, &header[0x58], sizeof(d->discHeader));
+			return;
+		} else {
+			// Non-WIA formats must have a valid DiscReader.
+			d->discType = GameCubePrivate::DISC_UNKNOWN;
+			d->isValid = false;
+			return;
+		}
 	}
 
 	// Save the disc header for later.
@@ -1142,6 +1222,14 @@ int GameCube::isRomSupported_static(const DetectInfo *info)
 		return (GameCubePrivate::DISC_SYSTEM_GCN | GameCubePrivate::DISC_FORMAT_RAW);
 	}
 
+	// Check for TGC.
+	const GCN_TGC_Header *const tgcHeader = reinterpret_cast<const GCN_TGC_Header*>(info->header.pData);
+	if (be32_to_cpu(tgcHeader->tgc_magic) == TGC_MAGIC) {
+		// TGC images have their own 32 KB header, so we can't
+		// check the actual GCN/Wii header here.
+		return (GameCubePrivate::DISC_SYSTEM_UNKNOWN | GameCubePrivate::DISC_FORMAT_TGC);
+	}
+
 	// Check for sparse/compressed disc formats.
 	// These are checked after the magic numbers in case some joker
 	// decides to make a GCN or Wii disc image with the game ID "WBFS".
@@ -1166,15 +1254,42 @@ int GameCube::isRomSupported_static(const DetectInfo *info)
 		// CISO format doesn't store a copy of the disc header
 		// at the beginning of the disc, so we can't check the
 		// system format here.
-		return GameCubePrivate::DISC_SYSTEM_UNKNOWN | GameCubePrivate::DISC_FORMAT_CISO;
+		return (GameCubePrivate::DISC_SYSTEM_UNKNOWN | GameCubePrivate::DISC_FORMAT_CISO);
 	}
 
-	// Check for TGC.
-	const GCN_TGC_Header *const tgcHeader = reinterpret_cast<const GCN_TGC_Header*>(info->header.pData);
-	if (be32_to_cpu(tgcHeader->tgc_magic) == TGC_MAGIC) {
-		// TGC images have their own 32 KB header, so we can't
-		// check the actual GCN/Wii header here.
-		return GameCubePrivate::DISC_SYSTEM_UNKNOWN | GameCubePrivate::DISC_FORMAT_TGC;
+	// Check for WIA.
+	static const uint8_t wia_magic[4] = {'W','I','A',1};
+	if (!memcmp(info->header.pData, wia_magic, sizeof(wia_magic))) {
+		// This is a WIA image.
+		// NOTE: We're using the WIA system ID if it's valid.
+		// Otherwise, fall back to GCN/Wii magic.
+		switch (info->header.pData[0x48]) {
+			case 1:
+				// GameCube disc image. (WIA format)
+				return (GameCubePrivate::DISC_SYSTEM_GCN | GameCubePrivate::DISC_FORMAT_WIA);
+			case 2:
+				// Wii disc image. (WIA format)
+				return (GameCubePrivate::DISC_SYSTEM_WII | GameCubePrivate::DISC_FORMAT_WIA);
+			default:
+				break;
+		}
+
+		// Check the GameCube/Wii magic.
+		// TODO: WIA struct when full WIA support is added.
+		uint32_t magic_tmp;
+		memcpy(&magic_tmp, &info->header.pData[0x70], sizeof(magic_tmp));
+		if (be32_to_cpu(magic_tmp) == WII_MAGIC) {
+			// Wii disc image. (WIA format)
+			return (GameCubePrivate::DISC_SYSTEM_WII | GameCubePrivate::DISC_FORMAT_WIA);
+		}
+		memcpy(&magic_tmp, &info->header.pData[0x74], sizeof(magic_tmp));
+		if (be32_to_cpu(magic_tmp) == GCN_MAGIC) {
+			// GameCube disc image. (WIA format)
+			return (GameCubePrivate::DISC_SYSTEM_GCN | GameCubePrivate::DISC_FORMAT_WIA);
+		}
+
+		// Unrecognized WIA image...
+		return (GameCubePrivate::DISC_SYSTEM_UNKNOWN | GameCubePrivate::DISC_FORMAT_WIA);
 	}
 
 	// Not supported.
@@ -1240,6 +1355,9 @@ const rp_char *const *GameCube::supportedFileExtensions_static(void)
 	static const rp_char *const exts[] = {
 		_RP(".gcm"), _RP(".rvm"), _RP(".wbfs"),
 		_RP(".ciso"), _RP(".cso"), _RP(".tgc"),
+
+		// Partially supported. (Header only!)
+		_RP(".wia"),
 
 		// NOTE: May cause conflicts on Windows
 		// if fallback handling isn't working.
@@ -1464,6 +1582,15 @@ int GameCube::loadFieldData(void)
 	d->fields->addField_string_numeric(_RP("Revision"),
 		d->discHeader.revision, RomFields::FB_DEC, 2);
 
+	// The remaining fields are not located in the disc header.
+	// If we can't read the disc contents for some reason, e.g.
+	// unimplemented DiscReader (WIA), skip the fields.
+	if (!d->discReader) {
+		// Cannot read the disc contents.
+		// We're done for now.
+		return (int)d->fields->count();
+	}
+
 	// Region code.
 	// bi2.bin and/or RVL_RegionSetting is loaded in the constructor,
 	// and the region code is stored in d->gcnRegion.
@@ -1502,22 +1629,22 @@ int GameCube::loadFieldData(void)
 			// Game name.
 			if (comment->gamename_full[0] != 0) {
 				field_len = (int)strnlen(comment->gamename_full, sizeof(comment->gamename_full));
-				comment_data += string(comment->gamename_full, field_len);
+				comment_data.append(comment->gamename_full, field_len);
 				comment_data += '\n';
 			} else if (comment->gamename[0] != 0) {
 				field_len = (int)strnlen(comment->gamename, sizeof(comment->gamename));
-				comment_data += string(comment->gamename, field_len);
+				comment_data.append(comment->gamename, field_len);
 				comment_data += '\n';
 			}
 
 			// Company.
 			if (comment->company_full[0] != 0) {
 				field_len = (int)strnlen(comment->company_full, sizeof(comment->company_full));
-				comment_data += string(comment->company_full, field_len);
+				comment_data.append(comment->company_full, field_len);
 				comment_data += '\n';
 			} else if (comment->company[0] != 0) {
 				field_len = (int)strnlen(comment->company, sizeof(comment->company));
-				comment_data += string(comment->company, field_len);
+				comment_data.append(comment->company, field_len);
 				comment_data += '\n';
 			}
 
@@ -1529,7 +1656,7 @@ int GameCube::loadFieldData(void)
 				}
 
 				field_len = (int)strnlen(comment->gamedesc, sizeof(comment->gamedesc));
-				comment_data += string(comment->gamedesc, field_len);
+				comment_data.append(comment->gamedesc, field_len);
 			}
 
 			// Remove trailing newlines.
@@ -1794,6 +1921,18 @@ int GameCube::loadInternalImage(ImageType imageType, const rp_image **pImage)
 		// Save file isn't valid.
 		*pImage = nullptr;
 		return -EIO;
+	} else if (!d->discReader) {
+		// Cannot read the disc contents.
+		*pImage = nullptr;
+		return -ENOENT;
+	}
+
+	// Internal images are currently only supported for GCN,
+	// and possibly Triforce.
+	if ((d->discType & GameCubePrivate::DISC_SYSTEM_MASK) >= GameCubePrivate::DISC_SYSTEM_WII) {
+		// opening.bnr doesn't have an image.
+		*pImage = nullptr;
+		return -ENOENT;
 	}
 
 	// Load opening.bnr. (GCN/Triforce only)

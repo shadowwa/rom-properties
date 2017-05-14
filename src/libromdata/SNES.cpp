@@ -189,6 +189,8 @@ SNES::SNES(IRpFile *file)
 	: super(new SNESPrivate(this, file))
 {
 	RP_D(SNES);
+	d->className = "SNES";
+
 	if (!d->file) {
 		// Could not dup() the file handle.
 		return;
@@ -502,7 +504,7 @@ int SNES::loadFieldData(void)
 		} else {
 			// Four-character ID.
 			// Append the publisher.
-			id6 += string(romHeader->ext.new_publisher_code, sizeof(romHeader->ext.new_publisher_code));
+			id6.append(romHeader->ext.new_publisher_code, sizeof(romHeader->ext.new_publisher_code));
 		}
 		d->fields->addField_string(_RP("Game ID"),
 			latin1_to_rp_string(id6.data(), (int)id6.size()));

@@ -92,11 +92,13 @@ SET(libromdata_SRCS
 	file/FileSystem_common.cpp
 	img/rp_image.cpp
 	img/rp_image_backend.cpp
+	img/rp_image_ops.cpp
 	img/RpImageLoader.cpp
 	img/ImageDecoder.cpp
 	img/RpPng.cpp
 	img/IconAnimHelper.cpp
 	#img/TCreateThumbnail.cpp	# NOT listed here due to template stuff.
+	img/pngcheck/pngcheck.cpp
 	disc/IDiscReader.cpp
 	disc/DiscReader.cpp
 	disc/WbfsReader.cpp
@@ -110,7 +112,8 @@ SET(libromdata_SRCS
 	disc/PEResourceReader.cpp
 	disc/NEResourceReader.cpp
 	disc/NCCHReader.cpp
-	img/pngcheck/pngcheck.cpp
+	config/ConfReader.cpp
+	config/Config.cpp
 	)
 SET(libromdata_H
 	byteorder.h
@@ -139,6 +142,7 @@ SET(libromdata_H
 	Amiibo.hpp
 	NES.hpp
 	EXE.hpp
+	EXE_p.hpp
 	WiiU.hpp
 	Nintendo3DS.hpp
 	md_structs.h
@@ -168,6 +172,7 @@ SET(libromdata_H
 	file/RpMemFile.hpp
 	file/FileSystem.hpp
 	img/rp_image.hpp
+	img/rp_image_p.hpp
 	img/rp_image_backend.hpp
 	img/RpImageLoader.hpp
 	img/ImageDecoder.hpp
@@ -196,6 +201,8 @@ SET(libromdata_H
 	disc/NEResourceReader.hpp
 	disc/NCCHReader.hpp
 	disc/NCCHReader_p.hpp
+	config/ConfReader.hpp
+	config/Config.hpp
 	)
 
 IF(NOT USE_INTERNAL_PNG OR (USE_INTERNAL_PNG AND USE_INTERNAL_PNG_DLL))
@@ -207,6 +214,10 @@ IF(JPEG_FOUND)
 	SET(libromdata_SRCS ${libromdata_SRCS} img/RpJpeg.cpp)
 	SET(libromdata_H ${libromdata_H} img/RpJpeg.hpp)
 ENDIF(JPEG_FOUND)
+
+IF(ENABLE_XML)
+	SET(libromdata_SRCS ${libromdata_SRCS} EXE_manifest.cpp)
+ENDIF(ENABLE_XML)
 
 IF(WIN32)
 	SET(libromdata_OS_SRCS
@@ -369,6 +380,9 @@ FOREACH(_target romdata8 romdata16)
 		TARGET_LINK_LIBRARIES(${_target} ${NETTLE_LIBRARY})
 		TARGET_INCLUDE_DIRECTORIES(${_target} PRIVATE ${NETTLE_INCLUDE_DIRS})
 	ENDIF(NETTLE_FOUND)
+	IF(ENABLE_XML)
+		TARGET_LINK_LIBRARIES(${_target} ${TinyXML2_LIBRARY})
+	ENDIF(ENABLE_XML)
 	IF(WIN32)
 		TARGET_LINK_LIBRARIES(${_target} gdiplus)
 		IF(ENABLE_DECRYPTION)

@@ -31,6 +31,8 @@
 //   - http://www.codeproject.com/Articles/338268/COM-in-C
 
 #include "stdafx.h"
+#include "config.version.h"
+
 #include "RegKey.hpp"
 #include "RP_ComBase.hpp"
 #include "RP_ExtractIcon.hpp"
@@ -90,9 +92,13 @@ BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD dwReason, LPVOID /*lpReserved*/)
 				dll_filename[0] = 0;
 			}
 
+#if !defined(_MSC_VER) || defined(_DLL)
 			// Disable thread library calls, since we don't
 			// care about thread attachments.
+			// NOTE: On MSVC, don't do this if using the static CRT.
+			// Reference: https://msdn.microsoft.com/en-us/library/windows/desktop/ms682579(v=vs.85).aspx
 			DisableThreadLibraryCalls(hInstance);
+#endif /* !defined(_MSC_VER) || defined(_DLL) */
 
 			// Register RpGdiplusBackend.
 			// TODO: Static initializer somewhere?
@@ -317,18 +323,28 @@ static wstring GetUserFileAssoc(const wstring &sid, const rp_char *ext)
 {
 	// Check if the user has already associated this file extension.
 	// TODO: Check all users.
-	wstring regPath;
-	regPath.reserve(128);
-	regPath  = sid;
-	regPath += L"\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\";
-	regPath += RP2W_c(ext);
-	regPath += L"\\UserChoice";
+
+	// 288-character buffer:
+	// - SID length: 184 characters
+	//   - Reference: http://stackoverflow.com/questions/1140528/what-is-the-maximum-length-of-a-sid-in-sddl-format
+	// - FileExts: 61 characters
+	// - Extension: 16 characters
+	// - UserChoice: 11 characters
+	// - Extra: 16 characters
+	wchar_t regPath[288];
+	int len = swprintf_s(regPath, ARRAY_SIZE(regPath),
+		L"%s\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\%s\\UserChoice",
+		sid.c_str(), RP2W_c(ext));
+	if (len <= 0 || len >= ARRAY_SIZE(regPath)) {
+		// Buffer isn't large enough...
+		return wstring();
+	}
 
 	// FIXME: This will NOT update profiles that aren't loaded.
 	// Other profiles will need to be loaded manually, or those users
 	// will have to register the DLL themselves.
 	// Reference: http://windowsitpro.com/scripting/how-can-i-update-all-profiles-machine-even-if-theyre-not-currently-loaded
-	RegKey hkcu_UserChoice(HKEY_USERS, regPath.c_str(), KEY_READ, false);
+	RegKey hkcu_UserChoice(HKEY_USERS, regPath, KEY_READ, false);
 	if (!hkcu_UserChoice.isOpen()) {
 		// ERROR_FILE_NOT_FOUND is acceptable.
 		// Anything else is an error.
@@ -391,11 +407,21 @@ static LONG RegisterUserFileType(const wstring &sid, const RomDataFactory::ExtIn
 	}
 
 	// Next, check "HKU\\[sid]".
-	wstring regPath;
-	regPath.reserve(128);
-	regPath  = sid;
-	regPath += L"\\Software\\Classes";
-	RegKey hku_cr(HKEY_USERS, regPath.c_str(), KEY_WRITE, false);
+
+	// 208-character buffer:
+	// - SID length: 184 characters
+	//   - Reference: http://stackoverflow.com/questions/1140528/what-is-the-maximum-length-of-a-sid-in-sddl-format
+	// - Software\\Classes: 16 characters
+	// - Extra: 8 characters
+	wchar_t regPath[208];
+	int len = swprintf_s(regPath, ARRAY_SIZE(regPath),
+		L"%s\\Software\\Classes", sid.c_str());
+	if (len <= 0 || len >= ARRAY_SIZE(regPath)) {
+		// Buffer isn't large enough...
+		return ERROR_BUFFER_OVERFLOW;
+	}
+
+	RegKey hku_cr(HKEY_USERS, regPath, KEY_WRITE, false);
 	if (hku_cr.isOpen()) {
 		LONG lResult = RegisterFileType(hku_cr, progID_info);
 		if (lResult != ERROR_SUCCESS) {
@@ -459,11 +485,21 @@ static LONG UnregisterUserFileType(const wstring &sid, const RomDataFactory::Ext
 	}
 
 	// Next, check "HKU\\[sid]".
-	wstring regPath;
-	regPath.reserve(128);
-	regPath  = sid;
-	regPath += L"\\Software\\Classes\\";
-	RegKey hku_cr(HKEY_USERS, regPath.c_str(), KEY_WRITE, false);
+
+	// 208-character buffer:
+	// - SID length: 184 characters
+	//   - Reference: http://stackoverflow.com/questions/1140528/what-is-the-maximum-length-of-a-sid-in-sddl-format
+	// - Software\\Classes: 16 characters
+	// - Extra: 8 characters
+	wchar_t regPath[208];
+	int len = swprintf_s(regPath, ARRAY_SIZE(regPath),
+		L"%s\\Software\\Classes", sid.c_str());
+	if (len <= 0 || len >= ARRAY_SIZE(regPath)) {
+		// Buffer isn't large enough...
+		return ERROR_BUFFER_OVERFLOW;
+	}
+
+	RegKey hku_cr(HKEY_USERS, regPath, KEY_WRITE, false);
 	if (hku_cr.isOpen()) {
 		LONG lResult = UnregisterFileType(hku_cr, progID_info);
 		if (lResult != ERROR_SUCCESS) {
@@ -628,6 +664,40 @@ STDAPI DllUnregisterServer(void)
 	// Notify the shell that file associations have changed.
 	// Reference: https://msdn.microsoft.com/en-us/library/windows/desktop/cc144148(v=vs.85).aspx
 	SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
+
+	return S_OK;
+}
+
+/**
+ * Get the DLL version.
+ * Reference: https://msdn.microsoft.com/en-us/library/windows/desktop/bb776404(v=vs.85).aspx
+ */
+STDAPI DllGetVersion(_Out_ DLLVERSIONINFO2 *pdvi)
+{
+	if (!pdvi) {
+		// Return E_POINTER since pdvi is an out param.
+		// Reference: http://stackoverflow.com/questions/1426672/when-return-e-pointer-and-when-e-invalidarg
+		return E_POINTER;
+	}
+
+	if (pdvi->info1.cbSize < sizeof(DLLVERSIONINFO)) {
+		// Invalid struct...
+		return E_INVALIDARG;
+	}
+
+	// DLLVERSIONINFO
+	pdvi->info1.dwMajorVersion = RP_VERSION_MAJOR;
+	pdvi->info1.dwMinorVersion = RP_VERSION_MINOR;
+	pdvi->info1.dwBuildNumber = RP_VERSION_PATCH;	// Not technically a build number...
+	pdvi->info1.dwBuildNumber = DLLVER_PLATFORM_NT;	// TODO: 9x?
+
+	if (pdvi->info1.cbSize >= sizeof(DLLVERSIONINFO2)) {
+		// DLLVERSIONINFO2
+		pdvi->dwFlags = 0;
+		pdvi->ullVersion = MAKEDLLVERULL(
+			RP_VERSION_MAJOR, RP_VERSION_MINOR,
+			RP_VERSION_PATCH, RP_VERSION_DEVEL);
+	}
 
 	return S_OK;
 }

@@ -10,11 +10,11 @@
   * Added support for downloading Nintendo DS, GameCube, and Wii cover scans.
     This includes cover and full cover scans for all three, and 3D cover scans
     for GameCube and Wii.
-  * !!! Multiple image sizes are now supported for external image downloads.
+  * Multiple image sizes are now supported for external image downloads.
     GameTDB has higher-resolution scans for certain image types, including
     Nintendo DS cover scans. These high-resolution scans are used if a larger
-    thumbnail size is requested by the file browser. A user configuration
-    option will be added later to disable high-resolution image downloads.
+    thumbnail size is requested by the file browser. An option to disable
+    downloading of high-resolution images is available in the user config file.
   * (Windows) Physical block devices are now supported. This allows viewing
     ROM Properties for certain types of physical media, e.g. Wii DVD-R backups.
     Currently only the property page is supported. Thumbnails (and icons)
@@ -23,10 +23,21 @@
   * (rpcli) New option "-k". This option will verify all known keys in
     keys.conf. Verification is done by decrypting a string that was encrypted
     with the original key and checking if the decrypted string is correct.
+  * GameCube: Added partial support for WIA disc images. A copy of the disc
+    header is stored in plaintext in WIA fomrat, so disc header fields and
+    external images are supported. Region code, age ratings, and the internal
+    GCN banner are not supported.
+  * (Windows) A configuration program, rp-config.exe, is now included. This
+    allows you to configure the image type priority for thumbnails as well
+    as download options. Linux versions will be added in a future release,
+    though the underlying rom-properties.conf functionality is implemented
+    and works on all platforms.
 
 * New systems supported:
   * Windows/DOS: Executables, dynamic link libraries, and other types of
-    executable files are supported.
+    executable files are supported. Includes parsing of version and
+    manifest resources. Icon thumbnailing on non-Windows systems will
+    be added in a future release.
   * Nintendo Wii U: Full disc images (\*.wud) are supported, with image
     downloads for disc, cover, 3D cover, and full cover scans.
   * Nintendo 3DS: SMDH, 3DSX, CCI (\*.3ds), CIA, and NCCH files are supported.
@@ -44,6 +55,11 @@
     /usr/lib64/. This prevented it from working correctly on anything but
     64-bit Linux systems that used the older multilib path, which means
     the Ubuntu GNOME packages did not work.
+
+* Other changes:
+  * (Windows) The 32-bit EXEs have been moved out of the i386/ subdirectory
+    and into the base directory. The 64-bit EXEs are still in the amd64/
+    subdirectory.
 
 ## v0.9-beta2 (released 2017/02/07)
 
