@@ -15,6 +15,7 @@ BuildRequires: zlib-devel
 BuildRequires: curl-devel
 BuildRequires: png-devel
 BuildRequires: jpeg-devel
+BuildRequires: pkgconfig(tinyxml2)
 #Requires:      
 
 %description
