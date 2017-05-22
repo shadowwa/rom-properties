@@ -20,14 +20,16 @@
  ***************************************************************************/
 
 #include "Amiibo.hpp"
-#include "RomData_p.hpp"
+#include "librpbase/RomData_p.hpp"
 
 #include "nfp_structs.h"
 #include "data/AmiiboData.hpp"
 
-#include "byteswap.h"
-#include "TextFuncs.hpp"
-#include "file/IRpFile.hpp"
+// librpbase
+#include "librpbase/byteswap.h"
+#include "librpbase/TextFuncs.hpp"
+#include "librpbase/file/IRpFile.hpp"
+using namespace LibRpBase;
 
 // C includes. (C++ namespace)
 #include <cassert>
@@ -440,7 +442,7 @@ int Amiibo::loadFieldData(void)
 	// Serial number.
 
 	// Convert the 7-byte serial number to ASCII.
-	static const uint8_t hex_lookup[16] = {
+	static const char hex_lookup[16] = {
 		'0','1','2','3','4','5','6','7',
 		'8','9','A','B','C','D','E','F'
 	};

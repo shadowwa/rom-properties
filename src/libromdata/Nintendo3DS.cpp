@@ -20,26 +20,28 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
  ***************************************************************************/
 
-#include "config.libromdata.h"
+#include "librpbase/config.librpbase.h"
 
 #include "Nintendo3DS.hpp"
-#include "RomData_p.hpp"
+#include "librpbase/RomData_p.hpp"
 
 #include "n3ds_structs.h"
 
-#include "common.h"
-#include "byteswap.h"
-#include "TextFuncs.hpp"
-#include "file/IRpFile.hpp"
-#include "file/FileSystem.hpp"
+// librpbase
+#include "librpbase/common.h"
+#include "librpbase/byteswap.h"
+#include "librpbase/TextFuncs.hpp"
+#include "librpbase/file/IRpFile.hpp"
+#include "librpbase/file/FileSystem.hpp"
+
+#include "librpbase/img/rp_image.hpp"
+#include "librpbase/img/ImageDecoder.hpp"
+using namespace LibRpBase;
 
 // For DSiWare SRLs embedded in CIAs.
-#include "disc/DiscReader.hpp"
-#include "disc/PartitionFile.hpp"
+#include "librpbase/disc/DiscReader.hpp"
+#include "librpbase/disc/PartitionFile.hpp"
 #include "NintendoDS.hpp"
-
-#include "img/rp_image.hpp"
-#include "img/ImageDecoder.hpp"
 
 // NCCH reader.
 #include "disc/NCCHReader.hpp"
@@ -174,15 +176,18 @@ class Nintendo3DSPrivate : public RomDataPrivate
 
 		/**
 		 * Load the specified NCCH header.
-		 * @param idx		[in] Content/partition index.
-		 * @return NCCHReader on success; nullptr on error.
+		 * @param idx			[in] Content/partition index.
+		 * @param pOutNcchReader	[out] Output variable for the NCCHReader.
+		 * @return 0 on success; negative POSIX error code on error.
+		 * NOTE: Caller must check NCCHReader::isOpen().
 		 */
-		NCCHReader *loadNCCH(int idx);
+		int loadNCCH(int idx, NCCHReader **pOutNcchReader);
 
 		/**
 		 * Create an NCCHReader for the primary content.
 		 * An NCCH reader is created as this->ncch_reader.
 		 * @return this->ncch_reader on success; nullptr on error.
+		 * NOTE: Caller must check NCCHReader::isOpen().
 		 */
 		NCCHReader *loadNCCH(void);
 
@@ -228,6 +233,13 @@ class Nintendo3DSPrivate : public RomDataPrivate
 		 */
 		static vector<const char*> n3dsRegionToGameTDB(
 			uint32_t smdhRegion, char idRegion);
+
+		/**
+		 * Convert a Nintendo 3DS version number field to a string.
+		 * @param version Version number.
+		 * @return String.
+		 */
+		static inline rp_string n3dsVersionToString(uint16_t version);
 };
 
 /** Nintendo3DSPrivate **/
@@ -367,8 +379,8 @@ int Nintendo3DSPrivate::loadSMDH(void)
 		case ROM_TYPE_NCCH: {
 			// CCI file, CIA file with no meta section, or NCCH file.
 			// Open "exefs:/icon".
-			NCCHReader *ncch_reader = loadNCCH();
-			if (!ncch_reader) {
+			NCCHReader *const ncch_reader = loadNCCH();
+			if (!ncch_reader || !ncch_reader->isOpen()) {
 				// Unable to open the primary NCCH.
 				return -7;
 			}
@@ -408,24 +420,29 @@ int Nintendo3DSPrivate::loadSMDH(void)
 
 /**
  * Load the specified NCCH header.
- * @param idx		[in] Content/partition index.
- * @return NCCHReader on success; nullptr on error.
+ * @param pOutNcchReader	[out] Output variable for the NCCHReader.
+ * @return 0 on success; negative POSIX error code on error.
+ * NOTE: Caller must check NCCHReader::isOpen().
  */
-NCCHReader *Nintendo3DSPrivate::loadNCCH(int idx)
+int Nintendo3DSPrivate::loadNCCH(int idx, NCCHReader **pOutNcchReader)
 {
+	assert(pOutNcchReader != nullptr);
+	if (!pOutNcchReader)
+		return -EINVAL;
+
 	int64_t offset = 0;
 	uint32_t length = 0;
 	switch (romType) {
 		case ROM_TYPE_CIA: {
 			if (!(headers_loaded & HEADER_CIA)) {
 				// CIA header is not loaded...
-				return nullptr;
+				return -EIO;
 			}
 
 			// Load the ticket and TMD header.
 			if (loadTicketAndTMD() != 0) {
 				// Unable to load the ticket and TMD header.
-				return nullptr;
+				return -EIO;
 			}
 
 			// TODO: Check the issuer to determine which set
@@ -438,7 +455,7 @@ NCCHReader *Nintendo3DSPrivate::loadNCCH(int idx)
 			// Check if the content index is valid.
 			if ((unsigned int)idx >= content_count) {
 				// Content index is out of range.
-				return nullptr;
+				return -ENOENT;
 			}
 
 			// Determine the content start position.
@@ -454,7 +471,7 @@ NCCHReader *Nintendo3DSPrivate::loadNCCH(int idx)
 			}
 			if (length == 0) {
 				// Content chunk not found.
-				return nullptr;
+				return -ENOENT;
 			}
 
 			// Add the content start address.
@@ -465,7 +482,7 @@ NCCHReader *Nintendo3DSPrivate::loadNCCH(int idx)
 		case ROM_TYPE_CCI: {
 			if (!(headers_loaded & HEADER_NCSD)) {
 				// NCSD header is not loaded...
-				return nullptr;
+				return -EIO;
 			}
 
 			// The NCCH header is located at the beginning of the partition.
@@ -473,7 +490,7 @@ NCCHReader *Nintendo3DSPrivate::loadNCCH(int idx)
 			assert(idx >= 0 && idx < 8);
 			if (idx < 0 || idx >= 8) {
 				// Invalid partition index.
-				return nullptr;
+				return -ENOENT;
 			}
 
 			// Get the partition offset and length.
@@ -483,7 +500,7 @@ NCCHReader *Nintendo3DSPrivate::loadNCCH(int idx)
 			// Make sure the partition starts after the card info header.
 			if (offset <= 0x2000) {
 				// Invalid partition offset.
-				return nullptr;
+				return -EIO;
 			}
 			break;
 		}
@@ -492,7 +509,7 @@ NCCHReader *Nintendo3DSPrivate::loadNCCH(int idx)
 			// NCCH file. Only one content.
 			if (idx != 0) {
 				// Invalid content index.
-				return nullptr;
+				return -ENOENT;
 			}
 			offset = 0;
 			length = (uint32_t)file->size();
@@ -501,7 +518,7 @@ NCCHReader *Nintendo3DSPrivate::loadNCCH(int idx)
 
 		default:
 			// Unsupported...
-			return nullptr;
+			return -ENOTSUP;
 	}
 
 	// Is this encrypted using CIA title key encryption?
@@ -524,22 +541,17 @@ NCCHReader *Nintendo3DSPrivate::loadNCCH(int idx)
 	}
 
 	// Create the NCCHReader.
-	NCCHReader *ncch_reader = new NCCHReader(file,
-		media_unit_shift, offset, length, ticket, idx);
-	if (!ncch_reader->isOpen()) {
-		// Error creating the NCCHReader.
-		delete ncch_reader;
-		return nullptr;
-	}
-
-	// NCCHReader created successfully.
-	return ncch_reader;
+	// NOTE: We're not checking isOpen() here.
+	// That should be checked by the caller.
+	*pOutNcchReader = new NCCHReader(file, media_unit_shift, offset, length, ticket, idx);
+	return 0;
 }
 
 /**
  * Create an NCCHReader for the primary content.
  * An NCCH reader is created as this->ncch_reader.
  * @return this->ncch_reader on success; nullptr on error.
+ * NOTE: Caller must check NCCHReader::isOpen().
  */
 NCCHReader *Nintendo3DSPrivate::loadNCCH(void)
 {
@@ -558,15 +570,9 @@ NCCHReader *Nintendo3DSPrivate::loadNCCH(void)
 
 	// TODO: For CCIs, verify that the copy in the
 	// Card Info Header matches the actual partition?
-	NCCHReader *ncch_reader = loadNCCH(content_idx);
-	if (ncch_reader && ncch_reader->isOpen()) {
-		// NCCH reader created successfully.
-		this->ncch_reader = ncch_reader;
-	} else {
-		// NCCH reader encountered an error.
-		delete ncch_reader;
-	}
-
+	// NOTE: We're not checking isOpen() here.
+	// That should be checked by the caller.
+	loadNCCH(content_idx, &this->ncch_reader);
 	return this->ncch_reader;
 }
 
@@ -577,8 +583,8 @@ NCCHReader *Nintendo3DSPrivate::loadNCCH(void)
  */
 inline const N3DS_NCCH_Header_NoSig_t *Nintendo3DSPrivate::loadNCCHHeader(void)
 {
-	const NCCHReader *const ncch_reader = loadNCCH();
-	return (ncch_reader ? ncch_reader->ncchHeader() : nullptr);
+	const NCCHReader *const ncch = loadNCCH();
+	return (ncch && ncch->isOpen() ? ncch->ncchHeader() : nullptr);
 }
 
 /**
@@ -861,7 +867,7 @@ void Nintendo3DSPrivate::addTitleIdAndProductCodeFields(bool showContentType)
 	// NCCH header.
 	NCCHReader *const ncch = loadNCCH();
 	const N3DS_NCCH_Header_NoSig_t *const ncch_header =
-		(ncch ? ncch->ncchHeader() : nullptr);
+		(ncch && ncch->isOpen() ? ncch->ncchHeader() : nullptr);
 
 	const rp_char *tid_desc = nullptr;
 	uint32_t tid_hi, tid_lo;
@@ -890,7 +896,7 @@ void Nintendo3DSPrivate::addTitleIdAndProductCodeFields(bool showContentType)
 			len > 0 ? latin1_to_rp_string(buf, len) : _RP(""));
 	}
 
-	if (ncch) {
+	if (ncch && ncch->isOpen()) {
 		// Product code.
 		if (ncch_header) {
 			fields->addField_string(_RP("Product Code"),
@@ -1053,6 +1059,24 @@ vector<const char*> Nintendo3DSPrivate::n3dsRegionToGameTDB(
 	}
 
 	return ret;
+}
+
+/**
+ * Convert a Nintendo 3DS version number field to a string.
+ * @param version Version number.
+ * @return String.
+ */
+inline rp_string Nintendo3DSPrivate::n3dsVersionToString(uint16_t version)
+{
+	// Reference: https://3dbrew.org/wiki/Titles
+	char buf[12];
+	int len = snprintf(buf, sizeof(buf), "%u.%u.%u",
+		(version >> 10),
+		(version >>  4) & 0x1F,
+		(version & 0x0F));
+	if (len > (int)sizeof(buf))
+		len = sizeof(buf);
+	return (len > 0 ? latin1_to_rp_string(buf, len) : _RP("Unknown"));
 }
 
 /** Nintendo3DS **/
@@ -1548,6 +1572,9 @@ int Nintendo3DS::loadFieldData(void)
 	// Reserve at least 2 tabs.
 	d->fields->reserveTabs(2);
 
+	// Have we shown a warning yet?
+	bool shownWarning = false;
+
 	// Temporary buffer for snprintf().
 	char buf[64];
 	int len;
@@ -1565,52 +1592,25 @@ int Nintendo3DS::loadFieldData(void)
 	// Get the primary NCCH.
 	// If this fails, and the file type is NCSD or CIA,
 	// it usually means there's a missing key.
-	const NCCHReader *const ncch_reader = d->loadNCCH();
+	const NCCHReader *const ncch = d->loadNCCH();
 	// Check for potential encryption key errors.
 	if (d->romType == Nintendo3DSPrivate::ROM_TYPE_CCI ||
 	    d->romType == Nintendo3DSPrivate::ROM_TYPE_CIA ||
 	    d->romType == Nintendo3DSPrivate::ROM_TYPE_NCCH)
 	{
-		KeyManager::VerifyResult res = (ncch_reader
-				? ncch_reader->verifyResult()
-				: KeyManager::VERIFY_UNKNOWN);
+		KeyManager::VerifyResult res = (ncch
+			? ncch->verifyResult()
+			: KeyManager::VERIFY_UNKNOWN);
 		if (!d->srlData && res != KeyManager::VERIFY_OK) {
 			// Missing encryption keys.
-			// TODO: Share with GameCube::wii_getCryptoStatus().
-
-			// Error table.
-			static const rp_char *const errTbl[] = {
-				// VERIFY_OK
-				_RP("Something happened."),
-				// VERIFY_INVALID_PARAMS
-				_RP("Invalid parameters. (THIS IS A BUG!)"),
-				// VERIFY_NO_SUPPORT
-				_RP("Decryption is not supported in this build."),
-				// VERIFY_KEY_DB_NOT_LOADED
-				_RP("keys.conf was not found."),
-				// VERIFY_KEY_DB_ERROR
-				_RP("keys.conf has an error and could not be loaded."),
-				// VERIFY_KEY_NOT_FOUND
-				_RP("Required key was not found in keys.conf."),
-				// VERIFY_KEY_INVALID
-				_RP("The key in keys.conf is not a valid key."),
-				// VERFIY_IAESCIPHER_INIT_ERR
-				_RP("AES decryption could not be initialized."),
-				// VERIFY_IAESCIPHER_DECRYPT_ERR
-				_RP("AES decryption failed."),
-				// VERIFY_WRONG_KEY
-				_RP("The key in keys.conf is incorrect."),
-			};
-			static_assert(ARRAY_SIZE(errTbl) == KeyManager::VERIFY_MAX, "Update errTbl[].");
-
-			const rp_char *err = nullptr;
-			if (res >= 0 && res < KeyManager::VERIFY_MAX) {
-				err = errTbl[res];
-			} else {
-				err = _RP("Unknown error. (THIS IS A BUG!)");
+			if (!shownWarning) {
+				const rp_char *err = KeyManager::verifyResultToString(res);
+				if (!err) {
+					err = _RP("Unknown error. (THIS IS A BUG!)");
+				}
+				d->fields->addField_string(_RP("Warning"), err, RomFields::STRF_WARNING);
+				shownWarning = true;
 			}
-
-			d->fields->addField_string(_RP("Warning"), err, RomFields::STRF_WARNING);
 		}
 	}
 
@@ -1722,12 +1722,21 @@ int Nintendo3DS::loadFieldData(void)
 			d->fields->setTabName(0, _RP("NCSD"));
 		}
 
-		if (!ncch_reader || ncch_reader->verifyResult() != KeyManager::VERIFY_OK) {
+		if (!ncch || ncch->verifyResult() != KeyManager::VERIFY_OK) {
 			// Missing encryption keys.
-			// TODO: Show the actual verification result.
-			d->fields->addField_string(_RP("Warning"),
-				_RP("A required encryption key was not found or is incorrect."),
-				RomFields::STRF_WARNING);
+			// TODO: This warning probably isn't needed,
+			// since it's handled above...
+			if (!shownWarning) {
+				KeyManager::VerifyResult res = (ncch
+					? ncch->verifyResult()
+					: KeyManager::VERIFY_UNKNOWN);
+				const rp_char *err = KeyManager::verifyResultToString(res);
+				if (!err) {
+					err = _RP("Unknown error. (THIS IS A BUG!)");
+				}
+				d->fields->addField_string(_RP("Warning"), err, RomFields::STRF_WARNING);
+				shownWarning = true;
+			}
 		}
 
 		// TODO: Add more fields?
@@ -1874,6 +1883,12 @@ int Nintendo3DS::loadFieldData(void)
 			if (length == 0)
 				continue;
 
+			// Make sure the partition exists first.
+			NCCHReader *pNcch = nullptr;
+			int ret = d->loadNCCH(i, &pNcch);
+			if (ret == -ENOENT)
+				continue;
+
 			const int vidx = (int)partitions->size();
 			partitions->resize(vidx+1);
 			auto &data_row = partitions->at(vidx);
@@ -1890,8 +1905,8 @@ int Nintendo3DS::loadFieldData(void)
 			data_row.push_back(type);
 
 			if (!emmc) {
-				unique_ptr<NCCHReader> ncch(d->loadNCCH(i));
-				const N3DS_NCCH_Header_NoSig_t *part_ncch_header = (ncch ? ncch->ncchHeader() : nullptr);
+				const N3DS_NCCH_Header_NoSig_t *const part_ncch_header =
+					(pNcch && pNcch->isOpen() ? pNcch->ncchHeader() : nullptr);
 				if (part_ncch_header) {
 					// Encryption.
 					NCCHReader::CryptoType cryptoType = {nullptr, false, 0, false};
@@ -1932,13 +1947,7 @@ int Nintendo3DS::loadFieldData(void)
 						// This is usually 1.1.0, though some might be 1.0.0.
 						data_row.push_back(_RP("1.x.x"));
 					} else {
-						len = snprintf(buf, sizeof(buf), "%u.%u.%u",
-							(version >> 10),
-							(version >>  4) & 0x1F,
-							(version & 0x0F));
-						if (len > (int)sizeof(buf))
-							len = sizeof(buf);
-						data_row.push_back(len > 0 ? latin1_to_rp_string(buf, len) : _RP("Unknown"));
+						data_row.push_back(d->n3dsVersionToString(version));
 					}
 				} else {
 					// Unable to load the NCCH header.
@@ -1958,6 +1967,8 @@ int Nintendo3DS::loadFieldData(void)
 			// Partition size.
 			const int64_t length_bytes = (int64_t)length << d->media_unit_shift;
 			data_row.push_back(d->formatFileSize(length_bytes));
+
+			delete pNcch;
 		}
 
 		// Add the partitions list data.
@@ -1983,17 +1994,8 @@ int Nintendo3DS::loadFieldData(void)
 		// TODO: Required system version?
 
 		// Version.
-		// Reference: https://3dbrew.org/wiki/Titles
-		// TODO: Consolidate with NCSD.
 		const uint16_t version = be16_to_cpu(tmd_header->title_version);
-		len = snprintf(buf, sizeof(buf), "%u.%u.%u",
-			(version >> 10),
-			(version >>  4) & 0x1F,
-			(version & 0x0F));
-		if (len > (int)sizeof(buf))
-			len = sizeof(buf);
-		d->fields->addField_string(_RP("Version"),
-			len > 0 ? latin1_to_rp_string(buf, len) : _RP("Unknown"));
+		d->fields->addField_string(_RP("Version"), d->n3dsVersionToString(version));
 
 		// Issuer.
 		// NOTE: We're using the Ticket Issuer in the TMD tab.
@@ -2021,6 +2023,13 @@ int Nintendo3DS::loadFieldData(void)
 				latin1_to_rp_string(d->mxh.ticket.issuer, sizeof(d->mxh.ticket.issuer)));
 		}
 
+		// Demo use limit.
+		if (be32_to_cpu(d->mxh.ticket.limits[0]) == 4) {
+			// Title has use limits.
+			d->fields->addField_string_numeric(_RP("Demo Use Limit"),
+				be32_to_cpu(d->mxh.ticket.limits[1]));
+		}
+
 		// Contents table.
 		// TODO: Show the ListView on a separate row?
 		auto contents = new std::vector<std::vector<rp_string> >();
@@ -2030,6 +2039,12 @@ int Nintendo3DS::loadFieldData(void)
 		// TODO: Content types?
 		const N3DS_Content_Chunk_Record_t *content_chunk = &d->content_chunks[0];
 		for (unsigned int i = 0; i < d->content_count; i++, content_chunk++) {
+			// Make sure the content exists first.
+			NCCHReader *pNcch = nullptr;
+			int ret = d->loadNCCH(i, &pNcch);
+			if (ret == -ENOENT)
+				continue;
+
 			const int vidx = (int)contents->size();
 			contents->resize(vidx+1);
 			auto &data_row = contents->at(vidx);
@@ -2041,8 +2056,8 @@ int Nintendo3DS::loadFieldData(void)
 			data_row.push_back(len > 0 ? latin1_to_rp_string(buf, len) : _RP("?"));
 
 			// TODO: Use content_chunk->index?
-			unique_ptr<NCCHReader> ncch(d->loadNCCH(i));
-			const N3DS_NCCH_Header_NoSig_t *content_ncch_header = (ncch ? ncch->ncchHeader() : nullptr);
+			const N3DS_NCCH_Header_NoSig_t *const content_ncch_header =
+				(pNcch && pNcch->isOpen() ? pNcch->ncchHeader() : nullptr);
 			if (!content_ncch_header) {
 				// Invalid content index, or this content isn't an NCCH.
 				// TODO: Are there CIAs with discontiguous content indexes?
@@ -2078,6 +2093,7 @@ int Nintendo3DS::loadFieldData(void)
 				} else {
 					data_row.push_back(_RP(""));
 				}
+				delete pNcch;
 				continue;
 			}
 
@@ -2088,7 +2104,7 @@ int Nintendo3DS::loadFieldData(void)
 			// Encryption.
 			NCCHReader::CryptoType cryptoType;
 			bool isCIAcrypto = !!(be16_to_cpu(content_chunk->type) & N3DS_CONTENT_CHUNK_ENCRYPTED);
-			int ret = NCCHReader::cryptoType_static(&cryptoType, content_ncch_header);
+			ret = NCCHReader::cryptoType_static(&cryptoType, content_ncch_header);
 			if (ret != 0) {
 				// Unknown encryption.
 				cryptoType.name = nullptr;
@@ -2118,19 +2134,13 @@ int Nintendo3DS::loadFieldData(void)
 			data_row.push_back(len > 0 ? latin1_to_rp_string(buf, len) : _RP("Unknown"));
 
 			// Version. [FIXME: Might not be right...]
-			// Reference: https://3dbrew.org/wiki/Titles
-			// Format the NCCH version.
 			const uint16_t version = le16_to_cpu(content_ncch_header->version);
-			len = snprintf(buf, sizeof(buf), "%u.%u.%u",
-				(version >> 10),
-				(version >>  4) & 0x1F,
-				(version & 0x0F));
-			if (len > (int)sizeof(buf))
-				len = sizeof(buf);
-			data_row.push_back(len > 0 ? latin1_to_rp_string(buf, len) : _RP("Unknown"));
+			data_row.push_back(d->n3dsVersionToString(version));
 
 			// Content size.
-			data_row.push_back(d->formatFileSize(ncch->partition_size()));
+			data_row.push_back(d->formatFileSize(pNcch->partition_size()));
+
+			delete pNcch;
 		}
 
 		static const rp_char *const contents_names[] = {
@@ -2145,7 +2155,7 @@ int Nintendo3DS::loadFieldData(void)
 
 	// Get the NCCH Extended Header.
 	const N3DS_NCCH_ExHeader_t *const ncch_exheader =
-		(ncch_reader ? ncch_reader->ncchExHeader() : nullptr);
+		(ncch && ncch->isOpen() ? ncch->ncchExHeader() : nullptr);
 	if (ncch_exheader) {
 		// Display the NCCH Extended Header.
 		// TODO: Add more fields?

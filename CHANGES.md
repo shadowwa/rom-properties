@@ -1,6 +1,27 @@
 # Changes
 
-## v1.0 (unreleased)
+## v1.1 (released 2017/??/??)
+
+* New features:
+  * Nintendo 3DS firmware binaries are now supported. For official FIRM
+    binaries, the CRC32 is compared against an internal database of known
+    versions. This currently includes 1.0 through 11.4. For unofficial
+    FIRM, various heuristics are used to determine if it's a well-known
+    homebrew title.
+
+## v1.0 (released 2017/05/20)
+
+* New systems supported:
+  * Windows/DOS: Executables, dynamic link libraries, and other types of
+    executable files are supported. Includes parsing of version and
+    manifest resources. Icon thumbnailing on non-Windows systems will
+    be added in a future release.
+  * Nintendo Wii U: Full disc images (\*.wud) are supported, with image
+    downloads for disc, cover, 3D cover, and full cover scans.
+  * Nintendo 3DS: SMDH, 3DSX, CCI (\*.3ds), CIA, and NCCH files are supported.
+    Parts of some formats (CCI, CIA, NCCH) may require decryption keys.
+    If the keys are not available, then some information will not be
+    available.
 
 * New features:
   * Property page viewers now support subtabs. This is used for Windows
@@ -24,7 +45,7 @@
     keys.conf. Verification is done by decrypting a string that was encrypted
     with the original key and checking if the decrypted string is correct.
   * GameCube: Added partial support for WIA disc images. A copy of the disc
-    header is stored in plaintext in WIA fomrat, so disc header fields and
+    header is stored in plaintext in WIA format, so disc header fields and
     external images are supported. Region code, age ratings, and the internal
     GCN banner are not supported.
   * (Windows) A configuration program, rp-config.exe, is now included. This
@@ -32,18 +53,10 @@
     as download options. Linux versions will be added in a future release,
     though the underlying rom-properties.conf functionality is implemented
     and works on all platforms.
-
-* New systems supported:
-  * Windows/DOS: Executables, dynamic link libraries, and other types of
-    executable files are supported. Includes parsing of version and
-    manifest resources. Icon thumbnailing on non-Windows systems will
-    be added in a future release.
-  * Nintendo Wii U: Full disc images (\*.wud) are supported, with image
-    downloads for disc, cover, 3D cover, and full cover scans.
-  * Nintendo 3DS: SMDH, 3DSX, CCI (\*.3ds), CIA, and NCCH files are supported.
-    Parts of some formats (CCI, CIA, NCCH) may require decryption keys.
-    If the keys are not available, then some information will not be
-    available.
+  * (Windows) A new installation program, svrplus, is provided. This program
+    supercedes install.cmd and uninstall.cmd.
+  * (rpcli) New option "-c". This option prints the system region codes.
+    This is mostly useful for debugging.
 
 * Bug fixes:
   * Fixed an inverted "Copy Protected" condition for Dreamcast VMI files.
@@ -125,7 +138,8 @@
     used on Windows, and it had some odd quirks like loading grayscale images
     as 32-bit ARGB instead of paletted.
   * (Windows) zlib and libpng are now compiled as DLLs instead of being
-    statically linked.
+    statically linked. The DLLs are linked using delay-load, so they're
+    not loaded until they're needed.
   * pngcheck: Fixed a race condition that could result in crashes if more
     than one thread attempted to load a PNG image at the same time.
   * Age ratings for CERO, ESRB, and AGCB are now converted to their official

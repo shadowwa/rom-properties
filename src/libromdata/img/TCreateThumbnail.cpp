@@ -28,13 +28,16 @@
 #include "libcachemgr/CacheManager.hpp"
 using LibCacheMgr::CacheManager;
 
+// librpbase
+#include "librpbase/RomData.hpp"
+#include "librpbase/file/RpFile.hpp"
+#include "librpbase/img/rp_image.hpp"
+#include "librpbase/img/RpImageLoader.hpp"
+#include "librpbase/config/Config.hpp"
+using namespace LibRpBase;
+
 // libromdata
-#include "../RomData.hpp"
 #include "../RomDataFactory.hpp"
-#include "../file/RpFile.hpp"
-#include "rp_image.hpp"
-#include "RpImageLoader.hpp"
-#include "../config/Config.hpp"
 
 // C includes. (C++ namespace)
 #include <cassert>
@@ -127,17 +130,22 @@ ImgClass TCreateThumbnail<ImgClass>::getExternalImage(
 	CacheManager cache;
 	for (auto iter = extURLs.cbegin(); iter != extURLs.cend(); ++iter) {
 		const RomData::ExtURL &extURL = *iter;
-		if (!downloadHighResScans && iter->high_res) {
-			// High-resolution scan downloads are disabled.
-			continue;
-		}
-
 		rp_string proxy = proxyForUrl(extURL.url);
 		cache.setProxyUrl(!proxy.empty() ? proxy.c_str() : nullptr);
 
+		// Should we attempt to download the image,
+		// or just use the local cache?
+		// TODO: Verify that this works correctly.
+		bool download = extImgDownloadEnabled;
+		if (!downloadHighResScans && extURL.high_res) {
+			// Don't download high-resolution images, but
+			// use them if they've already been downloaded.
+			download = false;
+		}
+
 		// TODO: Have download() return the actual data and/or load the cached file.
 		rp_string cache_filename;
-		if (extImgDownloadEnabled) {
+		if (download) {
 			// Attempt to download the image if it isn't already
 			// present in the rom-properties cache.
 			cache_filename = cache.download(extURL.url, extURL.cache_key);

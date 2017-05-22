@@ -21,10 +21,12 @@
 
 #include "EXE.hpp"
 
-#include "common.h"
-#include "byteswap.h"
-#include "TextFuncs.hpp"
-#include "file/IRpFile.hpp"
+// librpbase
+#include "librpbase/common.h"
+#include "librpbase/byteswap.h"
+#include "librpbase/TextFuncs.hpp"
+#include "librpbase/file/IRpFile.hpp"
+using namespace LibRpBase;
 
 // C includes. (C++ namespace)
 #include <cassert>
@@ -1328,7 +1330,8 @@ int EXE::loadFieldData(void)
 	// - NE: 6
 	// - PE: 6
 	//   - PE Version: +6
-	d->fields->reserve(12);
+	//   - PE Manifest: +12
+	d->fields->reserve(24);
 
 	// Executable type.
 	static const rp_char *const exeTypes[EXEPrivate::EXE_TYPE_LAST] = {

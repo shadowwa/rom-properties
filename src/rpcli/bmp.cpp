@@ -19,13 +19,15 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "bmp.hpp"
 #include "bmp_structs.h"
 
-#include "libromdata/byteswap.h"
-#include "libromdata/common.h"
-#include "libromdata/img/rp_image.hpp"
-using LibRomData::rp_image;
+// librpbase
+#include "librpbase/byteswap.h"
+#include "librpbase/common.h"
+#include "librpbase/img/rp_image.hpp"
+using LibRpBase::rp_image;
 
 // C includes. (C++ namespace)
 #include <cassert>
@@ -89,7 +91,7 @@ int rpbmp(std::ostream& os, const rp_image *img)
 	return 0;
 }
 
-int rpbmp(const rp_char *filename, const LibRomData::rp_image *img)
+int rpbmp(const rp_char *filename, const rp_image *img)
 {
 	std::ofstream file(filename, std::ios::out | std::ios::binary);
 	if (!file.is_open()) {

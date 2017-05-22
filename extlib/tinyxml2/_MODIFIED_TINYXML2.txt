@@ -4,8 +4,8 @@ The following changes have been made to the original:
 
 - Non-CMake build infrastructure has been removed.
 
-- The original CMakeLists.txt has been removed and replaced with a
-  minimal version that only supports static linking.
+- Parts of the original CMakeLists.txt that were not necessary for
+  rom-properties have been disabled, including the test suite.
 
 - Test cases are no longer built and run.
 
@@ -14,6 +14,8 @@ The following changes have been made to the original:
 
 - Added fall-through comments for gcc-7.1's -Wimplicit-fallthrough
   warning, which is enabled by default.
+
+- Applied Gentoo patch tinyxml2-4.0.1-xmltest.patch.
 
 To obtain the original tinyxml2-4.0.1, visit:
 https://github.com/leethomason/tinyxml2

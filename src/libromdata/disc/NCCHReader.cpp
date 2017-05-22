@@ -19,16 +19,17 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
  ***************************************************************************/
 
+#include "librpbase/config.librpbase.h"
 #include "NCCHReader.hpp"
-#include "config.libromdata.h"
 
-#include "file/IRpFile.hpp"
-#include "PartitionFile.hpp"
-
+// librpbase
+#include "librpbase/file/IRpFile.hpp"
+#include "librpbase/disc/PartitionFile.hpp"
 #ifdef ENABLE_DECRYPTION
-#include "crypto/AesCipherFactory.hpp"
-#include "crypto/IAesCipher.hpp"
+#include "librpbase/crypto/AesCipherFactory.hpp"
+#include "librpbase/crypto/IAesCipher.hpp"
 #endif /* ENABLE_DECRYPTION */
+using namespace LibRpBase;
 
 // C includes. (C++ namespace)
 #include <cassert>
@@ -68,6 +69,11 @@ NCCHReaderPrivate::NCCHReaderPrivate(NCCHReader *q, IRpFile *file,
 	, tmd_content_index(tmd_content_index)
 #endif /* ENABLE_DECRYPTION */
 {
+	// Clear the various structs.
+	memset(&ncch_header, 0, sizeof(ncch_header));
+	memset(&ncch_exheader, 0, sizeof(ncch_exheader));
+	memset(&exefs_header, 0, sizeof(exefs_header));
+
 #ifdef ENABLE_DECRYPTION
 	// Check if this is a CIA with title key encryption.
 	if (ticket) {
@@ -77,9 +83,15 @@ NCCHReaderPrivate::NCCHReaderPrivate(NCCHReader *q, IRpFile *file,
 		const uint8_t *keyY_verify = nullptr;
 		const uint8_t *keyNormal_verify = nullptr;
 		if (!strncmp(ticket->issuer, N3DS_TICKET_ISSUER_RETAIL, sizeof(ticket->issuer))) {
-			// Retail issuer..
+			// Retail issuer.
 			keyPrefix = "ctr";
 			titleKeyEncIdx = N3DS_TICKET_TITLEKEY_ISSUER_RETAIL;
+			if (ticket->keyY_index < 6) {
+				// Verification data is available.
+				keyX_verify = EncryptionKeyVerifyData[Key_Retail_Slot0x3DKeyX];
+				keyY_verify = EncryptionKeyVerifyData[Key_Retail_Slot0x3DKeyY_0 + ticket->keyY_index];
+				keyNormal_verify = EncryptionKeyVerifyData[Key_Retail_Slot0x3DKeyNormal_0 + ticket->keyY_index];
+			}
 		} else if (!strncmp(ticket->issuer, N3DS_TICKET_ISSUER_DEBUG, sizeof(ticket->issuer))) {
 			// Debug issuer.
 			keyPrefix = "ctr-dev";
@@ -147,6 +159,9 @@ NCCHReaderPrivate::NCCHReaderPrivate(NCCHReader *q, IRpFile *file,
 		} else {
 			// Unable to get the CIA encryption keys.
 			memset(title_key, 0, sizeof(title_key));
+			verifyResult = res;
+			this->file = nullptr;
+			return;
 		}
 	} else {
 		// No CIA encryption.
@@ -161,6 +176,8 @@ NCCHReaderPrivate::NCCHReaderPrivate(NCCHReader *q, IRpFile *file,
 	if (size != sizeof(ncch_header)) {
 		// Read error.
 		// NOTE: readFromROM() sets q->m_lastError.
+		// TODO: Better verifyResult?
+		verifyResult = KeyManager::VERIFY_WRONG_KEY;
 		this->file = nullptr;
 		return;
 	}
@@ -168,6 +185,8 @@ NCCHReaderPrivate::NCCHReaderPrivate(NCCHReader *q, IRpFile *file,
 	// Verify the NCCH magic number.
 	if (memcmp(ncch_header.hdr.magic, N3DS_NCCH_HEADER_MAGIC, sizeof(ncch_header.hdr.magic)) != 0) {
 		// NCCH magic number is incorrect.
+		// TODO: Better verifyResult? (May be DSiWare...)
+		verifyResult = KeyManager::VERIFY_WRONG_KEY;
 		if (q->m_lastError == 0) {
 			q->m_lastError = EIO;
 		}
@@ -189,8 +208,10 @@ NCCHReaderPrivate::NCCHReaderPrivate(NCCHReader *q, IRpFile *file,
 	if (verifyResult != KeyManager::VERIFY_OK) {
 		// Failed to load the keyset.
 		// Zero out the keys.
-		// TODO: Disable anything that requires reading encrypted data.
-		// TODO: Determine which key couldn't be loaded.
+		memset(ncch_keys, 0, sizeof(ncch_keys));
+		q->m_lastError = EIO;
+		this->file = nullptr;
+		return;
 	}
 #else /* !ENABLE_DECRYPTION */
 	// Decryption is not available, so only NoCrypto is allowed.
@@ -372,7 +393,7 @@ size_t NCCHReaderPrivate::readFromROM(uint32_t offset, void *ptr, size_t size)
 		// CIA decryption is required.
 		if (offset >= 16) {
 			// Subtract 16 in order to read the IV.
-			offset -= 16;
+			phys_addr -= 16;
 		}
 		int ret = file->seek(phys_addr);
 		if (ret != 0) {

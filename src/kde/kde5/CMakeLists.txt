@@ -20,7 +20,8 @@ IF(ECM_MODULE_PATH AND ECM_KDE_MODULE_DIR)
 	SET(Qt5_NO_LINK_QTMAIN 1)
 	FIND_PACKAGE(Qt5 COMPONENTS Core Gui Widgets)
 	IF(Qt5Core_FOUND AND Qt5Gui_FOUND AND Qt5Widgets_FOUND)
-		# FIXME: Some systems some have the correct value for PLUGIN_INSTALL_DIR.
+		# NOTE: QT_PLUGIN_INSTALL_DIR is missing the 'qt5' directory.
+		# Use `qtpaths` instead to get the actual path.
 		#
 		# Ubuntu:
 		# - Expected: lib/${DEB_HOST_MULTIARCH}/qt5/plugins
@@ -30,9 +31,20 @@ IF(ECM_MODULE_PATH AND ECM_KDE_MODULE_DIR)
 		# - Expected: lib64/qt5/plugins
 		# - Actual:   lib64/plugins
 		#
-		# Fix this by using "${LIB_INSTALL_DIR}/qt5/plugins".
+		# Arch:
+		# - Expected: lib/qt/plugins
+		# - Actual:   (FIXME)
 		#
-		SET(PLUGIN_INSTALL_DIR "${LIB_INSTALL_DIR}/qt5/plugins")
+
+		# Get the plugin directory and Qt prefix.
+		# Prefix will be removed from the plugin directory if necessary.
+		EXEC_PROGRAM(qtpaths ARGS --plugin-dir OUTPUT_VARIABLE PLUGIN_INSTALL_DIR)
+		IF(NOT PLUGIN_INSTALL_DIR)
+			MESSAGE(FATAL_ERROR "`qtpaths` isn't working correctly.")
+		ENDIF(NOT PLUGIN_INSTALL_DIR)
+		EXEC_PROGRAM(qtpaths ARGS --install-prefix OUTPUT_VARIABLE QT5_INSTALL_PREFIX)
+		INCLUDE(ReplaceHardcodedPrefix)
+		REPLACE_HARDCODED_PREFIX(PLUGIN_INSTALL_DIR "${QT5_INSTALL_PREFIX}")
 		SET(QT_PLUGIN_INSTALL_DIR "${PLUGIN_INSTALL_DIR}")
 
 		# Find KDE5. (TODO: Version?)
@@ -80,12 +92,9 @@ IF(BUILD_KDE5)
 			$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>
 			$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>
 		)
-	TARGET_LINK_LIBRARIES(rom-properties-kde5
-		romdata16
-		cachemgr16
-		KF5::KIOWidgets
-		Qt5::Widgets Qt5::Gui Qt5::Core
-		)
+	TARGET_LINK_LIBRARIES(rom-properties-kde5 cachemgr16 romdata16 rpbase16)
+	TARGET_LINK_LIBRARIES(rom-properties-kde5 KF5::KIOWidgets)
+	TARGET_LINK_LIBRARIES(rom-properties-kde5 Qt5::Widgets Qt5::Gui Qt5::Core)
 ENDIF(BUILD_KDE5)
 
 # Define -DQT_NO_DEBUG in release builds.

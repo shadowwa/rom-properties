@@ -20,23 +20,26 @@
  ***************************************************************************/
 
 #include "GameCube.hpp"
-#include "RomData_p.hpp"
+#include "librpbase/RomData_p.hpp"
 
 #include "data/NintendoPublishers.hpp"
 #include "data/WiiSystemMenuVersion.hpp"
 #include "gcn_structs.h"
 #include "gcn_banner.h"
-#include "SystemRegion.hpp"
 
-#include "common.h"
-#include "byteswap.h"
-#include "TextFuncs.hpp"
-#include "file/IRpFile.hpp"
-#include "img/rp_image.hpp"
-#include "img/ImageDecoder.hpp"
+// librpbase
+#include "librpbase/common.h"
+#include "librpbase/byteswap.h"
+#include "librpbase/TextFuncs.hpp"
+#include "librpbase/SystemRegion.hpp"
+#include "librpbase/file/IRpFile.hpp"
+
+#include "librpbase/img/rp_image.hpp"
+#include "librpbase/img/ImageDecoder.hpp"
+using namespace LibRpBase;
 
 // DiscReader
-#include "disc/DiscReader.hpp"
+#include "librpbase/disc/DiscReader.hpp"
 #include "disc/WbfsReader.hpp"
 #include "disc/CisoGcnReader.hpp"
 #include "disc/WiiPartition.hpp"
@@ -56,7 +59,7 @@ using std::string;
 using std::unique_ptr;
 using std::vector;
 
-#include "SystemRegion.hpp"
+#include "librpbase/SystemRegion.hpp"
 
 namespace LibRomData {
 
@@ -257,8 +260,8 @@ GameCubePrivate::~GameCubePrivate()
 		}
 	}
 
-	free(gcn_opening_bnr);
-	free(wii_opening_bnr);
+	delete gcn_opening_bnr;
+	delete wii_opening_bnr;
 	delete discReader;
 }
 
@@ -685,10 +688,7 @@ int GameCubePrivate::gcn_loadOpeningBnr(void)
 		return -gcnPartition->lastError();
 	}
 
-	// Always use a BNR2 pointer.
-	// BNR1 and BNR2 have identical layouts, except
-	// BNR2 has more comment fields.
-	banner_bnr2_t *pBanner = nullptr;
+	// Determine the banner size.
 	unsigned int banner_size = 0;
 
 	// Read the magic number to determine what type of
@@ -716,24 +716,22 @@ int GameCubePrivate::gcn_loadOpeningBnr(void)
 	}
 
 	// Load the full banner.
-	// NOTE: Magic number is loaded as host-endian.
-	pBanner = (banner_bnr2_t*)malloc(banner_size);
-	if (!pBanner) {
-		// ENOMEM
-		return -ENOMEM;
-	}
+	// NOTE: Always use a BNR2 pointer.
+	//       BNR1 and BNR2 have identical layouts, except
+	//       BNR2 has more comment fields.
+	// NOTE 2: Magic number is loaded as host-endian.
+	unique_ptr<banner_bnr2_t> pBanner(new banner_bnr2_t);
 	pBanner->magic = bnr_magic;
 	size = f_opening_bnr->read(&pBanner->reserved, banner_size-4);
 	if (size != banner_size-4) {
 		// Read error.
 		// TODO: Allow smaller than "full" for BNR2?
-		free(pBanner);
 		int err = f_opening_bnr->lastError();
 		return (err != 0 ? -err : -EIO);
 	}
 
 	// Banner is loaded.
-	gcn_opening_bnr = pBanner;
+	gcn_opening_bnr = pBanner.release();
 	return 0;
 }
 
@@ -769,14 +767,13 @@ int GameCubePrivate::wii_loadOpeningBnr(void)
 	}
 
 	// Read the IMET struct.
-	wii_imet_t *pBanner = static_cast<wii_imet_t*>(malloc(sizeof(*pBanner)));
+	unique_ptr<wii_imet_t> pBanner(new wii_imet_t);
 	if (!pBanner) {
 		return -ENOMEM;
 	}
-	size_t size = f_opening_bnr->read(pBanner, sizeof(*pBanner));
+	size_t size = f_opening_bnr->read(pBanner.get(), sizeof(*pBanner));
 	if (size != sizeof(*pBanner)) {
 		// Read error.
-		free(pBanner);
 		int err = f_opening_bnr->lastError();
 		return (err != 0 ? -err : -EIO);
 	}
@@ -785,12 +782,11 @@ int GameCubePrivate::wii_loadOpeningBnr(void)
 	if (be32_to_cpu(pBanner->magic) != WII_IMET_MAGIC) {
 		// Magic is incorrect.
 		// TODO: Better error code?
-		free(pBanner);
 		return -EIO;
 	}
 
 	// Banner is loaded.
-	wii_opening_bnr = pBanner;
+	wii_opening_bnr = pBanner.release();
 	return 0;
 }
 
@@ -952,31 +948,6 @@ rp_string GameCubePrivate::wii_getBannerName(void) const
  */
 const rp_char *GameCubePrivate::wii_getCryptoStatus(const WiiPartition *partition)
 {
-	// Error table.
-	static const rp_char *const errTbl[] = {
-		// VERIFY_OK
-		_RP("ERROR: Something happened."),
-		// VERIFY_INVALID_PARAMS
-		_RP("ERROR: Invalid parameters. (THIS IS A BUG!)"),
-		// VERIFY_NO_SUPPORT
-		_RP("ERROR: Decryption is not supported in this build."),
-		// VERIFY_KEY_DB_NOT_LOADED
-		_RP("ERROR: keys.conf was not found."),
-		// VERIFY_KEY_DB_ERROR
-		_RP("ERROR: keys.conf has an error and could not be loaded."),
-		// VERIFY_KEY_NOT_FOUND
-		_RP("ERROR: Required key was not found in keys.conf."),
-		// VERIFY_KEY_INVALID
-		_RP("ERROR: The key in keys.conf is not a valid key."),
-		// VERFIY_IAESCIPHER_INIT_ERR
-		_RP("ERROR: AES decryption could not be initialized."),
-		// VERIFY_IAESCIPHER_DECRYPT_ERR
-		_RP("ERROR: AES decryption failed."),
-		// VERIFY_WRONG_KEY
-		_RP("ERROR: The key in keys.conf is incorrect."),
-	};
-	static_assert(ARRAY_SIZE(errTbl) == KeyManager::VERIFY_MAX, "Update errTbl[].");
-
 	const KeyManager::VerifyResult res = partition->verifyResult();
 	if (res == KeyManager::VERIFY_KEY_NOT_FOUND) {
 		// This may be an invalid key index.
@@ -986,12 +957,11 @@ const rp_char *GameCubePrivate::wii_getCryptoStatus(const WiiPartition *partitio
 		}
 	}
 
-	if (res >= 0 && res < KeyManager::VERIFY_MAX) {
-		return errTbl[res];
+	const rp_char *err = KeyManager::verifyResultToString(res);
+	if (!err) {
+		err = _RP("ERROR: Unknown error. (THIS IS A BUG!)");
 	}
-
-	// Should not get here...
-	return _RP("ERROR: Unknown error. (THIS IS A BUG!)");
+	return err;
 }
 
 /** GameCube **/
@@ -1533,6 +1503,7 @@ int GameCube::loadFieldData(void)
 
 	// Disc header is read in the constructor.
 	// TODO: Reserve fewer fields for GCN?
+	const GCN_DiscHeader *const discHeader = &d->discHeader;
 	d->fields->reserve(10);	// Maximum of 10 fields.
 
 	// TODO: Trim the titles. (nulls, spaces)
@@ -1547,7 +1518,7 @@ int GameCube::loadFieldData(void)
 			// USA/PAL uses cp1252.
 			d->fields->addField_string(_RP("Title"),
 				cp1252_to_rp_string(
-					d->discHeader.game_title, sizeof(d->discHeader.game_title)));
+					discHeader->game_title, sizeof(discHeader->game_title)));
 			break;
 
 		case GCN_REGION_JAPAN:
@@ -1555,32 +1526,32 @@ int GameCube::loadFieldData(void)
 			// Japan uses Shift-JIS.
 			d->fields->addField_string(_RP("Title"),
 				cp1252_sjis_to_rp_string(
-					d->discHeader.game_title, sizeof(d->discHeader.game_title)));
+					discHeader->game_title, sizeof(discHeader->game_title)));
 			break;
 	}
 
 	// Game ID.
 	// The ID6 cannot have non-printable characters.
 	// (NDDEMO has ID6 "00\0E01".)
-	for (int i = ARRAY_SIZE(d->discHeader.id6)-1; i >= 0; i--) {
-		if (!isprint(d->discHeader.id6[i])) {
+	for (int i = ARRAY_SIZE(discHeader->id6)-1; i >= 0; i--) {
+		if (!isprint(discHeader->id6[i])) {
 			// Non-printable character found.
 			return -ENOENT;
 		}
 	}
 	d->fields->addField_string(_RP("Game ID"),
-		latin1_to_rp_string(d->discHeader.id6, ARRAY_SIZE(d->discHeader.id6)));
+		latin1_to_rp_string(discHeader->id6, ARRAY_SIZE(discHeader->id6)));
 
 	// Look up the publisher.
-	const rp_char *publisher = NintendoPublishers::lookup(d->discHeader.company);
+	const rp_char *publisher = NintendoPublishers::lookup(discHeader->company);
 	d->fields->addField_string(_RP("Publisher"),
 		publisher ? publisher : _RP("Unknown"));
 
 	// Other fields.
 	d->fields->addField_string_numeric(_RP("Disc #"),
-		d->discHeader.disc_number+1, RomFields::FB_DEC);
+		discHeader->disc_number+1, RomFields::FB_DEC);
 	d->fields->addField_string_numeric(_RP("Revision"),
-		d->discHeader.revision, RomFields::FB_DEC, 2);
+		discHeader->revision, RomFields::FB_DEC, 2);
 
 	// The remaining fields are not located in the disc header.
 	// If we can't read the disc contents for some reason, e.g.
@@ -1594,7 +1565,7 @@ int GameCube::loadFieldData(void)
 	// Region code.
 	// bi2.bin and/or RVL_RegionSetting is loaded in the constructor,
 	// and the region code is stored in d->gcnRegion.
-	const rp_char *region = d->gcnRegionToString(d->gcnRegion, d->discHeader.id4[3]);
+	const rp_char *region = d->gcnRegionToString(d->gcnRegion, discHeader->id4[3]);
 	if (region) {
 		d->fields->addField_string(_RP("Region"), region);
 	} else {
@@ -1741,8 +1712,9 @@ int GameCube::loadFieldData(void)
 			// homebrew, a prototype, or a key error.
 			if (d->gamePartition->verifyResult() != KeyManager::VERIFY_OK) {
 				// Key error.
-				d->fields->addField_string(_RP("Game Info"),
-					d->wii_getCryptoStatus(d->gamePartition));
+				rp_string err(_RP("ERROR: "));
+				err += d->wii_getCryptoStatus(d->gamePartition);
+				d->fields->addField_string(_RP("Game Info"), err);
 			}
 		}
 

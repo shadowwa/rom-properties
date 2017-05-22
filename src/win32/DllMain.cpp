@@ -33,7 +33,6 @@
 #include "stdafx.h"
 #include "config.version.h"
 
-#include "RegKey.hpp"
 #include "RP_ComBase.hpp"
 #include "RP_ExtractIcon.hpp"
 #include "RP_ClassFactory.hpp"
@@ -41,15 +40,22 @@
 #include "RP_ShellPropSheetExt.hpp"
 #include "RP_ThumbnailProvider.hpp"
 
+// libwin32common
+#include "libwin32common/RegKey.hpp"
+using LibWin32Common::RegKey;
+
+// rp_image backend registration.
+#include "librpbase/img/RpGdiplusBackend.hpp"
+#include "librpbase/img/rp_image.hpp"
+using LibRpBase::RpGdiplusBackend;
+using LibRpBase::rp_image;
+
+// Text conversion functions and macros.
+#include "librpbase/TextFuncs.hpp"
+
 // For file extensions.
 #include "libromdata/RomDataFactory.hpp"
 using LibRomData::RomDataFactory;
-
-// rp_image backend registration.
-#include "libromdata/img/RpGdiplusBackend.hpp"
-#include "libromdata/img/rp_image.hpp"
-using LibRomData::RpGdiplusBackend;
-using LibRomData::rp_image;
 
 // C++ includes.
 #include <memory>
@@ -85,11 +91,15 @@ BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD dwReason, LPVOID /*lpReserved*/)
 			g_hInstance = hInstance;
 
 			// Get the DLL filename.
+			SetLastError(ERROR_SUCCESS);
 			DWORD dwResult = GetModuleFileName(g_hInstance,
-				dll_filename, sizeof(dll_filename)/sizeof(dll_filename[0]));
-			if (dwResult == 0) {
-				// FIXME: Handle this.
+				dll_filename, ARRAY_SIZE(dll_filename));
+			if (dwResult == 0 || GetLastError() != ERROR_SUCCESS) {
+				// Cannot get the DLL filename.
+				// TODO: Windows XP doesn't SetLastError() if the
+				// filename is too big for the buffer.
 				dll_filename[0] = 0;
+				return FALSE;
 			}
 
 #if !defined(_MSC_VER) || defined(_DLL)

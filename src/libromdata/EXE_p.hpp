@@ -22,8 +22,8 @@
 #ifndef __ROMPROPERTIES_LIBROMDATA_EXE_P_HPP__
 #define __ROMPROPERTIES_LIBROMDATA_EXE_P_HPP__
 
-#include "config.libromdata.h"
-#include "RomData_p.hpp"
+#include "librpbase/config.librpbase.h"
+#include "librpbase/RomData_p.hpp"
 
 #include "exe_structs.h"
 
@@ -38,10 +38,10 @@
 namespace LibRomData {
 
 class EXE;
-class EXEPrivate : public RomDataPrivate
+class EXEPrivate : public LibRpBase::RomDataPrivate
 {
 	public:
-		EXEPrivate(EXE *q, IRpFile *file);
+		EXEPrivate(EXE *q, LibRpBase::IRpFile *file);
 		~EXEPrivate();
 
 	private:
@@ -158,8 +158,9 @@ class EXEPrivate : public RomDataPrivate
 #ifdef ENABLE_XML
 		/**
 		 * Add fields from the Win32 manifest resource.
+		 * @return 0 on success; negative POSIX error code on error.
 		 */
-		void addFields_PE_Manifest(void);
+		int addFields_PE_Manifest(void);
 #endif /* ENABLE_XML */
 };
 

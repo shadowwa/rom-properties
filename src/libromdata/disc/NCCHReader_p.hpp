@@ -23,15 +23,15 @@
 #ifndef __ROMPROPERTIES_LIBROMDATA_DISC_NCCHREADER_P_HPP__
 #define __ROMPROPERTIES_LIBROMDATA_DISC_NCCHREADER_P_HPP__
 
+#include "librpbase/config.librpbase.h"
 #include "NCCHReader.hpp"
-#include "config.libromdata.h"
-
-#include "byteswap.h"
 #include "n3ds_structs.h"
 
-#include "crypto/KeyManager.hpp"
+// librpbase
+#include "librpbase/byteswap.h"
+#include "librpbase/crypto/KeyManager.hpp"
 #ifdef ENABLE_DECRYPTION
-#include "crypto/CtrKeyScrambler.hpp"
+#include "../crypto/CtrKeyScrambler.hpp"
 #endif /* ENABLE_DECRYPTION */
 
 // C includes.
@@ -40,16 +40,18 @@
 // C++ includes.
 #include <vector>
 
-namespace LibRomData {
-
 #ifdef ENABLE_DECRYPTION
-class IAesCipher;
+namespace LibRpBase {
+	class IAesCipher;
+}
 #endif /* ENABLE_DECRYPTION */
+
+namespace LibRomData {
 
 class NCCHReaderPrivate
 {
 	public:
-		NCCHReaderPrivate(NCCHReader *q, IRpFile *file,
+		NCCHReaderPrivate(NCCHReader *q, LibRpBase::IRpFile *file,
 			uint8_t media_unit_shift,
 			int64_t ncch_offset, uint32_t ncch_length,
 			const N3DS_Ticket_t *ticket = nullptr,
@@ -62,7 +64,7 @@ class NCCHReaderPrivate
 		NCCHReader *const q_ptr;
 
 	public:
-		IRpFile *file;		// 3DS ROM image.
+		LibRpBase::IRpFile *file;	// 3DS ROM image.
 
 		// NCCH offsets.
 		const int64_t ncch_offset;	// NCCH start offset, in bytes.
@@ -92,7 +94,7 @@ class NCCHReaderPrivate
 		N3DS_ExeFS_Header_t exefs_header;
 
 		// Encryption key verification result.
-		KeyManager::VerifyResult verifyResult;
+		LibRpBase::KeyManager::VerifyResult verifyResult;
 
 		/**
 		 * Read data from the underlying ROM image.
@@ -122,11 +124,11 @@ class NCCHReaderPrivate
 		u128_t ncch_keys[2];
 
 		// NCCH cipher.
-		IAesCipher *cipher_ncch;	// NCCH cipher.
+		LibRpBase::IAesCipher *cipher_ncch;	// NCCH cipher.
 
 		// CIA cipher.
 		uint8_t title_key[16];		// Decrypted title key.
-		IAesCipher *cipher_cia;		// CIA cipher.
+		LibRpBase::IAesCipher *cipher_cia;		// CIA cipher.
 
 		union ctr_t {
 			uint8_t u8[16];
@@ -201,7 +203,7 @@ class NCCHReaderPrivate
 		 * @param keyY_verify		[in,opt] KeyY verification data. (NULL or 16 bytes)
 		 * @return VerifyResult.
 		 */
-		KeyManager::VerifyResult loadKeyNormal(u128_t *pKeyOut,
+		LibRpBase::KeyManager::VerifyResult loadKeyNormal(u128_t *pKeyOut,
 			const char *keyNormal_name,
 			const char *keyX_name,
 			const char *keyY_name,
@@ -227,7 +229,7 @@ class NCCHReaderPrivate
 		 *                                   If unknown, will try Debug, then Retail.
 		 * @return VerifyResult.
 		 */
-		KeyManager::VerifyResult loadNCCHKeys(u128_t pKeyOut[2],
+		LibRpBase::KeyManager::VerifyResult loadNCCHKeys(u128_t pKeyOut[2],
 			const N3DS_NCCH_Header_t *pNcchHeader, uint8_t issuer);
 
 		// Encryption key indexes.
@@ -236,18 +238,27 @@ class NCCHReaderPrivate
 			Key_Retail_Slot0x18KeyX,
 			Key_Retail_Slot0x1BKeyX,
 			Key_Retail_Slot0x25KeyX,
+			Key_Retail_Slot0x2CKeyX,
+			Key_Retail_Slot0x3DKeyX,
 			Key_Retail_Slot0x3DKeyY_0,
 			Key_Retail_Slot0x3DKeyY_1,
 			Key_Retail_Slot0x3DKeyY_2,
 			Key_Retail_Slot0x3DKeyY_3,
 			Key_Retail_Slot0x3DKeyY_4,
 			Key_Retail_Slot0x3DKeyY_5,
+			Key_Retail_Slot0x3DKeyNormal_0,
+			Key_Retail_Slot0x3DKeyNormal_1,
+			Key_Retail_Slot0x3DKeyNormal_2,
+			Key_Retail_Slot0x3DKeyNormal_3,
+			Key_Retail_Slot0x3DKeyNormal_4,
+			Key_Retail_Slot0x3DKeyNormal_5,
 
 			// Debug
 			Key_Debug_FixedCryptoKey,
 			Key_Debug_Slot0x18KeyX,
 			Key_Debug_Slot0x1BKeyX,
 			Key_Debug_Slot0x25KeyX,
+			Key_Debug_Slot0x2CKeyX,
 			Key_Debug_Slot0x3DKeyX,
 			Key_Debug_Slot0x3DKeyY_0,
 			Key_Debug_Slot0x3DKeyY_1,

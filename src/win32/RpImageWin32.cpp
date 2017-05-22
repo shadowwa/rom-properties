@@ -22,10 +22,11 @@
 #include "stdafx.h"
 #include "RpImageWin32.hpp"
 
-// libromdata
-#include "libromdata/img/rp_image.hpp"
-#include "libromdata/img/RpGdiplusBackend.hpp"
-using namespace LibRomData;
+// librpbase
+#include "librpbase/img/rp_image.hpp"
+#include "librpbase/img/RpGdiplusBackend.hpp"
+using LibRpBase::rp_image;
+using LibRpBase::RpGdiplusBackend;
 
 // C includes. (C++ namespace)
 #include <cassert>
@@ -45,14 +46,14 @@ namespace Gdiplus {
 	using std::max;
 }
 #include <gdiplus.h>
-#include "libromdata/img/GdiplusHelper.hpp"
+#include "librpbase/img/GdiplusHelper.hpp"
 
 /**
  * Convert an rp_image to a HBITMAP for use as an icon mask.
  * @param image rp_image.
  * @return HBITMAP, or nullptr on error.
  */
-HBITMAP RpImageWin32::toHBITMAP_mask(const LibRomData::rp_image *image)
+HBITMAP RpImageWin32::toHBITMAP_mask(const rp_image *image)
 {
 	assert(image != nullptr);
 	assert(image->isValid());
@@ -212,7 +213,7 @@ HBITMAP RpImageWin32::toHBITMAP(const rp_image *image, uint32_t bgColor)
  * @param nearest	[in] If true, use nearest-neighbor scaling.
  * @return HBITMAP, or nullptr on error.
  */
-HBITMAP RpImageWin32::toHBITMAP(const LibRomData::rp_image *image, uint32_t bgColor,
+HBITMAP RpImageWin32::toHBITMAP(const rp_image *image, uint32_t bgColor,
 				const SIZE &size, bool nearest)
 {
 	assert(image != nullptr);
@@ -242,7 +243,7 @@ HBITMAP RpImageWin32::toHBITMAP(const LibRomData::rp_image *image, uint32_t bgCo
  * @param image	[in] rp_image.
  * @return HBITMAP, or nullptr on error.
  */
-HBITMAP RpImageWin32::toHBITMAP_alpha(const LibRomData::rp_image *image)
+HBITMAP RpImageWin32::toHBITMAP_alpha(const rp_image *image)
 {
 	const SIZE size = {0, 0};
 	return toHBITMAP_alpha(image, size, false);
@@ -256,7 +257,7 @@ HBITMAP RpImageWin32::toHBITMAP_alpha(const LibRomData::rp_image *image)
  * @param nearest	[in] If true, use nearest-neighbor scaling.
  * @return HBITMAP, or nullptr on error.
  */
-HBITMAP RpImageWin32::toHBITMAP_alpha(const LibRomData::rp_image *image, const SIZE &size, bool nearest)
+HBITMAP RpImageWin32::toHBITMAP_alpha(const rp_image *image, const SIZE &size, bool nearest)
 {
 	assert(image != nullptr);
 	assert(image->isValid());
@@ -394,19 +395,14 @@ rp_image *RpImageWin32::fromHBITMAP(HBITMAP hBitmap)
 	// Allocate memory for the bitmap.
 	const int src_stride = ((bm.bmWidth * bi.biBitCount + 31) / 32) * 4;
 	const DWORD dwBmpSize = src_stride * height;
-	uint8_t *pBits = static_cast<uint8_t*>(malloc(dwBmpSize));
-	if (!pBits) {
-		// malloc() failed.
-		return nullptr;
-	}
+	unique_ptr<uint8_t[]> pBits(new uint8_t[dwBmpSize]);
 
 	// Get the DIBits.
 	HDC hDC = GetDC(nullptr);
-	int dib_ret = GetDIBits(hDC, hBitmap, 0, height, pBits, (BITMAPINFO*)&bi, DIB_RGB_COLORS);
+	int dib_ret = GetDIBits(hDC, hBitmap, 0, height, pBits.get(), (BITMAPINFO*)&bi, DIB_RGB_COLORS);
 	ReleaseDC(nullptr, hDC);
 	if (!dib_ret) {
 		// GetDIBits() failed.
-		free(pBits);
 		return nullptr;
 	}
 
@@ -418,7 +414,7 @@ rp_image *RpImageWin32::fromHBITMAP(HBITMAP hBitmap)
 	// The image might be upside-down.
 
 	// Copy the image data.
-	const uint8_t *src = pBits;
+	const uint8_t *src = pBits.get();
 	uint8_t *dest = static_cast<uint8_t*>(img->bits());
 	const int dest_stride = img->stride();
 	for (int y = height; y > 0; y--) {
@@ -426,7 +422,6 @@ rp_image *RpImageWin32::fromHBITMAP(HBITMAP hBitmap)
 		src += src_stride;
 		dest += dest_stride;
 	}
-	free(pBits);
 
 	// rp_image created.
 	return img;

@@ -61,15 +61,15 @@ the "ROM Properties" tab to view more information about the ROM image.
 
 ### Windows
 
-Extract the ZIP archive to a directory, then run the install.cmd file.
-If using Windows Vista or later, install.cmd must be run as an administrator.
-(Right-click the file, select "Run as administrator".)
+Extract the ZIP archive to a directory, then run install.exe. The installer
+requires administrator access, so click "Yes" if requested. In the installer,
+click the "Install" button to register the ROM Properties Page DLL.
 
 Note that this will hard-code the location of the DLL files in the registry,
 so you may want to place the DLLs in a common location.
 
-To uninstall the plugin, run uninstall.cmd. This also requires administrator
-access on Windows Vista and later.
+To uninstall the plugin, run install.exe again, then click the "Uninstall"
+button.
 
 ## Current OS Feature Support Level
 
@@ -109,7 +109,7 @@ Notes:
 | Nintendo Entertainment System |       Yes      |       N/A       |       No       |
 | Windows/DOS Executables       |       Yes      |        No       |       N/A      |
 | Nintendo Wii U                |       Yes      |        No       |  Disc, Covers  |
-| Nintendo 3DS                  |       Yes      |       Icon      |     Covers     |
+| Nintendo 3DS                  |       Yes      |       Icon      |  Covers, Box   |
 
 Notes:
 * Internal image refers to artwork contained within the ROM and/or disc image.
@@ -126,8 +126,11 @@ Notes:
 * Windows executables may contain multiple icon sizes. Support for Windows icons
   will be added once support for multiple image sizes is added.
 
-There will eventually be a configuration window for setting which image
-will be used for thumbnails (and icons on Windows).
+An initial configuration program is included with the Windows version of
+rom-propreties 1.0. This allows you to configure which images will be used for
+thumbnails on each system. The functionality is available on Linux as well, but
+the UI hasn't been ported over yet. See `doc/rom-properties.conf.example` for
+an example configuration file, which can be placed in `~/.config/rom-properties`.
 
 ## File Types Supported
 
@@ -149,11 +152,9 @@ will be used for thumbnails (and icons on Windows).
 * Nintendo Wii U: 1:1 disc image (\*.wud)
 * Nintendo 3DS: Icon files (\*.smdh), homebrew (\*.3dsx), cartridge images
   (\*.3ds, \*.cci), importable archives (\*.cia), eMMC dumps (\*.bin),
-  and title contents (\*.ncch, \*.app)
+  title contents (\*.ncch, \*.app), and firmware binaries (\*.firm, \*.bin)
   * Encryption keys are needed for encrypted cartridge images, importable
-    archives, and title contents. Many keys are still unknown, so it may not
-    be possible to view the full details of one of these files unless they
-    are decrypted first.
+    archives, and title contents.
 
 ## External Media Downloads
 

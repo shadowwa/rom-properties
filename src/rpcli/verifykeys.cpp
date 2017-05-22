@@ -20,6 +20,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "config.rpcli.h"
 
 #ifndef ENABLE_DECRYPTION
@@ -28,10 +29,13 @@
 
 #include "verifykeys.hpp"
 
+// librpbase
+#include "librpbase/crypto/KeyManager.hpp"
+using LibRpBase::KeyManager;
+
 // libromdata
-#include "libromdata/crypto/KeyManager.hpp"
-#include "libromdata/disc/WiiPartition.hpp"
 #include "libromdata/crypto/CtrKeyScrambler.hpp"
+#include "libromdata/disc/WiiPartition.hpp"
 #include "libromdata/disc/NCCHReader.hpp"
 using namespace LibRomData;
 

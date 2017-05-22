@@ -25,8 +25,12 @@
 #error This file should only be compiled if decryption is enabled.
 #endif /* !ENABLE_DECRYPTION */
 
-#include "crypto/IAesCipher.hpp"
-#include "crypto/AesCipherFactory.hpp"
+// librpbase
+#include "librpbase/crypto/IAesCipher.hpp"
+#include "librpbase/crypto/AesCipherFactory.hpp"
+using LibRpBase::IAesCipher;
+using LibRpBase::AesCipherFactory;
+using LibRpBase::KeyManager;
 
 // C includes. (C++ namespace)
 #include <cassert>
@@ -64,7 +68,7 @@ KeyManager::VerifyResult NCCHReaderPrivate::loadKeyNormal(u128_t *pKeyOut,
 	}
 
 	// Get the Key Manager instance.
-	KeyManager *keyManager = KeyManager::instance();
+	KeyManager *const keyManager = KeyManager::instance();
 	assert(keyManager != nullptr);
 	if (!keyManager) {
 		// TODO: Some other error?
@@ -253,11 +257,11 @@ KeyManager::VerifyResult NCCHReaderPrivate::loadNCCHKeys(u128_t pKeyOut[2],
 
 		// Standard keyslot. (0x2C)
 		if (isDebug) {
-			keyX_name[0] = "ctr-dev-Slot0x2CKeyX";
-			keyX_verify[0] = nullptr;
+			keyX_name[0] = EncryptionKeyNames[Key_Debug_Slot0x2CKeyX];
+			keyX_verify[0] = EncryptionKeyVerifyData[Key_Debug_Slot0x2CKeyX];
 		} else {
-			keyX_name[0] = "ctr-Slot0x2CKeyX";
-			keyX_verify[0] = nullptr;
+			keyX_name[0] = EncryptionKeyNames[Key_Retail_Slot0x2CKeyX];
+			keyX_verify[0] = EncryptionKeyVerifyData[Key_Retail_Slot0x2CKeyX];
 		}
 
 		// Check for a secondary keyslot.
@@ -295,6 +299,10 @@ KeyManager::VerifyResult NCCHReaderPrivate::loadNCCHKeys(u128_t pKeyOut[2],
 		}
 	}
 
+	// FIXME: Allowing a missing secondary key for now,
+	// since only the primary key is needed for headers.
+	// Need to return an appropriate error in this case.
+
 	// Load the two KeyX keys.
 	KeyManager::KeyData_t keyX_data[2] = {{nullptr, 0}, {nullptr, 0}};
 	for (int i = 0; i < 2; i++) {
@@ -313,7 +321,11 @@ KeyManager::VerifyResult NCCHReaderPrivate::loadNCCHKeys(u128_t pKeyOut[2],
 
 		if (res != KeyManager::VERIFY_OK) {
 			// KeyX error.
-			return res;
+			if (i == 0)
+				return res;
+			// Secondary key. Ignore errors for now.
+			memset(&keyX_data[i], 0, sizeof(keyX_data[i]));
+			keyX_name[i] = nullptr;
 		} else if (keyX_data[i].length != 16) {
 			// KeyX is the wrong length.
 			return KeyManager::VERIFY_KEY_INVALID;
@@ -347,7 +359,9 @@ KeyManager::VerifyResult NCCHReaderPrivate::loadNCCHKeys(u128_t pKeyOut[2],
 			reinterpret_cast<const u128_t*>(pNcchHeader->signature));
 		// TODO: Scrambling-specific error?
 		if (ret != 0) {
-			return KeyManager::VERIFY_KEY_INVALID;
+			// FIXME: Ignoring errors for secondary keys for now.
+			//return KeyManager::VERIFY_KEY_INVALID;
+			memset(&pKeyOut[1], 0, sizeof(pKeyOut[1]));
 		}
 	} else {
 		// Copy ncchKey0 to ncchKey1.
@@ -397,18 +411,27 @@ const char *const NCCHReaderPrivate::EncryptionKeyNames[Key_Max] = {
 	"ctr-Slot0x18KeyX",
 	"ctr-Slot0x1BKeyX",
 	"ctr-Slot0x25KeyX",
+	"ctr-Slot0x2CKeyX",
+	"ctr-Slot0x3DKeyX",
 	"ctr-Slot0x3DKeyY-0",
 	"ctr-Slot0x3DKeyY-1",
 	"ctr-Slot0x3DKeyY-2",
 	"ctr-Slot0x3DKeyY-3",
 	"ctr-Slot0x3DKeyY-4",
 	"ctr-Slot0x3DKeyY-5",
+	"ctr-Slot0x3DKeyNormal-0",
+	"ctr-Slot0x3DKeyNormal-1",
+	"ctr-Slot0x3DKeyNormal-2",
+	"ctr-Slot0x3DKeyNormal-3",
+	"ctr-Slot0x3DKeyNormal-4",
+	"ctr-Slot0x3DKeyNormal-5",
 
 	// Debug
 	"ctr-dev-FixedCryptoKey",
 	"ctr-dev-Slot0x18KeyX",
 	"ctr-dev-Slot0x1BKeyX",
 	"ctr-dev-Slot0x25KeyX",
+	"ctr-dev-Slot0x2CKeyX",
 	"ctr-dev-Slot0x3DKeyX",
 	"ctr-dev-Slot0x3DKeyY-0",
 	"ctr-dev-Slot0x3DKeyY-1",
@@ -440,6 +463,14 @@ const uint8_t NCCHReaderPrivate::EncryptionKeyVerifyData[Key_Max][16] = {
 	{0x23,0x81,0x94,0x9A,0x56,0xC9,0xEC,0x25,
 	 0xE1,0xA8,0xC7,0x52,0x49,0xE6,0x58,0x25},
 
+	// Key_Retail_Slot0x2CKeyX
+	{0x76,0x2D,0xA6,0x8D,0xD2,0xB5,0xC8,0xBB,
+	 0xCB,0x43,0x0E,0x9B,0xC0,0x60,0x56,0x1E},
+
+	// Key_Retail_Slot0x3DKeyX
+	{0x7D,0xD5,0x76,0x3A,0x97,0x89,0xED,0xD9,
+	 0x17,0x73,0x00,0x2A,0xA6,0xA5,0x3A,0x92},
+
 	// Key_Retail_Slot0x3DKeyY
 	// 0: eShop titles
 	{0x0E,0xBD,0x7C,0x95,0x9B,0x76,0x23,0x46,
@@ -460,6 +491,26 @@ const uint8_t NCCHReaderPrivate::EncryptionKeyVerifyData[Key_Max][16] = {
 	{0x9A,0x91,0x0F,0x20,0x06,0x22,0xE0,0x50,
 	 0x80,0x2A,0xE1,0xA4,0x96,0x7D,0x2E,0x56},
 
+	// Key_Retail_Slot0x3DKeyNormal
+	// 0: eShop titles
+	{0xD2,0x8B,0x76,0x6A,0xFD,0xD7,0x6F,0xC9,
+	 0xB3,0x45,0xE8,0xA9,0x19,0x57,0x20,0x2E},
+	// 1: System titles
+	{0x8B,0xE8,0x86,0x10,0x44,0x88,0x93,0xC7,
+	 0xE5,0x1E,0x75,0xF7,0x5F,0xD5,0x7F,0x54},
+	// 2
+	{0xCA,0x70,0x4D,0x49,0x3B,0x20,0x60,0xE3,
+	 0xE6,0x07,0x98,0x75,0x4A,0xD6,0x9B,0x6D},
+	// 3
+	{0x49,0x2D,0xCA,0xD6,0x74,0xA0,0x03,0x69,
+	 0x08,0x83,0x01,0x86,0x4B,0x2A,0xEC,0x67},
+	// 4
+	{0x4D,0x56,0x78,0x6B,0xC0,0x7C,0x16,0x65,
+	 0x10,0x8D,0xF9,0x6D,0x56,0x24,0xBB,0x6E},
+	// 5
+	{0x58,0xFC,0x29,0xA7,0x26,0x2E,0x16,0x32,
+	 0x92,0xF6,0x60,0x5A,0x93,0x0B,0x17,0x2E},
+
 	/** Debug **/
 
 	// Key_Debug_FixedCryptoKey
@@ -477,6 +528,10 @@ const uint8_t NCCHReaderPrivate::EncryptionKeyVerifyData[Key_Max][16] = {
 	// Key_Debug_Slot0x25KeyX
 	{0x81,0x01,0x31,0xFD,0xDC,0x08,0x9E,0x7D,
 	 0x56,0xC9,0x62,0x37,0xAE,0x33,0x26,0xEE},
+
+	// Key_Debug_Slot0x2CKeyX
+	{0xB3,0xB7,0x34,0x02,0xF6,0xE0,0x6A,0x0B,
+	 0xFB,0x51,0xED,0xFC,0x19,0x3B,0x4A,0x04},
 
 	// Key_Debug_Slot0x3DKeyX
 	{0x1A,0x62,0xA4,0x97,0x8F,0xBF,0xC0,0x86,

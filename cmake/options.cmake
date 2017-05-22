@@ -42,7 +42,10 @@ ELSE(WIN32)
 	OPTION(USE_INTERNAL_PNG "Use the internal copy of libpng." OFF)
 	OPTION(ENABLE_JPEG "Enable JPEG decoding using libjpeg." ON)
 	#OPTION(USE_INTERNAL_JPEG "Use the internal copy of libjpeg-turbo." OFF)
-	SET(USE_INTERNAL_JPEG OFF)
+	IF(ENABLE_JPEG AND USE_INTERNAL_JPEG)
+		SET(USE_INTERNAL_JPEG OFF CACHE "Use the internal copy of libjpeg-turbo." INTERNAL FORCE)
+		MESSAGE(WARNING "Cannot use the internal libjpeg-turbo on this platform.\nUsing system libjpeg if available.")
+	ENDIF(ENABLE_JPEG AND USE_INTERNAL_JPEG)
 	OPTION(ENABLE_XML "Enable XML parsing for e.g. Windows manifests." ON)
 	OPTION(USE_INTERNAL_XML "Use the internal copy of TinyXML2." OFF)
 ENDIF()
@@ -52,6 +55,15 @@ ENDIF()
 
 # Enable decryption for newer ROM and disc images.
 OPTION(ENABLE_DECRYPTION "Enable decryption for newer ROM and disc images." ON)
+
+# Link-time optimization.
+# FIXME: Not working in clang builds...
+IF(CMAKE_CXX_COMPILER_ID MATCHES "(Apple)?[Cc]lang")
+	SET(LTO_DEFAULT OFF)
+ELSEIF(CMAKE_COMPILER_IS_GNUCXX OR MSVC)
+	SET(LTO_DEFAULT ON)
+ENDIF()
+OPTION(ENABLE_LTO "Enable link-time optimization in release builds." ${LTO_DEFAULT})
 
 # Split debug information into a separate file.
 OPTION(SPLIT_DEBUG "Split debug information into a separate file." ON)

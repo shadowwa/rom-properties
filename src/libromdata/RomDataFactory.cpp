@@ -19,12 +19,16 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
  ***************************************************************************/
 
-#include "config.libromdata.h"
+#include "librpbase/config.librpbase.h"
 
-#include "common.h"
 #include "RomDataFactory.hpp"
-#include "file/RpFile.hpp"
-#include "file/FileSystem.hpp"
+
+// librpbase
+#include "librpbase/common.h"
+#include "librpbase/RomData.hpp"
+#include "librpbase/file/RpFile.hpp"
+#include "librpbase/file/FileSystem.hpp"
+using namespace LibRpBase;
 
 // C++ includes.
 #include <unordered_map>
@@ -55,6 +59,7 @@ using std::vector;
 #include "WiiU.hpp"
 #include "EXE.hpp"
 #include "Nintendo3DS.hpp"
+#include "Nintendo3DSFirm.hpp"
 
 // Special case for Dreamcast save files.
 #include "dc_structs.h"
@@ -126,6 +131,7 @@ const RomDataFactoryPrivate::RomDataFns RomDataFactoryPrivate::romDataFns_header
 	GetRomDataFns(NES, false),
 	GetRomDataFns(WiiU, true),
 	GetRomDataFns(Nintendo3DS, true),
+	GetRomDataFns(Nintendo3DSFirm, false),
 
 	// NOTE: EXE has a 16-bit magic number,
 	// so it should go at the end.
