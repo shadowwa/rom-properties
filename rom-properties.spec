@@ -1,10 +1,11 @@
 Name:          rom-properties
 Version:       1.0
-Release:       0
+Release:       1
 Summary:       ROM Properties Page shell extension
 Group:         games
 License:       GPL
 URL:           https://github.com/GerbilSoft/rom-properties/
+%bcond_without test
 
 Source:        %{name}-%{version}.tar.gz
 BuildRoot:     %(mktemp -ud %{_tmppath}/%{name}-%{version}-%{release}-XXXXXX)
@@ -70,6 +71,9 @@ This package contains the Nautilus (GNOME 3, Unity) version.
 
 %build
 %cmake \
+%if %{with test}
+    -DBUILD_TESTING=ON \
+%endif
 	-DCMAKE_BUILD_TYPE=Release \
     -DENABLE_JPEG=ON \
 	-DSPLIT_DEBUG=OFF \
@@ -81,21 +85,12 @@ This package contains the Nautilus (GNOME 3, Unity) version.
 %make_build
 
 %install
-#%{__rm} -rf %{buildroot}
-#%{__install} -Dp -m0755 file-in-source %{buildroot}/path/to/target/server/file-in-source
 %{makeinstall_std} -C build
 
-%pre
-# Pre-install steps go here.
-
-%post
-# Post-install steps go here.
-
-%preun
-# Steps prior to uninstall go here.
-
-%postun
-# Steps after uninstall go here.
+%if %{with test}
+%check
+LC_NUMERIC=en_US CTEST_OUTPUT_ON_FAILURE=1 %make_build -C build test
+%endif
 
 %clean
 %{__rm} -rf %{buildroot}
@@ -105,6 +100,7 @@ This package contains the Nautilus (GNOME 3, Unity) version.
 %doc LICENSE
 %doc doc/COMPILING.md
 %doc doc/keys.conf.example
+%doc doc/rom-properties.conf.example
 %defattr(-,root,root,0755)
 
 %files -n rom-properties-kde5
@@ -124,6 +120,11 @@ This package contains the Nautilus (GNOME 3, Unity) version.
 
 
 %changelog
+
+* Mon May 22 2017 shad <shad> 1.0-1
+- add rom-properties.conf.example file
+- Build test (can be disable passing --without test to rpmbuild)
+- cleanup useless placeholder
 
 * Thu May 4 2017 shad <shad> 1.0-0
 - test git packages
