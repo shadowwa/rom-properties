@@ -23,9 +23,11 @@
 #define __ROMPROPERTIES_LIBRPBASE_ROMFIELDS_HPP__
 
 #include "librpbase/config.librpbase.h"
-#include "librpbase/common.h"
 
+// C includes.
 #include <stdint.h>
+
+// C++ includes.
 #include <array>
 #include <string>
 #include <vector>
@@ -63,53 +65,19 @@ class RomFields
 			// center-aligned text.
 			// NOTE: Maximum of one STRF_CREDITS per RomData subclass.
 			STRF_CREDITS	= (1 << 2),
+
+			// Trim spaces from the end of strings.
+			STRF_TRIM_END	= (1 << 3),
 		};
 
-		// Description for String.
-		struct StringDesc {
-			enum StringFormat {
-				// Print the string using a monospaced font.
-				STRF_MONOSPACE	= (1 << 0),
+		// Display flags for RFT_LISTDATA.
+		enum ListDataFlags {
+			// Show the ListView on a separate row
+			// from the description label.
+			RFT_LISTDATA_SEPARATE_ROW = (1 << 0),
 
-				// Print the string using a "warning" font.
-				// (usually bold and red)
-				STRF_WARNING	= (1 << 1),
-
-				// "Credits" field.
-				// Used for providing credits for an external database.
-				// This field disables highlighting and enables links
-				// using HTML-style "<a>" tags. This field is also
-				// always shown at the bottom of the dialog and with
-				// center-aligned text.
-				// NOTE: Maximum of one STRF_CREDITS per RomData subclass.
-				STRF_CREDITS	= (1 << 2),
-			};
-
-			// Custom formatting options.
-			// (See the StringFormat enum.)
-			uint32_t formatting;
-		};
-
-		// Description for Bitfield.
-		struct BitfieldDesc {
-			// Number of bits to check. (must be 1-32)
-			int elements;
-			// Bit flags per row. (3 or 4 is usually good)
-			int elemsPerRow;
-			// Bit flag names.
-			// Must be an array of at least 'elements' strings.
-			// If a name is nullptr, that element is skipped.
-			const rp_char *const *names;
-		};
-
-		// Description for ListData.
-		struct ListDataDesc {
-			// Number of fields per row.
-			int count;
-			// List field names. (headers)
-			// Must be an array of at least 'fields' strings.
-			// If a name is nullptr, that field is skipped.
-			const rp_char *const *names;
+			// Enable checkboxes.
+			RFT_LISTDATA_CHECKBOXES = (1 << 1),
 		};
 
 		// Display flags for RFT_DATETIME.
@@ -120,64 +88,17 @@ class RomFields
 			// Show the time value.
 			RFT_DATETIME_HAS_TIME = (1 << 1),
 
+			// Date does not have a valid year value.
+			RFT_DATETIME_NO_YEAR = (1 << 2),
+
 			// Mask for date/time display values.
 			RFT_DATETIME_HAS_DATETIME_MASK = RFT_DATETIME_HAS_DATE | RFT_DATETIME_HAS_TIME,
+			RFT_DATETIME_HAS_DATETIME_NO_YEAR_MASK = RFT_DATETIME_HAS_DATE | RFT_DATETIME_HAS_TIME | RFT_DATETIME_NO_YEAR,
 
 			// Show the timestamp as UTC instead of the local timezone.
 			// This is useful for timestamps that aren't actually
 			// adjusted for the local timezone.
-			RFT_DATETIME_IS_UTC = (1 << 2),
-		};
-
-		// Description for RFT_DATETIME.
-		struct DateTimeDesc {
-			uint32_t flags;	// DateTimeFlags
-		};
-
-		// The ROM data class holds a number of customizable fields.
-		// These fields are hard-coded by the subclass and passed
-		// to the constructor.
-		struct Desc {
-			const rp_char *name;	// Display name.
-			RomFieldType type;	// ROM field type.
-
-			// Some types require more information.
-			// The following pointer must point to the required
-			// data structure for the type.
-			union {
-				const void *ptr;
-				const StringDesc *str_desc;	// May be nullptr.
-				const BitfieldDesc *bitfield;
-				const ListDataDesc *list_data;
-				const DateTimeDesc *date_time;
-			};
-		};
-
-		// List data for a list view.
-		struct ListData {
-			// Each entry in 'data' contains a vector of strings,
-			// which represents each field.
-			std::vector<std::vector<rp_string> > data;
-		};
-
-		// ROM field data.
-		// Actual contents depend on the field type.
-		struct Data {
-			RomFieldType type;	// ROM field type.
-			union {
-				const rp_char *str;	// String data.
-				uint32_t bitfield;	// Bitfield.
-				ListData *list_data;	// ListData
-
-				// Date/Time. (UNIX format)
-				// NOTE: -1 is used to indicate
-				// an invalid date/time.
-				int64_t date_time;
-
-				// Age ratings. (pointer to uint16_t[16])
-				// See AgeRatingsCountry for field indexes.
-				uint16_t *age_ratings;
-			};
+			RFT_DATETIME_IS_UTC = (1 << 3),
 		};
 
 		// Age Ratings indexes.
@@ -213,14 +134,14 @@ class RomFields
 		// ROM field struct.
 		// Dynamically allocated.
 		struct Field {
-			rp_string name;		// Field name.
+			std::string name;	// Field name.
 			RomFieldType type;	// ROM field type.
 			uint8_t tabIdx;		// Tab index. (0 for default)
 			bool isValid;		// True if this field has valid data.
 
 			// Field description.
 			union _desc {
-				uint32_t flags;	// Generic flags. (string, date)
+				unsigned int flags;	// Generic flags. (string, date)
 
 				struct _bitfield {
 					// Number of bits to check. (must be 1-32)
@@ -231,13 +152,17 @@ class RomFields
 					// Bit flag names.
 					// Must be a vector of at least 'elements' strings.
 					// If a name is nullptr, that element is skipped.
-					const std::vector<rp_string> *names;
+					const std::vector<std::string> *names;
 				} bitfield;
 				struct _list_data {
+					// Flags.
+					unsigned int flags;
+					// Number of visible rows. (0 for "default")
+					int rows_visible;
 					// List field names. (headers)
 					// Must be a vector of at least 'fields' strings.
 					// If a name is nullptr, that field is skipped.
-					const std::vector<rp_string> *names;
+					const std::vector<std::string> *names;
 				} list_data;
 			} desc;
 
@@ -247,18 +172,21 @@ class RomFields
 				uint64_t generic;
 
 				// RFT_STRING
-				const rp_string *str;
+				const std::string *str;
 
 				// RFT_BITFIELD
 				uint32_t bitfield;
 
 				// RFT_LISTDATA
-				const std::vector<std::vector<rp_string> > *list_data;
+				struct {
+					const std::vector<std::vector<std::string> > *list_data;
+					uint32_t list_checkboxes;	// Requires RFT_LISTDATA_CHECKBOXES.
+				};
 
 				// RFT_DATETIME (UNIX format)
 				// NOTE: -1 is used to indicate
 				// an invalid date/time.
-				int64_t date_time;
+				time_t date_time;
 
 				// RFT_AGE_RATINGS
 				// See AgeRatingsCountry for field indexes.
@@ -315,7 +243,7 @@ class RomFields
 		 * Get the abbreviation of an age rating organization.
 		 * (TODO: Full name function?)
 		 * @param country Rating country. (See AgeRatingsCountry.)
-		 * @return Abbreviation (in ASCII), or nullptr if invalid.
+		 * @return Abbreviation, or nullptr if invalid.
 		 */
 		static const char *ageRatingAbbrev(int country);
 
@@ -323,14 +251,20 @@ class RomFields
 		 * Decode an age rating into a human-readable string.
 		 * This does not include the name of the rating organization.
 		 *
-		 * NOTE: The returned string is in UTF-8 in order to
-		 * be able to use special characters.
-		 *
 		 * @param country Rating country. (See AgeRatingsCountry.)
 		 * @param rating Rating value.
 		 * @return Human-readable string, or empty string if the rating isn't active.
 		 */
 		static std::string ageRatingDecode(int country, uint16_t rating);
+
+		/**
+		 * Decode all age ratings into a human-readable string.
+		 * This includes the names of the rating organizations.
+		 * @param age_ratings Age ratings.
+		 * @param newlines If true, print newlines after every four ratings.
+		 * @return Human-readable string, or empty string if no ratings.
+		 */
+		static std::string ageRatingsDecode(const age_ratings_t *age_ratings, bool newlines = true);
 
 	public:
 		/** Convenience functions for RomData subclasses. **/
@@ -355,14 +289,14 @@ class RomFields
 		 * @param tabIdx Tab index.
 		 * @param name Tab name.
 		 */
-		void setTabName(int tabIdx, const rp_char *name);
+		void setTabName(int tabIdx, const char *name);
 
 		/**
 		 * Add a tab to the end and select it.
 		 * @param name Tab name.
 		 * @return Tab index.
 		 */
-		int addTab(const rp_char *name);
+		int addTab(const char *name);
 
 		/**
 		 * Get the tab count.
@@ -375,7 +309,7 @@ class RomFields
 		 * @param tabIdx Tab index.
 		 * @return Tab name, or nullptr if no name is set.
 		 */
-		const rp_char *tabName(int tabIdx) const;
+		const char *tabName(int tabIdx) const;
 
 		/** Fields **/
 
@@ -386,15 +320,27 @@ class RomFields
 		void reserve(int n);
 
 		/**
-		 * Convert an array of rp_char strings to a vector of rp_string.
+		 * Convert an array of char strings to a vector of std::string.
 		 * This can be used for addField_bitfield() and addField_listData().
 		 * @param strArray Array of strings.
 		 * @param count Number of strings, or -1 for a NULL-terminated array.
 		 * NOTE: The array will be terminated at NULL regardless of count,
 		 * so a -1 count is only useful if the size isn't known.
-		 * @return Allocated std::vector<rp_string>.
+		 * @return Allocated std::vector<std::string>.
 		 */
-		static std::vector<rp_string> *strArrayToVector(const rp_char *const *strArray, int count = -1);
+		static std::vector<std::string> *strArrayToVector(const char *const *strArray, int count = -1);
+
+		/**
+		 * Convert an array of char strings to a vector of std::string.
+		 * This can be used for addField_bitfield() and addField_listData().
+		 * @param msgctxt i18n context.
+		 * @param strArray Array of strings.
+		 * @param count Number of strings, or -1 for a NULL-terminated array.
+		 * NOTE: The array will be terminated at NULL regardless of count,
+		 * so a -1 count is only useful if the size isn't known.
+		 * @return Allocated std::vector<std::string>.
+		 */
+		static std::vector<std::string> *strArrayToVector_i18n(const char *msgctxt, const char *const *strArray, int count = -1);
 
 		/**
 		 * Add fields from another RomFields object.
@@ -411,7 +357,7 @@ class RomFields
 		 * @param flags Formatting flags.
 		 * @return Field index.
 		 */
-		int addField_string(const rp_char *name, const rp_char *str, int flags = 0);
+		int addField_string(const char *name, const char *str, unsigned int flags = 0);
 
 		/**
 		 * Add string field data.
@@ -420,7 +366,7 @@ class RomFields
 		 * @param flags Formatting flags.
 		 * @return Field index.
 		 */
-		int addField_string(const rp_char *name, const rp_string &str, int flags = 0);
+		int addField_string(const char *name, const std::string &str, unsigned int flags = 0);
 
 		enum Base {
 			FB_DEC,
@@ -437,7 +383,7 @@ class RomFields
 		 * @param flags Formatting flags.
 		 * @return Field index, or -1 on error.
 		 */
-		int addField_string_numeric(const rp_char *name, uint32_t val, Base base = FB_DEC, int digits = 0, int flags = 0);
+		int addField_string_numeric(const char *name, uint32_t val, Base base = FB_DEC, int digits = 0, unsigned int flags = 0);
 
 		/**
 		 * Add a string field formatted like a hex dump
@@ -447,7 +393,7 @@ class RomFields
 		 * @param flags Formatting flags.
 		 * @return Field index, or -1 on error.
 		 */
-		int addField_string_hexdump(const rp_char *name, const uint8_t *buf, size_t size, int flags = 0);
+		int addField_string_hexdump(const char *name, const uint8_t *buf, size_t size, unsigned int flags = 0);
 
 		/**
 		 * Add a string field formatted for an address range.
@@ -459,9 +405,9 @@ class RomFields
 		 * @param flags Formatting flags.
 		 * @return Field index, or -1 on error.
 		 */
-		int addField_string_address_range(const rp_char *name,
+		int addField_string_address_range(const char *name,
 			uint32_t start, uint32_t end,
-			const rp_char *suffix, int digits = 8, int flags = 0);
+			const char *suffix, int digits = 8, unsigned int flags = 0);
 
 		/**
 		 * Add a string field formatted for an address range.
@@ -472,8 +418,8 @@ class RomFields
 		 * @param flags Formatting flags.
 		 * @return Field index, or -1 on error.
 		 */
-		inline int addField_string_address_range(const rp_char *name,
-			uint32_t start, uint32_t end, int digits = 8, int flags = 0)
+		inline int addField_string_address_range(const char *name,
+			uint32_t start, uint32_t end, int digits = 8, unsigned int flags = 0)
 		{
 			return addField_string_address_range(name, start, end, nullptr, digits, flags);
 		}
@@ -487,21 +433,29 @@ class RomFields
 		 * @param bitfield Bitfield.
 		 * @return Field index, or -1 on error.
 		 */
-		int addField_bitfield(const rp_char *name,
-			const std::vector<rp_string> *bit_names,
+		int addField_bitfield(const char *name,
+			const std::vector<std::string> *bit_names,
 			int elemsPerRow, uint32_t bitfield);
 
 		/**
 		 * Add ListData.
 		 * NOTE: This object takes ownership of the two vectors.
 		 * @param name Field name.
-		 * @param headers Vector of column names.
+		 * @param headers Vector of column names. (If NULL, no headers will be shown.)
 		 * @param list_data ListData.
+		 * @param rows_visible Number of visible rows, (0 for "default")
+		 * @param flags Flags.
+		 * @param checkboxes Checkbox bitfield. (requires RFT_LISTDATA_CHECKBOXES)
+		 *
+		 * NOTE: If headers is nullptr, the column count will be
+		 * determined using the first row in list_data.
+		 *
 		 * @return Field index, or -1 on error.
 		 */
-		int addField_listData(const rp_char *name,
-			const std::vector<rp_string> *headers,
-			const std::vector<std::vector<rp_string> > *list_data);
+		int addField_listData(const char *name,
+			const std::vector<std::string> *headers,
+			const std::vector<std::vector<std::string> > *list_data,
+			int rows_visible = 0, unsigned int flags = 0, uint32_t checkboxes = 0);
 
 		/**
 		 * Add DateTime.
@@ -510,7 +464,7 @@ class RomFields
 		 * @param flags Date/Time flags.
 		 * @return Field index, or -1 on error.
 		 */
-		int addField_dateTime(const rp_char *name, int64_t date_time, int flags = 0);
+		int addField_dateTime(const char *name, time_t date_time, unsigned int flags = 0);
 
 		/**
 		 * Add age ratings.
@@ -519,7 +473,7 @@ class RomFields
 		 * @param age_ratings Pointer to age ratings array.
 		 * @return Field index, or -1 on error.
 		 */
-		int addField_ageRatings(const rp_char *name, const age_ratings_t &age_ratings);
+		int addField_ageRatings(const char *name, const age_ratings_t &age_ratings);
 };
 
 }

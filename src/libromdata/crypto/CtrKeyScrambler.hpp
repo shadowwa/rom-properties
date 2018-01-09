@@ -28,17 +28,11 @@
 #endif /* ENABLE_DECRYPTION */
 
 #include "librpbase/common.h"
-#include <stdint.h>
+
+// for u128_t
+#include "N3DSVerifyKeys.hpp"
 
 namespace LibRomData {
-
-// 128-bit type for AES counter and keys.
-// TODO: Move to another file.
-typedef union {
-	uint8_t u8[16];
-	uint32_t u32[4];
-	uint64_t u64[2];
-} u128_t;
 
 class CtrKeyScrambler
 {
@@ -76,6 +70,15 @@ class CtrKeyScrambler
 			const u128_t *keyX, const u128_t *keyY);
 
 	public:
+		// Encryption key indexes.
+		enum EncryptionKeys {
+			// Retail
+			Key_Twl_Scrambler,
+			Key_Ctr_Scrambler,
+
+			Key_Max
+		};
+
 		/**
 		 * Get the total number of encryption key names.
 		 * @return Number of encryption key names.

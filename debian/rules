@@ -2,6 +2,8 @@
 
 DEB_HOST_MULTIARCH ?= $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
 
+TMP := $(CURDIR)/debian/tmp
+
 %:
 	dh $@ --parallel -Bbuild
 
@@ -13,7 +15,8 @@ CMAKE_OPTIONS := \
 	-DBUILD_KDE4=ON \
 	-DBUILD_KDE5=ON \
 	-DBUILD_XFCE=ON \
-	-DBUILD_CLI=ON
+	-DBUILD_CLI=ON \
+	-DENABLE_LTO=OFF
 ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
 CMAKE_OPTIONS += -DBUILD_TESTING=ON
 endif
@@ -25,3 +28,12 @@ override_dh_auto_test:
 ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
 	CTEST_OUTPUT_ON_FAILURE=1 $(MAKE) -C build test
 endif
+
+# Change rp-config and rp-thumbnail into symlinks.
+# Needed to fix an unstripped file issue with rp-thumbnail.
+override_dh_auto_install:
+	dh_auto_install
+	rm $(TMP)/usr/bin/rp-config
+	rm $(TMP)/usr/lib/$(DEB_HOST_MULTIARCH)/libexec/rp-thumbnail
+	ln -s rp-stub $(TMP)/usr/bin/rp-config
+	ln -s /usr/bin/rp-stub $(TMP)/usr/lib/$(DEB_HOST_MULTIARCH)/libexec/rp-thumbnail

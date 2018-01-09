@@ -23,15 +23,14 @@
 
 #include "RpPng.hpp"
 #include "rp_image.hpp"
-#include "IconAnimData.hpp"
-#include "../file/RpFile.hpp"
-#include "../file/FileSystem.hpp"
+#include "../file/IRpFile.hpp"
 
-// APNG
-#include "APNG_dlopen.h"
+// PNG writer.
+#include "RpPngWriter.hpp"
 
 // C includes. (C++ namespace)
 #include <cassert>
+#include <cstring>
 
 // C++ includes.
 #include <algorithm>
@@ -54,6 +53,16 @@ using std::unique_ptr;
 #define png_set_expand_gray_1_2_4_to_8(png_ptr) \
 	png_set_gray_1_2_4_to_8(png_ptr)
 #endif
+
+// PNGCAPI was added in libpng-1.5.0beta14.
+// Older versions will need this.
+#ifndef PNGCAPI
+# ifdef _MSC_VER
+#  define PNGCAPI __cdecl
+# else
+#  define PNGCAPI
+# endif
+#endif /* !PNGCAPI */
 
 // pngcheck()
 #include "pngcheck/pngcheck.hpp"
@@ -103,7 +112,7 @@ class RpPngPrivate
 		 * @param data		[out] Buffer for the data to read.
 		 * @param length	[in]  Size of data.
 		 */
-		static void png_io_IRpFile_read(png_structp png_ptr, png_bytep data, png_size_t length);
+		static void PNGCAPI png_io_IRpFile_read(png_structp png_ptr, png_bytep data, png_size_t length);
 
 		/**
 		 * libpng I/O write handler for IRpFile.
@@ -111,13 +120,13 @@ class RpPngPrivate
 		 * @param data		[in] Data to write.
 		 * @param length	[in] Size of data.
 		 */
-		static void png_io_IRpFile_write(png_structp png_ptr, png_bytep data, png_size_t length);
+		static void PNGCAPI png_io_IRpFile_write(png_structp png_ptr, png_bytep data, png_size_t length);
 
 		/**
 		 * libpng I/O flush handler for IRpFile.
 		 * @param png_ptr	[in] PNG pointer.
 		 */
-		static void png_io_IRpFile_flush(png_structp png_ptr);
+		static void PNGCAPI png_io_IRpFile_flush(png_structp png_ptr);
 
 		/** Read functions. **/
 
@@ -138,35 +147,6 @@ class RpPngPrivate
 		 * @return rp_image*, or nullptr on error.
 		 */
 		static rp_image *loadPng(png_structp png_ptr, png_infop info_ptr);
-
-		/** Write functions. **/
-
-		/**
-		 * Write the palette from a CI8 image.
-		 * @param png_ptr png_structp
-		 * @param info_ptr png_infop
-		 * @param img rp_image containing the palette.
-		 * @return 0 on success; negative POSIX error code on error.
-		 */
-		static int Write_CI8_Palette(png_structp png_ptr, png_infop info_ptr, const rp_image *img);
-
-		/**
-		 * Write a PNG image to an opened PNG handle.
-		 * @param png_ptr png_structp
-		 * @param info_ptr png_infop
-		 * @param img rp_image
-		 * @return 0 on success; negative POSIX error code on error.
-		 */
-		static int savePng(png_structp png_ptr, png_infop info_ptr, const rp_image *img);
-
-		/**
-		 * Write an APNG image to an opened APNG handle.
-		 * @param png_ptr png_structp
-		 * @param info_ptr png_infop
-		 * @param iconAnimData IconAnimData
-		 * @return 0 on success; negative POSIX error code on error.
-		 */
-		static int saveAPng(png_structp png_ptr, png_infop info_ptr, const IconAnimData *iconAnimData);
 };
 
 /** RpPngPrivate **/
@@ -179,7 +159,7 @@ class RpPngPrivate
  * @param data		[out] Buffer for the data to read.
  * @param length	[in]  Size of data.
  */
-void RpPngPrivate::png_io_IRpFile_read(png_structp png_ptr, png_bytep data, png_size_t length)
+void PNGCAPI RpPngPrivate::png_io_IRpFile_read(png_structp png_ptr, png_bytep data, png_size_t length)
 {
 	// Assuming io_ptr is an IRpFile*.
 	IRpFile *file = static_cast<IRpFile*>(png_get_io_ptr(png_ptr));
@@ -205,7 +185,7 @@ void RpPngPrivate::png_io_IRpFile_read(png_structp png_ptr, png_bytep data, png_
  * @param data		[in] Data to write.
  * @param length	[in] Size of data.
  */
-void RpPngPrivate::png_io_IRpFile_write(png_structp png_ptr, png_bytep data, png_size_t length)
+void PNGCAPI RpPngPrivate::png_io_IRpFile_write(png_structp png_ptr, png_bytep data, png_size_t length)
 {
 	// Assuming io_ptr is an IRpFile*.
 	IRpFile *file = static_cast<IRpFile*>(png_get_io_ptr(png_ptr));
@@ -221,7 +201,7 @@ void RpPngPrivate::png_io_IRpFile_write(png_structp png_ptr, png_bytep data, png
  * libpng I/O flush handler for IRpFile.
  * @param png_ptr	[in] PNG pointer.
  */
-void RpPngPrivate::png_io_IRpFile_flush(png_structp png_ptr)
+void PNGCAPI RpPngPrivate::png_io_IRpFile_flush(png_structp png_ptr)
 {
 	// Assuming io_ptr is an IRpFile*.
 	IRpFile *file = static_cast<IRpFile*>(png_get_io_ptr(png_ptr));
@@ -253,9 +233,12 @@ void RpPngPrivate::Read_CI8_Palette(png_structp png_ptr, png_infop info_ptr,
 
 	// rp_image's palette data.
 	// ARGB32: AAAAAAAA RRRRRRRR GGGGGGGG BBBBBBBB
+	const int palette_len = img->palette_len();
 	uint32_t *img_palette = img->palette();
+	assert(palette_len > 0);
+	assert(palette_len <= 256);
 	assert(img_palette != nullptr);
-	if (!img_palette)
+	if (!img_palette || palette_len <= 0 || palette_len > 256)
 		return;
 
 	switch (color_type) {
@@ -271,62 +254,50 @@ void RpPngPrivate::Read_CI8_Palette(png_structp png_ptr, png_infop info_ptr,
 			}
 
 			// Combine the 24-bit RGB palette with the transparency information.
-			for (int i = std::min(num_palette, img->palette_len());
-				i > 0; i--, img_palette++, png_palette++)
+			for (int i = std::min(num_palette, palette_len);
+			     i > 0; i--, img_palette++, png_palette++)
 			{
-				uint32_t color = (png_palette->blue << 0) |
-							(png_palette->green << 8) |
-							(png_palette->red << 16);
+				argb32_t color;
+				color.r = png_palette->red;
+				color.g = png_palette->green;
+				color.b = png_palette->blue;
 				if (trans && num_trans > 0) {
 					// Copy the transparency information.
-					color |= (*trans << 24);
+					color.a = *trans;
 					num_trans--;
 				} else {
 					// No transparency information.
 					// Assume the color is opaque.
-					color |= 0xFF000000;
+					color.a = 0xFF;
 				}
 
-				*img_palette = color;
+				*img_palette = color.u32;
 			}
 
-			if (num_palette < img->palette_len()) {
+			if (num_palette < palette_len) {
 				// Clear the rest of the palette.
 				// (NOTE: 0 == fully transparent.)
-				for (int i = img->palette_len()-num_palette;
-				i > 0; i--, img_palette++)
-				{
-					*img_palette = 0;
-				}
+				memset(img_palette, 0, (palette_len - num_palette) * sizeof(uint32_t));
 			}
 			break;
 
-		case PNG_COLOR_TYPE_GRAY:
+		case PNG_COLOR_TYPE_GRAY: {
 			// Create a default grayscale palette.
 			// NOTE: If the palette isn't 256 entries long,
 			// the grayscale values will be incorrect.
 			// TODO: Handle the tRNS chunk?
-			for (int i = 0; i < std::min(256, img->palette_len());
-				i++, img_palette++)
+			uint32_t gray = 0xFF000000;
+			for (int i = 0; i < std::min(256, palette_len);
+			     i++, img_palette++, gray += 0x010101)
 			{
-				uint8_t gray = (uint8_t)i;
-				*img_palette = (gray | gray << 8 | gray << 16);
 				// TODO: tRNS chunk handling.
-				*img_palette |= 0xFF000000;
-			}
-
-			if (img->palette_len() > 256) {
-				// Clear the rest of the palette.
-				// (NOTE: 0 == fully transparent.)
-				for (int i = img->palette_len()-256; i > 0;
-					i--, img_palette++)
-				{
-					*img_palette = 0;
-				}
+				*img_palette = gray;
 			}
 			break;
+		}
 
 		default:
+			assert(!"Unsupported CI8 palette type.");
 			break;
 	}
 }
@@ -340,8 +311,13 @@ void RpPngPrivate::Read_CI8_Palette(png_structp png_ptr, png_infop info_ptr,
 rp_image *RpPngPrivate::loadPng(png_structp png_ptr, png_infop info_ptr)
 {
 	// Row pointers. (NOTE: Allocated after IHDR is read.)
-	png_byte **row_pointers = nullptr;
+	const png_byte **row_pointers = nullptr;
 	rp_image *img = nullptr;
+
+#ifdef PNG_sBIT_SUPPORTED
+	bool has_sBIT = false;
+	png_color_8p png_sBIT = nullptr;
+#endif /* PNG_sBIT_SUPPORTED */
 
 #ifdef PNG_SETJMP_SUPPORTED
 	// WARNING: Do NOT initialize any C++ objects past this point!
@@ -366,10 +342,23 @@ rp_image *RpPngPrivate::loadPng(png_structp png_ptr, png_infop info_ptr)
 	png_uint_32 width, height;
 	png_get_IHDR(png_ptr, info_ptr, &width, &height,
 		&bit_depth, &color_type, nullptr, nullptr, nullptr);
-	if (width <= 0 || height <= 0) {
-		// Invalid image size.
+	// Sanity check: Don't allow images larger than 32768x32768.
+	assert(width > 0);
+	assert(height > 0);
+	assert(width <= 32768);
+	assert(height <= 32768);
+	if (width <= 0 || height <= 0 ||
+	    width > 32768 || height > 32768)
+	{
+		// Image size is either invalid or too big.
 		return nullptr;
 	}
+
+#ifdef PNG_sBIT_SUPPORTED
+	// Read the sBIT chunk.
+	// TODO: Fake sBIT if the PNG doesn't have one?
+	has_sBIT = (png_get_sBIT(png_ptr, info_ptr, &png_sBIT) == PNG_INFO_sBIT);
+#endif /* PNG_sBIT_SUPPORTED */
 
 	// Check the color type.
 	bool is24bit = false;
@@ -386,6 +375,7 @@ rp_image *RpPngPrivate::loadPng(png_structp png_ptr, png_infop info_ptr)
 			break;
 		case PNG_COLOR_TYPE_GRAY_ALPHA:
 			// Grayscale+Alpha is handled as ARGB32.
+			// QImage, gdk-pixbuf, cairo, and GDI+ don't support IA8.
 			// TODO: Does this work with 1, 2, and 4-bit grayscale?
 			fmt = rp_image::FORMAT_ARGB32;
 			png_set_gray_to_rgb(png_ptr);
@@ -439,20 +429,32 @@ rp_image *RpPngPrivate::loadPng(png_structp png_ptr, png_infop info_ptr)
 	// Update the PNG info.
 	png_read_update_info(png_ptr, info_ptr);
 
+	// Create the rp_image.
+
+	// Initialize the row pointers array.
+	img = new rp_image(width, height, fmt);
+	if (!img->isValid()) {
+		// Could not allocate the image.
+		delete img;
+		return nullptr;
+	}
+
 	// Allocate the row pointers.
-	row_pointers = (png_byte**)png_malloc(png_ptr, sizeof(png_byte*) * height);
+	row_pointers = (const png_byte**)png_malloc(png_ptr, sizeof(const png_byte*) * height);
 	if (!row_pointers) {
+		delete img;
 		return nullptr;
 	}
 
 	// Initialize the row pointers array.
-	img = new rp_image(width, height, fmt);
-	for (int y = height-1; y >= 0; y--) {
-		row_pointers[y] = static_cast<png_byte*>(img->scanLine(y));
+	const png_byte *pb = static_cast<const png_byte*>(img->bits());
+	const int stride = img->stride();
+	for (png_uint_32 y = 0; y < height; y++, pb += stride) {
+		row_pointers[y] = pb;
 	}
 
 	// Read the image.
-	png_read_image(png_ptr, row_pointers);
+	png_read_image(png_ptr, const_cast<png_byte**>(row_pointers));
 	png_free(png_ptr, row_pointers);
 
 	// If CI8, read the palette.
@@ -460,244 +462,16 @@ rp_image *RpPngPrivate::loadPng(png_structp png_ptr, png_infop info_ptr)
 		Read_CI8_Palette(png_ptr, info_ptr, color_type, img);
 	}
 
+#ifdef PNG_sBIT_SUPPORTED
+	// Set the sBIT metadata.
+	if (has_sBIT && png_sBIT) {
+		// NOTE: rp_image::sBIT_t has the same format as png_color_8.
+		img->set_sBIT(reinterpret_cast<rp_image::sBIT_t*>(png_sBIT));
+	}
+#endif /* PNG_sBIT_SUPPORTED */
+
 	// Done reading the PNG image.
 	return img;
-}
-
-/** Write functions. **/
-
-/**
- * Write the palette from a CI8 image.
- * @param png_ptr png_structp
- * @param info_ptr png_infop
- * @param img rp_image containing the palette.
- * @return 0 on success; negative POSIX error code on error.
- */
-int RpPngPrivate::Write_CI8_Palette(png_structp png_ptr, png_infop info_ptr, const rp_image *img)
-{
-	const int num_entries = img->palette_len();
-	if (num_entries < 0 || num_entries > 256)
-		return -EINVAL;
-
-	// Maximum size.
-	png_color png_pal[256];
-	uint8_t png_tRNS[256];
-	bool has_tRNS = false;
-
-	// Convert the palette.
-	const uint32_t *const palette = img->palette();
-	for (int i = 0; i < num_entries; i++) {
-		png_pal[i].blue  = ( palette[i]        & 0xFF);
-		png_pal[i].green = ((palette[i] >> 8)  & 0xFF);
-		png_pal[i].red   = ((palette[i] >> 16) & 0xFF);
-		png_tRNS[i]      = ((palette[i] >> 24) & 0xFF);
-		has_tRNS |= (png_tRNS[i] != 0xFF);
-	}
-
-	// Write the PLTE and tRNS chunks.
-	png_set_PLTE(png_ptr, info_ptr, png_pal, num_entries);
-	if (has_tRNS) {
-		// Palette has transparency.
-		// Write the tRNS chunk.
-		png_set_tRNS(png_ptr, info_ptr, png_tRNS, num_entries, nullptr);
-	}
-
-	return 0;
-}
-
-/**
- * Write a PNG image to an opened PNG handle.
- * @param png_ptr png_structp
- * @param info_ptr png_infop
- * @param img rp_image
- * @return 0 on success; negative POSIX error code on error.
- */
-int RpPngPrivate::savePng(png_structp png_ptr, png_infop info_ptr, const rp_image *img)
-{
-	// Row pointers. (NOTE: Allocated after IHDR is written.)
-	const png_byte **row_pointers = nullptr;
-
-#ifdef PNG_SETJMP_SUPPORTED
-	// WARNING: Do NOT initialize any C++ objects past this point!
-	if (setjmp(png_jmpbuf(png_ptr))) {
-		// PNG read failed.
-		png_free(png_ptr, row_pointers);
-		return -EIO;
-	}
-#endif
-
-	// Initialize compression parameters.
-	png_set_filter(png_ptr, 0, PNG_FILTER_NONE);
-	png_set_compression_level(png_ptr, 5);	// TODO: Customizable?
-
-	const int width = img->width();
-	const int height = img->height();
-
-	// Write the PNG header.
-	switch (img->format()) {
-		case rp_image::FORMAT_ARGB32:
-			png_set_IHDR(png_ptr, info_ptr, width, height,
-					8, PNG_COLOR_TYPE_RGB_ALPHA,
-					PNG_INTERLACE_NONE,
-					PNG_COMPRESSION_TYPE_DEFAULT,
-					PNG_FILTER_TYPE_DEFAULT);
-			break;
-
-		case rp_image::FORMAT_CI8:
-			png_set_IHDR(png_ptr, info_ptr, width, height,
-					8, PNG_COLOR_TYPE_PALETTE,
-					PNG_INTERLACE_NONE,
-					PNG_COMPRESSION_TYPE_DEFAULT,
-					PNG_FILTER_TYPE_DEFAULT);
-
-			// Write the palette and tRNS values.
-			Write_CI8_Palette(png_ptr, info_ptr, img);
-			break;
-
-		default:
-			// Unsupported pixel format.
-			assert(!"Unsupported rp_image::Format.");
-			return -EINVAL;
-	}
-
-	// Write the PNG information to the file.
-	png_write_info(png_ptr, info_ptr);
-
-	// TODO: Byteswap image data on big-endian systems?
-	//ppng_set_swap(png_ptr);
-	// TODO: What format on big-endian?
-	png_set_bgr(png_ptr);
-
-	// Allocate the row pointers.
-	row_pointers = (const png_byte**)png_malloc(png_ptr, sizeof(const png_byte*) * height);
-	if (!row_pointers) {
-		return -ENOMEM;
-	}
-
-	// Initialize the row pointers array.
-	for (int y = height-1; y >= 0; y--) {
-		row_pointers[y] = static_cast<const png_byte*>(img->scanLine(y));
-	}
-
-	// Write the image data.
-	png_write_image(png_ptr, (png_bytepp)row_pointers);
-	png_free(png_ptr, row_pointers);
-
-	// Finished writing.
-	png_write_end(png_ptr, info_ptr);
-	return 0;
-}
-
-/**
- * Write an APNG image to an opened APNG handle.
- * @param png_ptr png_structp
- * @param info_ptr png_infop
- * @param iconAnimData IconAnimData
- * @return 0 on success; negative POSIX error code on error.
- */
-int RpPngPrivate::saveAPng(png_structp png_ptr, png_infop info_ptr, const IconAnimData *iconAnimData)
-{
-	// Row pointers. (NOTE: Allocated after IHDR is written.)
-	const png_byte **row_pointers = nullptr;
-
-#ifdef PNG_SETJMP_SUPPORTED
-	// WARNING: Do NOT initialize any C++ objects past this point!
-	if (setjmp(png_jmpbuf(png_ptr))) {
-		// PNG read failed.
-		png_free(png_ptr, row_pointers);
-		return -EIO;
-	}
-#endif
-
-	// Initialize compression parameters.
-	png_set_filter(png_ptr, 0, PNG_FILTER_NONE);
-	png_set_compression_level(png_ptr, 5);	// TODO: Customizable?
-
-	// Get the first image.
-	// TODO: Handle animated images where the different frames
-	// have different widths, heights, and/or formats.
-	const rp_image *img0 = iconAnimData->frames[iconAnimData->seq_index[0]];
-
-	const int width = img0->width();
-	const int height = img0->height();
-	const rp_image::Format format = img0->format();
-
-	// Write the PNG header.
-	switch (format) {
-		case rp_image::FORMAT_ARGB32:
-			png_set_IHDR(png_ptr, info_ptr, width, height,
-					8, PNG_COLOR_TYPE_RGB_ALPHA,
-					PNG_INTERLACE_NONE,
-					PNG_COMPRESSION_TYPE_DEFAULT,
-					PNG_FILTER_TYPE_DEFAULT);
-			break;
-
-		case rp_image::FORMAT_CI8:
-			png_set_IHDR(png_ptr, info_ptr, width, height,
-					8, PNG_COLOR_TYPE_PALETTE,
-					PNG_INTERLACE_NONE,
-					PNG_COMPRESSION_TYPE_DEFAULT,
-					PNG_FILTER_TYPE_DEFAULT);
-
-			// Write the palette and tRNS values.
-			// FIXME: Individual palette per frame?
-			Write_CI8_Palette(png_ptr, info_ptr, img0);
-			break;
-
-		default:
-			// Unsupported pixel format.
-			assert(!"Unsupported rp_image::Format.");
-			return -EINVAL;
-	}
-
-	// Write an acTL to indicate that this is an APNG.
-	png_set_acTL(png_ptr, info_ptr, iconAnimData->seq_count, 0);
-
-	// Write the PNG information to the file.
-	png_write_info(png_ptr, info_ptr);
-
-	// TODO: Byteswap image data on big-endian systems?
-	//ppng_set_swap(png_ptr);
-	// TODO: What format on big-endian?
-	png_set_bgr(png_ptr);
-
-	// Allocate the row pointers.
-	row_pointers = (const png_byte**)png_malloc(png_ptr, sizeof(const png_byte*) * height);
-	if (!row_pointers) {
-		return -ENOMEM;
-	}
-
-	for (int i = 0; i < iconAnimData->seq_count; i++) {
-		const rp_image *img = iconAnimData->frames[iconAnimData->seq_index[i]];
-		if (!img)
-			break;
-
-		// Initialize the row pointers array.
-		for (int y = height-1; y >= 0; y--) {
-			row_pointers[y] = static_cast<const png_byte*>(img->scanLine(y));
-		}
-
-		// Frame header.
-		png_write_frame_head(png_ptr, info_ptr, (png_bytepp)row_pointers,
-				width, height, 0, 0,		// width, height, x offset, y offset
-				iconAnimData->delays[i].numer,
-				iconAnimData->delays[i].denom,
-				PNG_DISPOSE_OP_NONE,
-				PNG_BLEND_OP_SOURCE);
-
-		// Write the image data.
-		// TODO: Individual palette for CI8?
-		png_write_image(png_ptr, (png_bytepp)row_pointers);
-
-		// Frame tail.
-		png_write_frame_tail(png_ptr, info_ptr);
-	}
-
-	png_free(png_ptr, row_pointers);
-
-	// Finished writing.
-	png_write_end(png_ptr, info_ptr);
-	return 0;
 }
 
 /** RpPng **/
@@ -792,54 +566,23 @@ rp_image *RpPng::load(IRpFile *file)
  */
 int RpPng::save(IRpFile *file, const rp_image *img)
 {
-	if (!file || !img)
+	assert(file != nullptr);
+	assert(img != nullptr);
+	if (!file || !file->isOpen() || !img)
 		return -EINVAL;
 
-#if defined(_MSC_VER) && (defined(ZLIB_IS_DLL) || defined(PNG_IS_DLL))
-	// Delay load verification.
-	// TODO: Only if linked with /DELAYLOAD?
-	if (DelayLoad_test_zlib_and_png() != 0) {
-		// Delay load failed.
-		return -ENOTSUP;
-	}
-#endif /* defined(_MSC_VER) && (defined(ZLIB_IS_DLL) || defined(PNG_IS_DLL)) */
+	// Create a PNG writer.
+	unique_ptr<RpPngWriter> pngWriter(new RpPngWriter(file, img));
+	if (!pngWriter->isOpen())
+		return -pngWriter->lastError();
 
-	// Truncate the file initially.
-	int ret = file->truncate(0);
-	if (ret != 0) {
-		// Cannot truncate the file for some reason.
+	// Write the PNG IHDR.
+	int ret = pngWriter->write_IHDR();
+	if (ret != 0)
 		return ret;
-	}
 
-	// Truncation should automatically rewind,
-	// but let's do it anyway.
-	file->rewind();
-
-	png_structp png_ptr;
-	png_infop info_ptr;
-
-	// Initialize libpng.
-	png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
-	if (!png_ptr) {
-		return -ENOMEM;
-	}
-	info_ptr = png_create_info_struct(png_ptr);
-	if (!info_ptr) {
-		png_destroy_write_struct(&png_ptr, nullptr);
-		return -ENOMEM;
-	}
-
-	// Initialize the custom I/O handler for IRpFile.
-	png_set_write_fn(png_ptr, file,
-		RpPngPrivate::png_io_IRpFile_write,
-		RpPngPrivate::png_io_IRpFile_flush);
-
-	// Call the actual PNG image writing function.
-	ret = RpPngPrivate::savePng(png_ptr, info_ptr, img);
-
-	// Free the PNG structs.
-	png_destroy_write_struct(&png_ptr, &info_ptr);
-	return ret;
+	// Write the PNG image data.
+	return pngWriter->write_IDAT();
 }
 
 /**
@@ -849,36 +592,26 @@ int RpPng::save(IRpFile *file, const rp_image *img)
  * @param img rp_image to save.
  * @return 0 on success; negative POSIX error code on error.
  */
-int RpPng::save(const rp_char *filename, const rp_image *img)
+int RpPng::save(const char *filename, const rp_image *img)
 {
+	assert(filename != nullptr);
+	assert(filename[0] != 0);
+	assert(img != nullptr);
 	if (!filename || filename[0] == 0 || !img)
 		return -EINVAL;
 
-#if defined(_MSC_VER) && (defined(ZLIB_IS_DLL) || defined(PNG_IS_DLL))
-	// Delay load verification.
-	// TODO: Only if linked with /DELAYLOAD?
-	if (DelayLoad_test_zlib_and_png() != 0) {
-		// Delay load failed.
-		return -ENOTSUP;
-	}
-#endif /* defined(_MSC_VER) && (defined(ZLIB_IS_DLL) || defined(PNG_IS_DLL)) */
+	// Create a PNG writer.
+	unique_ptr<RpPngWriter> pngWriter(new RpPngWriter(filename, img));
+	if (!pngWriter->isOpen())
+		return -pngWriter->lastError();
 
-	unique_ptr<RpFile> file(new RpFile(filename, RpFile::FM_CREATE_WRITE));
-	if (!file->isOpen()) {
-		// Error opening the file.
-		int err = file->lastError();
-		if (err == 0)
-			err = EIO;
-		return -err;
-	}
+	// Write the PNG IHDR.
+	int ret = pngWriter->write_IHDR();
+	if (ret != 0)
+		return ret;
 
-	int ret = save(file.get(), img);
-	if (ret != 0) {
-		// PNG write failed. Remove the file.
-		file.reset();
-		FileSystem::delete_file(filename);
-	}
-	return ret;
+	// Write the PNG image data.
+	return pngWriter->write_IDAT();
 }
 
 /**
@@ -902,65 +635,23 @@ int RpPng::save(const rp_char *filename, const rp_image *img)
  */
 int RpPng::save(IRpFile *file, const IconAnimData *iconAnimData)
 {
-	if (!file || !iconAnimData)
+	assert(file != nullptr);
+	assert(iconAnimData != nullptr);
+	if (!file || !file->isOpen() || !iconAnimData)
 		return -EINVAL;
 
-	if (iconAnimData->seq_count <= 0) {
-		// Nothing to save...
-		return -EINVAL;
-	}
+	// Create a PNG writer.
+	unique_ptr<RpPngWriter> pngWriter(new RpPngWriter(file, iconAnimData));
+	if (!pngWriter->isOpen())
+		return -pngWriter->lastError();
 
-	// If we have a single image, save it as a regular PNG.
-	if (iconAnimData->seq_count == 1) {
-		// Single image.
-		return save(file, iconAnimData->frames[iconAnimData->seq_index[0]]);
-	}
-
-#if defined(_MSC_VER) && (defined(ZLIB_IS_DLL) || defined(PNG_IS_DLL))
-	// Delay load verification.
-	// TODO: Only if linked with /DELAYLOAD?
-	if (DelayLoad_test_zlib_and_png() != 0) {
-		// Delay load failed.
-		return -ENOTSUP;
-	}
-#endif /* defined(_MSC_VER) && (defined(ZLIB_IS_DLL) || defined(PNG_IS_DLL)) */
-
-	// Truncate the file initially.
-	int ret = file->truncate(0);
-	if (ret != 0) {
-		// Cannot truncate the file for some reason.
+	// Write the PNG IHDR.
+	int ret = pngWriter->write_IHDR();
+	if (ret != 0)
 		return ret;
-	}
 
-	// Truncation should automatically rewind,
-	// but let's do it anyway.
-	file->rewind();
-
-	png_structp png_ptr;
-	png_infop info_ptr;
-
-	// Initialize libpng.
-	png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
-	if (!png_ptr) {
-		return -ENOMEM;
-	}
-	info_ptr = png_create_info_struct(png_ptr);
-	if (!info_ptr) {
-		png_destroy_write_struct(&png_ptr, nullptr);
-		return -ENOMEM;
-	}
-
-	// Initialize the custom I/O handler for IRpFile.
-	png_set_write_fn(png_ptr, file,
-		RpPngPrivate::png_io_IRpFile_write,
-		RpPngPrivate::png_io_IRpFile_flush);
-
-	// Call the actual PNG image writing function.
-	ret = RpPngPrivate::saveAPng(png_ptr, info_ptr, iconAnimData);
-
-	// Free the PNG structs.
-	png_destroy_write_struct(&png_ptr, &info_ptr);
-	return ret;
+	// Write the PNG image data.
+	return pngWriter->write_IDAT();
 }
 
 /**
@@ -979,56 +670,26 @@ int RpPng::save(IRpFile *file, const IconAnimData *iconAnimData)
  * @param iconAnimData Animated image data to save.
  * @return 0 on success; negative POSIX error code on error.
  */
-int RpPng::save(const rp_char *filename, const IconAnimData *iconAnimData)
+int RpPng::save(const char *filename, const IconAnimData *iconAnimData)
 {
+	assert(filename != nullptr);
+	assert(filename[0] != 0);
+	assert(iconAnimData != nullptr);
 	if (!filename || filename[0] == 0 || !iconAnimData)
 		return -EINVAL;
 
-	if (iconAnimData->seq_count <= 0) {
-		// Nothing to save...
-		return -EINVAL;
-	}
+	// Create a PNG writer.
+	unique_ptr<RpPngWriter> pngWriter(new RpPngWriter(filename, iconAnimData));
+	if (!pngWriter->isOpen())
+		return -pngWriter->lastError();
 
-	// If we have a single image, save it as a regular PNG.
-	if (iconAnimData->seq_count == 1) {
-		// Single image.
-		return save(filename, iconAnimData->frames[iconAnimData->seq_index[0]]);
-	}
+	// Write the PNG IHDR.
+	int ret = pngWriter->write_IHDR();
+	if (ret != 0)
+		return ret;
 
-#if defined(_MSC_VER) && (defined(ZLIB_IS_DLL) || defined(PNG_IS_DLL))
-	// Delay load verification.
-	// TODO: Only if linked with /DELAYLOAD?
-	if (DelayLoad_test_zlib_and_png() != 0) {
-		// Delay load failed.
-		return -ENOTSUP;
-	}
-#endif /* defined(_MSC_VER) && (defined(ZLIB_IS_DLL) || defined(PNG_IS_DLL)) */
-
-	// Load APNG.
-	int apng_ret = APNG_ref();
-	if (apng_ret != 0) {
-		// Error loading APNG.
-		return -ENOTSUP;
-	}
-
-	unique_ptr<RpFile> file(new RpFile(filename, RpFile::FM_CREATE_WRITE));
-	if (!file->isOpen()) {
-		// Error opening the file.
-		int err = file->lastError();
-		if (err == 0)
-			err = EIO;
-		return -err;
-	}
-
-	int ret = save(file.get(), iconAnimData);
-	if (ret != 0) {
-		// PNG write failed. Remove the file.
-		file.reset();
-		FileSystem::delete_file(filename);
-	}
-
-	APNG_unref();
-	return ret;
+	// Write the PNG image data.
+	return pngWriter->write_IDAT();
 }
 
 }

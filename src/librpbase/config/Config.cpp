@@ -40,9 +40,6 @@ using std::unordered_map;
 
 #include "RomData.hpp"
 
-// Text conversion functions and macros.
-#include "TextFuncs.hpp"
-
 // Uninitialized vector class.
 // Reference: http://andreoffringa.org/?q=uvector
 #include "uvector.h"
@@ -127,13 +124,14 @@ const uint8_t ConfigPrivate::defImgTypePrio[] = {
 	RomData::IMG_EXT_MEDIA,
 	RomData::IMG_EXT_COVER,
 	RomData::IMG_EXT_BOX,
+	RomData::IMG_INT_IMAGE,
 	RomData::IMG_INT_MEDIA,
 	RomData::IMG_INT_ICON,
 	RomData::IMG_INT_BANNER,
 };
 
 ConfigPrivate::ConfigPrivate()
-	: super(_RP("rom-properties.conf"))
+	: super("rom-properties.conf")
 	/* Download options */
 	, extImgDownloadEnabled(true)
 	, useIntIconForSmallSizes(true)
@@ -177,9 +175,6 @@ int ConfigPrivate::processConfigLine(const char *section, const char *name, cons
 {
 	// NOTE: Invalid lines are ignored, so we're always returning 1.
 
-	// TODO: Load image type priorities.
-	// For now, only loading the "Download" options.
-
 	// Verify that the parameters are valid.
 	if (!section || section[0] == 0 ||
 	    !name || name[0] == 0 ||
@@ -217,8 +212,19 @@ int ConfigPrivate::processConfigLine(const char *section, const char *name, cons
 		// NOTE: Duplicates will overwrite previous entries in the map,
 		// though all of the data will remain in the vector.
 
-		// Parse the comma-separated values.
+		// inih automatically trims spaces from the
+		// start and end of the string.
+
+		// If the first character is '"', ignore it.
+		// Needed because QSettings encloses strings in
+		// double-quotes if they contain commas.
+		// (Unquoted strings represent QStringList.)
 		const char *pos = value;
+		if (*pos == '"') {
+			pos++;
+		}
+
+		// Parse the comma-separated values.
 		const unsigned int vStartPos = (unsigned int)vImgTypePrio.size();
 		unsigned int count = 0;	// Number of image types.
 		uint32_t imgbf = 0;	// Image type bitfield to prevent duplicates.
@@ -233,7 +239,7 @@ int ConfigPrivate::processConfigLine(const char *section, const char *name, cons
 
 			// If no comma was found, read the remainder of the field.
 			// Otherwise, read from pos to comma-1.
-			const unsigned int len = (comma ? (unsigned int)(comma-pos) : (unsigned int)strlen(pos));
+			unsigned int len = (comma ? (unsigned int)(comma-pos) : (unsigned int)strlen(pos));
 
 			// If the first entry is "no", then all thumbnails
 			// for this system are disabled.
@@ -244,6 +250,33 @@ int ConfigPrivate::processConfigLine(const char *section, const char *name, cons
 				break;
 			}
 
+			// If the last character is '"', ignore it.
+			// Needed because QSettings encloses strings in
+			// double-quotes if they contain commas.
+			// (Unquoted strings represent QStringList.)
+			if (!comma && pos[len-1] == '"') {
+				len--;
+			}
+
+			// Check for spaces at the start of the string.
+			while (isspace(*pos) && len > 0) {
+				pos++;
+				len--;
+			}
+			// Check for spaces at the end of the string.
+			while (len > 0 && isspace(pos[len-1])) {
+				len--;
+			}
+
+			if (len == 0) {
+				// Empty string.
+				if (!comma)
+					break;
+				// Continue after the comma.
+				pos = comma + 1;
+				continue;
+			}
+
 			// Check the image type.
 			// TODO: Hash comparison?
 			// First byte of 'name' is a length value for optimization purposes.
@@ -251,10 +284,11 @@ int ConfigPrivate::processConfigLine(const char *section, const char *name, cons
 			// MSVC 2015 and gcc-4.5.2. In order to get it to work correctly,
 			// we have to store the length byte separately from the actual
 			// image type name.
-			static const char *const imageTypeNames[RomData::IMG_EXT_MAX+1] = {
+			static const char *const imageTypeNames[] = {
 				"\x07" "IntIcon",
 				"\x09" "IntBanner",
 				"\x08" "IntMedia",
+				"\x08" "IntImage",
 				"\x08" "ExtMedia",
 				"\x08" "ExtCover",
 				"\x0A" "ExtCover3D",

@@ -14,23 +14,51 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
  * GNU General Public License for more details.                            *
  *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * You should have received a copy of the GNU General Public License       *
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.   *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBRPBASE_RP_IMAGE_HPP__
 #define __ROMPROPERTIES_LIBRPBASE_RP_IMAGE_HPP__
 
 #include "librpbase/config.librpbase.h"
-#include "librpbase/common.h"
+#include "../common.h"
+#include "../byteorder.h"
+#include "cpu_dispatch.h"
 
 // C includes.
 #include <stdint.h>
 
+#if defined(RP_CPU_I386) || defined(RP_CPU_AMD64)
+# include "librpbase/cpuflags_x86.h"
+# define RP_IMAGE_HAS_SSE2 1
+#endif
+#ifdef RP_CPU_AMD64
+# define RP_IMAGE_ALWAYS_HAS_SSE2 1
+#endif
+
 // TODO: Make this implicitly shared.
 
 namespace LibRpBase {
+
+// ARGB32 value with byte accessors.
+union argb32_t {
+	struct {
+#if SYS_BYTEORDER == SYS_LIL_ENDIAN
+		uint8_t b;
+		uint8_t g;
+		uint8_t r;
+		uint8_t a;
+#else /* SYS_BYTEORDER == SYS_BIG_ENDIAN */
+		uint8_t a;
+		uint8_t r;
+		uint8_t g;
+		uint8_t b;
+#endif
+	};
+	uint32_t u32;
+};
+ASSERT_STRUCT(argb32_t, 4);
 
 class rp_image_backend;
 
@@ -129,10 +157,18 @@ class rp_image
 		bool isSquare(void) const;
 
 		/**
-		 * Get the number of bytes per line.
+		 * Get the total number of bytes per line.
+		 * This includes memory alignment padding.
 		 * @return Bytes per line.
 		 */
 		int stride(void) const;
+
+		/**
+		 * Get the number of active bytes per line.
+		 * This does not include memory alignment padding.
+		 * @return Number of active bytes per line.
+		 */
+		int row_bytes(void) const;
 
 		/**
 		 * Get the image format.
@@ -170,7 +206,7 @@ class rp_image
 
 		/**
 		 * Get the image data size, in bytes.
-		 * This is width * height * pixel size.
+		 * This is height * stride.
 		 * @return Image data size, in bytes.
 		 */
 		size_t data_len(void) const;
@@ -214,7 +250,38 @@ class rp_image
 		 * @param format Format.
 		 * @return String containing the user-friendly name of a format.
 		 */
-		static const rp_char *getFormatName(Format format);
+		static const char *getFormatName(Format format);
+
+	public:
+		/** Metadata. **/
+
+		// sBIT struct.
+		// This matches libpng's.
+		struct sBIT_t {
+			uint8_t red;
+			uint8_t green;
+			uint8_t blue;
+			uint8_t gray;
+			uint8_t alpha;	// Set to 0 to write an RGB image in RpPngWriter.
+		};
+
+		/**
+		 * Set the number of significant bits per channel.
+		 * @param sBIT	[in] sBIT_t struct.
+		 */
+		void set_sBIT(const sBIT_t *sBIT);
+
+		/**
+		 * Get the number of significant bits per channel.
+		 * @param sBIT	[out] sBIT_t struct.
+		 * @return 0 on success; non-zero if not set or error.
+		 */
+		int get_sBIT(sBIT_t *sBIT) const;
+
+		/**
+		 * Clear the sBIT data.
+		 */
+		void clear_sBIT(void);
 
 	public:
 		/** Image operations. **/
@@ -226,16 +293,116 @@ class rp_image
 		rp_image *dup(void) const;
 
 		/**
+		 * Duplicate the rp_image, converting to ARGB32 if necessary.
+		 * @return New ARGB32 rp_image with a copy of the image data.
+		 */
+		rp_image *dup_ARGB32(void) const;
+
+		/**
 		 * Square the rp_image.
 		 *
 		 * If the width and height don't match, transparent rows
 		 * and/or columns will be added to "square" the image.
 		 * Otherwise, this is the same as dup().
 		 *
-		 * @return New rp_image with a squared version of the original.
+		 * @return New rp_image with a squared version of the original, or nullptr on error.
 		 */
 		rp_image *squared(void) const;
+
+		/**
+		 * Resize the rp_image.
+		 *
+		 * A new rp_image will be created with the specified dimensions,
+		 * and the current image will be copied into the new image.
+		 * If the new dimensions are smaller than the old dimensions,
+		 * the image will be cropped. If the new dimensions are larger,
+		 * the original image will be in the upper-left corner and the
+		 * new space will be empty. (ARGB: 0x00000000)
+		 *
+		 * @param width New width.
+		 * @param height New height.
+		 * @return New rp_image with a resized version of the original, or nullptr on error.
+		 */
+		rp_image *resized(int width, int height) const;
+
+		/**
+		 * Un-premultiply this image.
+		 * Image must be ARGB32.
+		 * @return 0 on success; non-zero on error.
+		 */
+		int un_premultiply(void);
+
+		/**
+		 * Convert a chroma-keyed image to standard ARGB32.
+		 * Standard version using regular C++ code.
+		 *
+		 * This operates on the image itself, and does not return
+		 * a duplicated image with the adjusted image.
+		 *
+		 * NOTE: The image *must* be ARGB32.
+		 *
+		 * @param key Chroma key color.
+		 * @return 0 on success; negative POSIX error code on error.
+		 */
+		int apply_chroma_key_cpp(uint32_t key);
+
+#ifdef RP_IMAGE_HAS_SSE2
+		/**
+		 * Convert a chroma-keyed image to standard ARGB32.
+		 * SSE2-optimized version.
+		 *
+		 * This operates on the image itself, and does not return
+		 * a duplicated image with the adjusted image.
+		 *
+		 * NOTE: The image *must* be ARGB32.
+		 *
+		 * @param key Chroma key color.
+		 * @return 0 on success; negative POSIX error code on error.
+		 */
+		int apply_chroma_key_sse2(uint32_t key);
+#endif /* RP_IMAGE_HAS_SSE2 */
+
+		/**
+		 * Convert a chroma-keyed image to standard ARGB32.
+		 *
+		 * This operates on the image itself, and does not return
+		 * a duplicated image with the adjusted image.
+		 *
+		 * NOTE: The image *must* be ARGB32.
+		 *
+		 * @param key Chroma key color.
+		 * @return 0 on success; negative POSIX error code on error.
+		 */
+		int apply_chroma_key(uint32_t key);
 };
+
+/**
+ * Convert a chroma-keyed image to standard ARGB32.
+ *
+ * This operates on the image itself, and does not return
+ * a duplicated image with the adjusted image.
+ *
+ * NOTE: The image *must* be ARGB32.
+ *
+ * @param key Chroma key color.
+ * @return 0 on success; negative POSIX error code on error.
+ */
+inline int rp_image::apply_chroma_key(uint32_t key)
+{
+#ifdef RP_IMAGE_ALWAYS_HAS_SSE2
+	// amd64 always has SSE2.
+	return apply_chroma_key_sse2(key);
+#else /* !RP_IMAGE_ALWAYS_HAS_SSE2 */
+# ifdef RP_IMAGE_HAS_SSE2
+	if (RP_CPU_HasSSE2()) {
+		return apply_chroma_key_sse2(key);
+	} else
+# endif /* RP_IMAGE_HAS_SSE2 */
+	{
+		return apply_chroma_key_cpp(key);
+	}
+#endif /* RP_IMAGE_ALWAYS_HAS_SSE2 */
+}
 
 }
 

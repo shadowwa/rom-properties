@@ -22,7 +22,7 @@
 #ifndef __ROMPROPERTIES_LIBROMDATA_DISC_NCCHREADER_HPP__
 #define __ROMPROPERTIES_LIBROMDATA_DISC_NCCHREADER_HPP__
 
-#include "../n3ds_structs.h"
+#include "../Handheld/n3ds_structs.h"
 
 // librpbase
 #include "librpbase/disc/IPartition.hpp"
@@ -30,6 +30,7 @@
 
 namespace LibRpBase {
 	class IRpFile;
+	class IDiscReader;
 }
 
 namespace LibRomData {
@@ -44,17 +45,30 @@ class NCCHReader : public LibRpBase::IPartition
 		 * NOTE: The IRpFile *must* remain valid while this
 		 * NCCHReader is open.
 		 *
-		 * @param file 			[in] IRpFile.
+		 * @param file 			[in] IRpFile. (for CCIs only)
 		 * @param media_unit_shift	[in] Media unit shift.
 		 * @param ncch_offset		[in] NCCH start offset, in bytes.
 		 * @param ncch_length		[in] NCCH length, in bytes.
-		 * @param ticket		[in,opt] Ticket for CIA decryption. (nullptr if NoCrypto)
-		 * @param tmd_content_index	[in,opt] TMD content index for CIA decryption.
 		 */
-		NCCHReader(LibRpBase::IRpFile *file, uint8_t media_unit_shift,
-			int64_t ncch_offset, uint32_t ncch_length,
-			const N3DS_Ticket_t *ticket = nullptr,
-			uint16_t tmd_content_index = 0);
+		NCCHReader(LibRpBase::IRpFile *file,
+			uint8_t media_unit_shift,
+			int64_t ncch_offset, uint32_t ncch_length);
+
+		/**
+		 * Construct an NCCHReader with the specified IDiscReader.
+		 *
+		 * NOTE: The NCCHReader *takes ownership* of the IDiscReader.
+		 * This makes it easier to create a temporary CIAReader
+		 * without worrying about keeping track of it.
+		 *
+		 * @param discReader		[in] IDiscReader. (for CCIs or CIAs)
+		 * @param media_unit_shift	[in] Media unit shift.
+		 * @param ncch_offset		[in] NCCH start offset, in bytes.
+		 * @param ncch_length		[in] NCCH length, in bytes.
+		 */
+		NCCHReader(LibRpBase::IDiscReader *discReader,
+			uint8_t media_unit_shift,
+			int64_t ncch_offset, uint32_t ncch_length);
 		virtual ~NCCHReader();
 
 	private:
@@ -183,7 +197,7 @@ class NCCHReader : public LibRpBase::IPartition
 		 * Get the content type as a string.
 		 * @return Content type, or nullptr on error.
 		 */
-		const rp_char *contentType(void) const;
+		const char *contentType(void) const;
 
 		/**
 		 * Open a file. (read-only)
@@ -196,27 +210,15 @@ class NCCHReader : public LibRpBase::IPartition
 		 */
 		LibRpBase::IRpFile *open(int section, const char *filename);
 
-#ifdef ENABLE_DECRYPTION
 		/**
-		 * Get the total number of encryption key names.
-		 * @return Number of encryption key names.
+		 * Open the logo section.
+		 *
+		 * For CXIs compiled with pre-SDK5, opens the "logo" file in ExeFS.
+		 * Otherwise, this opens the separate logo section.
+		 *
+		 * @return IRpFile*, or nullptr on error.
 		 */
-		static int encryptionKeyCount_static(void);
-
-		/**
-		 * Get an encryption key name.
-		 * @param keyIdx Encryption key index.
-		 * @return Encryption key name (in ASCII), or nullptr on error.
-		 */
-		static const char *encryptionKeyName_static(int keyIdx);
-
-		/**
-		 * Get the verification data for a given encryption key index.
-		 * @param keyIdx Encryption key index.
-		 * @return Verification data. (16 bytes)
-		 */
-		static const uint8_t *encryptionVerifyData_static(int keyIdx);
-#endif /* ENABLE_DECRYPTION */
+		LibRpBase::IRpFile *openLogo(void);
 };
 
 }

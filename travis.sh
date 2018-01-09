@@ -15,9 +15,10 @@ cmake .. \
 	-DBUILD_XFCE=ON \
 	-DBUILD_GNOME=ON \
 	|| exit 1
-# Build UTF-8 and UTF-16 libraries for testing purposes.
-make -k romdata8 romdata16 cachemgr8 cachemgr16 || RET=1
-# Build the actual plugin(s).
+# Build everything.
 make -k || RET=1
-ctest -V || RET=1
+# Test with en_US.UTF8.
+LC_ALL="en_US.UTF8" ctest -V || RET=1
+# Test with fr_FR.UTF8 to find i18n issues.
+LC_ALL="fr_FR.UTF8" ctest -V || RET=1
 exit "${RET}"

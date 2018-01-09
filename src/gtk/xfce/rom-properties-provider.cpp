@@ -25,8 +25,8 @@
 // librpbase
 #include "librpbase/file/RpFile.hpp"
 #include "librpbase/RomData.hpp"
-using LibRpBase::RpFile;
-using LibRpBase::RomData;
+#include "librpbase/TextFuncs.hpp"
+using namespace LibRpBase;
 
 // libromdata
 #include "libromdata/RomDataFactory.hpp"

@@ -23,13 +23,6 @@
 #include "properties.hpp"
 #include "config.rpcli.h"
 
-// Time functions, with workaround for systems
-// that don't have reentrant versions.
-// NOTE: This defines _POSIX_C_SOURCE, which is
-// required for *_r() functions on MinGW-w64,
-// so it needs to be before other includes.
-#include "time_r.h"
-
 // C includes. (C++ namespace)
 #include <cassert>
 
@@ -38,17 +31,20 @@
 #include <iostream>
 #include <iomanip>
 #include <memory>
+#include <string>
 using std::endl;
 using std::left;
 using std::max;
 using std::ostream;
 using std::setw;
+using std::string;
 using std::unique_ptr;
 
 // librpbase
 #include "librpbase/RomData.hpp"
 #include "librpbase/RomFields.hpp"
 #include "librpbase/TextFuncs.hpp"
+#include "librpbase/TextFuncs_utf8.hpp"
 #include "librpbase/img/rp_image.hpp"
 #include "librpbase/img/IconAnimData.hpp"
 using namespace LibRpBase;
@@ -85,22 +81,22 @@ public:
 };
 class ColonPad {
 	size_t width;
-	const rp_char* str;
+	const char* str;
 public:
-	ColonPad(size_t width, const rp_char* str) :width(width), str(str) {}
+	ColonPad(size_t width, const char* str) :width(width), str(str) {}
 	friend ostream& operator<<(ostream& os, const ColonPad& cp) {
 		StreamStateSaver state(os);
-		os << cp.str << left << setw(max(0, (signed)(cp.width - rp_strlen(cp.str)))) << ":";
+		os << cp.str << left << setw(max(0, (signed)(cp.width - strlen(cp.str)))) << ':';
 		return os;
 	}
 };
 class SafeString {
-	const rp_char* str;
+	const char* str;
 	bool quotes;
 	size_t width;
 public:
-	SafeString(const rp_char* str, bool quotes = true, size_t width=0) :str(str), quotes(quotes), width(width) {}
-	SafeString(const rp_string* str, bool quotes = true, size_t width=0) :quotes(quotes), width(width) {
+	SafeString(const char* str, bool quotes = true, size_t width=0) :str(str), quotes(quotes), width(width) {}
+	SafeString(const string* str, bool quotes = true, size_t width=0) :quotes(quotes), width(width) {
 		this->str = (str ? str->c_str() : nullptr);
 	}
 	friend ostream& operator<<(ostream& os, const SafeString& cp) {
@@ -109,22 +105,22 @@ public:
 			return os << "(null)";
 		}
 		
-		rp_string escaped;
-		escaped.reserve(rp_strlen(cp.str));
-		for (const rp_char* str = cp.str; *str != 0; str++) {
+		string escaped;
+		escaped.reserve(strlen(cp.str));
+		for (const char* str = cp.str; *str != 0; str++) {
 			if (cp.width && *str == '\n') {
 				escaped += '\n';
-				escaped.append(cp.width + (cp.quotes?1:0), _RP_CHR(' '));
+				escaped.append(cp.width + (cp.quotes?1:0), ' ');
 			} else if ((unsigned char)*str < 0x20) {
 				// Encode control characters using U+2400 through U+241F.
 				escaped += "\xE2\x90";
-				escaped += (rp_char)(0x80 + (unsigned char)*str);
+				escaped += (char)(0x80 + (unsigned char)*str);
 			} else {
 				escaped += *str;
 			}
 		}
 		if (cp.quotes) {
-			return os << "'" << escaped << "'";
+			return os << '\'' << escaped << '\'';
 		}
 		else {
 			return os << escaped;
@@ -168,7 +164,7 @@ public:
 		// Determine the column widths.
 		int col = 0;
 		for (int bit = 0; bit < count; bit++) {
-			const rp_string &name = bitfieldDesc.names->at(bit);
+			const string &name = bitfieldDesc.names->at(bit);
 			if (name.empty())
 				continue;
 
@@ -185,7 +181,7 @@ public:
 		os << left;
 		col = 0;
 		for (int bit = 0; bit < count; bit++) {
-			const rp_string &name = bitfieldDesc.names->at(bit);
+			const string &name = bitfieldDesc.names->at(bit);
 			if (name.empty())
 				continue;
 
@@ -213,47 +209,90 @@ public:
 	ListDataField(size_t width, const RomFields::Field *romField) :width(width), romField(romField) {}
 	friend ostream& operator<<(ostream& os, const ListDataField& field) {
 		auto romField = field.romField;
+
 		const auto &listDataDesc = romField->desc.list_data;
-		assert(listDataDesc.names != nullptr);
-		assert(romField->data.list_data != nullptr);
-		if (!listDataDesc.names) {
-			return os << "[ERROR: No list field names.]";
-		} else if (!romField->data.list_data) {
+		// NOTE: listDataDesc.names can be nullptr,
+		// which means we don't have any column headers.
+
+		auto list_data = romField->data.list_data;
+		assert(list_data != nullptr);
+		if (!list_data) {
 			return os << "[ERROR: No list data.]";
 		}
 
-		const size_t fieldCount = listDataDesc.names->size();
-		unique_ptr<size_t[]> colSize(new size_t[fieldCount]());
-		size_t totalWidth = fieldCount + 1;
-		for (int i = (int)fieldCount - 1; i >= 0; i--) {
-			colSize[i] = listDataDesc.names->at(i).size();
+		int col_count = 1;
+		if (listDataDesc.names) {
+			col_count = (int)listDataDesc.names->size();
+		} else {
+			// No column headers.
+			// Use the first row.
+			if (list_data && !list_data->empty()) {
+				col_count = (int)list_data->at(0).size();
+			}
 		}
-		for (auto it = romField->data.list_data->begin();
-		     it != romField->data.list_data->end(); ++it)
-		{
+		assert(col_count > 0);
+		if (col_count < 0) {
+			return os << "[ERROR: No list data.]";
+		}
+
+		unique_ptr<size_t[]> colSize(new size_t[col_count]());
+		size_t totalWidth = col_count + 1;
+		if (listDataDesc.names) {
+			for (int i = (int)listDataDesc.names->size()-1; i >= 0; i--) {
+				colSize[i] = listDataDesc.names->at(i).size();
+			}
+		}
+
+		for (auto it = list_data->cbegin(); it != list_data->cend(); ++it) {
 			int i = 0;
-			for (auto jt = it->begin(); jt != it->end(); ++jt) {
+			for (auto jt = it->cbegin(); jt != it->cend(); ++jt) {
 				colSize[i] = max(jt->length(), colSize[i]);
 				i++;
 			}
 		}
+		// TODO: Use a separate column for the checkboxes?
+		if (listDataDesc.flags & RomFields::RFT_LISTDATA_CHECKBOXES) {
+			// Prepend 4 spaces in column 0 for "[x] ".
+			colSize[0] += 4;
+		}
 
 		os << ColonPad(field.width, romField->name.c_str());
 		StreamStateSaver state(os);
-		for (int i = 0; i < (int)listDataDesc.names->size(); i++) {
-			totalWidth += colSize[i]; // this could be in a separate loop, but whatever
-			os << "|" << setw(colSize[i]) << listDataDesc.names->at(i);
-		}
-		os << "|" << endl << Pad(field.width) << rp_string(totalWidth, '-');
-		for (auto it = romField->data.list_data->begin();
-		     it != romField->data.list_data->end(); ++it)
-		{
-			int i = 0;
-			os << endl << Pad(field.width);
-			for (auto jt = it->begin(); jt != it->end(); ++jt) {
-				os << "|" << setw(colSize[i++]) << SafeString(jt->c_str(), false);
+
+		bool skipFirstNL = true;
+		if (listDataDesc.names) {
+			// Print the column names.
+			for (int i = 0; i < (int)listDataDesc.names->size(); i++) {
+				totalWidth += colSize[i]; // this could be in a separate loop, but whatever
+				os << '|' << setw(colSize[i]) << listDataDesc.names->at(i);
 			}
-			os << "|";
+			os << '|' << endl << Pad(field.width) << string(totalWidth, '-');
+			// Don't skip the first newline, since we're
+			// printing headers.
+			skipFirstNL = false;
+		}
+
+		uint32_t checkboxes = romField->data.list_checkboxes;
+		if (listDataDesc.flags & RomFields::RFT_LISTDATA_CHECKBOXES) {
+			// Remove the 4 spaces in column 0.
+			// Those spaces will not be used in the text area.
+			colSize[0] -= 4;
+		}
+		for (auto it = list_data->cbegin(); it != list_data->cend(); ++it) {
+			int i = 0;
+			if (!skipFirstNL) {
+				os << endl << Pad(field.width);
+			} else {
+				skipFirstNL = false;
+			}
+			os << '|';
+			if (listDataDesc.flags & RomFields::RFT_LISTDATA_CHECKBOXES) {
+				os << '[' << ((checkboxes & 1) ? 'x' : ' ') << "] ";
+				checkboxes >>= 1;
+			}
+			for (auto jt = it->cbegin(); jt != it->cend(); ++jt) {
+				os << setw(colSize[i++]) << SafeString(jt->c_str(), false) << '|';
+			}
 		}
 		return os;
 	}
@@ -294,15 +333,21 @@ public:
 			return os;
 		}
 
-		static const char *formats[4] = {
-			"Invalid DateTime",
-			"%x", // Date
-			"%X", // Time
-			"%x %X", // Date Time
+		static const char *const formats[8] = {
+			"Invalid DateTime",	// No date or time.
+			"%x",			// Date
+			"%X",			// Time
+			"%x %X",		// Date Time
+
+			// TODO: Better localization here.
+			"Invalid DateTime",	// No date or time.
+			"%b %d",		// Date (no year)
+			"%X",			// Time
+			"%b %d %X",		// Date Time (no year)
 		};
 
 		char str[128];
-		strftime(str, 128, formats[flags & RomFields::RFT_DATETIME_HAS_DATETIME_MASK], &timestamp);
+		strftime(str, 128, formats[flags & RomFields::RFT_DATETIME_HAS_DATETIME_NO_YEAR_MASK], &timestamp);
 		os << str;
 		return os;
 	}
@@ -319,42 +364,9 @@ public:
 		os << ColonPad(field.width, romField->name.c_str());
 		StreamStateSaver state(os);
 
+		// Convert the age ratings field to a string.
 		const RomFields::age_ratings_t *age_ratings = romField->data.age_ratings;
-		assert(age_ratings != nullptr);
-		if (!age_ratings) {
-			os << "Unknown";
-			return os;
-		}
-
-		bool printedOne = false;
-		for (int i = 0; i < (int)age_ratings->size(); i++) {
-			const uint16_t rating = age_ratings->at(i);
-			if (!(rating & RomFields::AGEBF_ACTIVE))
-				continue;
-
-			if (printedOne) {
-				// Append a comma.
-				os << ", ";
-			}
-			printedOne = true;
-
-			const char *abbrev = RomFields::ageRatingAbbrev(i);
-			if (abbrev) {
-				os << abbrev;
-			} else {
-				// Invalid age rating.
-				// Use the numeric index.
-				os << i;
-			}
-			os << '=';
-			os << RomFields::ageRatingDecode(i, rating);
-		}
-
-		if (!printedOne) {
-			// No age ratings.
-			os << "None";
-		}
-
+		os << RomFields::ageRatingsDecode(age_ratings, false);
 		return os;
 	}
 };
@@ -366,7 +378,10 @@ public:
 	friend std::ostream& operator<<(std::ostream& os, const FieldsOutput& fo) {
 		size_t maxWidth = 0;
 		for (int i = 0; i < fo.fields.count(); i++) {
-			maxWidth = max(maxWidth, fo.fields.field(i)->name.size());
+			const RomFields::Field *const field = fo.fields.field(i);
+			if (likely(field != nullptr)) {
+				maxWidth = max(maxWidth, field->name.size());
+			}
 		}
 		maxWidth += 2;
 		bool printed_first = false;
@@ -418,43 +433,43 @@ public:
 };
 
 class JSONString {
-	const rp_char* str;
+	const char* str;
 public:
-	explicit JSONString(const rp_char* str) :str(str) {}
+	explicit JSONString(const char* str) :str(str) {}
 	friend ostream& operator<<(ostream& os, const JSONString& js) {
 		//assert(js.str); // not all strings can't be null, apparently
 		if (!js.str) {
 			// NULL string.
 			// Print "0" to indicate this.
-			return os << "0";
+			return os << '0';
 		}
 
 		// Certain characters need to be escaped.
-		const rp_char *str = js.str;
-		rp_string escaped;
-		escaped.reserve(rp_strlen(str));
+		const char *str = js.str;
+		string escaped;
+		escaped.reserve(strlen(str));
 		for (; *str != 0; str++) {
 			switch (*str) {
 				case '\\':
-					escaped += _RP("\\\\");
+					escaped += "\\\\";
 					break;
 				case '"':
-					escaped += _RP("\\");
+					escaped += "\\";
 					break;
 				case '\b':
-					escaped += _RP("\\b");
+					escaped += "\\b";
 					break;
 				case '\f':
-					escaped += _RP("\\f");
+					escaped += "\\f";
 					break;
 				case '\t':
-					escaped += _RP("\\t");
+					escaped += "\\t";
 					break;
 				case '\n':
-					escaped += _RP("\\n");
+					escaped += "\\n";
 					break;
 				case '\r':
-					escaped += _RP("\\r");
+					escaped += "\\r";
 					break;
 				default:
 					escaped += *str;
@@ -480,7 +495,7 @@ public:
 				continue;
 
 			if (printed_first)
-				os << "," << endl;
+				os << ',' << endl;
 
 			switch (romField->type) {
 			case RomFields::RFT_INVALID: {
@@ -492,7 +507,7 @@ public:
 			case RomFields::RFT_STRING: {
 				os << "{\"type\":\"STRING\",\"desc\":{\"name\":" << JSONString(romField->name.c_str())
 				   << ",\"format\":" << romField->desc.flags
-				   << "},\"data\":" << JSONString(romField->data.str->c_str()) << "}";
+				   << "},\"data\":" << JSONString(romField->data.str->c_str()) << '}';
 				break;
 			}
 
@@ -513,11 +528,11 @@ public:
 					}
 					bool printedOne = false;
 					for (int bit = 0; bit < count; bit++) {
-						const rp_string &name = bitfieldDesc.names->at(bit);
+						const string &name = bitfieldDesc.names->at(bit);
 						if (name.empty())
 							continue;
 
-						if (printedOne) os << ",";
+						if (printedOne) os << ',';
 						printedOne = true;
 						os << JSONString(name.c_str());
 					}
@@ -525,39 +540,46 @@ public:
 				} else {
 					os << "\"ERROR\"";
 				}
-				os << "},\"data\":" << romField->data.bitfield << "}";
+				os << "},\"data\":" << romField->data.bitfield << '}';
 				break;
 			}
 
 			case RomFields::RFT_LISTDATA: {
 				const auto &listDataDesc = romField->desc.list_data;
 				os << "{\"type\":\"LISTDATA\",\"desc\":{\"name\":" << JSONString(romField->name.c_str());
-				assert(listDataDesc.names != nullptr);
 				if (listDataDesc.names) {
-					os << ",\"count\":" << listDataDesc.names->size()
-					   << ",\"names\":[";
-					const int count = (int)listDataDesc.names->size();
-					for (int j = 0; j < count; j++) {
-						if (j) os << ",";
+					os << ",\"names\":[";
+					const int col_count = (int)listDataDesc.names->size();
+					if (listDataDesc.flags & RomFields::RFT_LISTDATA_CHECKBOXES) {
+						// TODO: Better JSON schema for RFT_LISTDATA_CHECKBOXES?
+						os << "checked,";
+					}
+					for (int j = 0; j < col_count; j++) {
+						if (j) os << ',';
 						os << JSONString(listDataDesc.names->at(j).c_str());
 					}
 					os << ']';
 				} else {
-					os << ",\"count\":0,\"names\":\"ERROR\"";
+					os << ",\"names\":[]";
 				}
 				os << "},\"data\":[";
-				assert(romField->data.list_data != nullptr);
-				if (romField->data.list_data) {
-					for (auto it = romField->data.list_data->begin();
-					     it != romField->data.list_data->end(); ++it)
-					{
-						if (it != romField->data.list_data->begin()) os << ",";
-						os << "[";
-						for (auto jt = it->begin(); jt != it->end(); ++jt) {
-							if (jt != it->begin()) os << ",";
+				auto list_data = romField->data.list_data;
+				assert(list_data != nullptr);
+				if (list_data) {
+					uint32_t checkboxes = romField->data.list_checkboxes;
+					for (auto it = list_data->cbegin(); it != list_data->cend(); ++it) {
+						if (it != list_data->cbegin()) os << ',';
+						os << '[';
+						if (listDataDesc.flags & RomFields::RFT_LISTDATA_CHECKBOXES) {
+							// TODO: Better JSON schema for RFT_LISTDATA_CHECKBOXES?
+							os << ((checkboxes & 1) ? "true" : "false") << ',';
+							checkboxes >>= 1;
+						}
+						for (auto jt = it->cbegin(); jt != it->cend(); ++jt) {
+							if (jt != it->cbegin()) os << ',';
 							os << JSONString(jt->c_str());
 						}
-						os << "]";
+						os << ']';
 					}
 				}
 				os << "]}";
@@ -568,7 +590,7 @@ public:
 				os << "{\"type\":\"DATETIME\",\"desc\":{\"name\":" << JSONString(romField->name.c_str())
 				   << ",\"flags\":" << romField->desc.flags
 				   << "},\"data\":" << romField->data.date_time
-				   << "}";
+				   << '}';
 				break;
 			}
 
@@ -592,7 +614,7 @@ public:
 
 					if (printedOne) {
 						// Append a comma.
-						os << ",";
+						os << ',';
 					}
 					printedOne = true;
 
@@ -622,7 +644,7 @@ public:
 
 			printed_first = true;
 		}
-		os << "]";
+		os << ']';
 		return os;
 	}
 };
@@ -632,11 +654,11 @@ public:
 ROMOutput::ROMOutput(const RomData *romdata) : romdata(romdata) { }
 std::ostream& operator<<(std::ostream& os, const ROMOutput& fo) {
 	auto romdata = fo.romdata;
-	const rp_char *sysName = romdata->systemName(RomData::SYSNAME_TYPE_LONG | RomData::SYSNAME_REGION_GENERIC);
-	const rp_char *fileType = romdata->fileType_string();
+	const char *sysName = romdata->systemName(RomData::SYSNAME_TYPE_LONG | RomData::SYSNAME_REGION_GENERIC);
+	const char *fileType = romdata->fileType_string();
 
 	os << "-- " << (sysName ? sysName : "(unknown system)") <<
-	      " " << (fileType ? fileType : "(unknown filetype)") <<
+	      ' ' << (fileType ? fileType : "(unknown filetype)") <<
 	      " detected" << endl;
 	os << FieldsOutput(*(romdata->fields())) << endl;
 
@@ -662,6 +684,9 @@ std::ostream& operator<<(std::ostream& os, const ROMOutput& fo) {
 		if (!(supported & (1 << i)))
 			continue;
 
+		// NOTE: extURLs may be empty even though the class supports it.
+		// Check extURLs before doing anything else.
+
 		extURLs.clear();	// NOTE: May not be needed...
 		// TODO: Customize the image size parameter?
 		// TODO: Option to retrieve supported image size?
@@ -672,7 +697,7 @@ std::ostream& operator<<(std::ostream& os, const ROMOutput& fo) {
 		for (auto iter = extURLs.cbegin(); iter != extURLs.end(); ++iter) {
 			os << "-- " <<
 				RomData::getImageTypeName((RomData::ImageType)i) << ": " << iter->url <<
-				" (cache_key: " << iter->cache_key << ")" << endl;
+				" (cache_key: " << iter->cache_key << ')' << endl;
 		}
 	}
 	return os;
@@ -683,8 +708,8 @@ std::ostream& operator<<(std::ostream& os, const JSONROMOutput& fo) {
 	auto romdata = fo.romdata;
 	assert(romdata && romdata->isValid());
 
-	const rp_char *sysName = romdata->systemName(RomData::SYSNAME_TYPE_LONG | RomData::SYSNAME_REGION_GENERIC);
-	const rp_char *fileType = romdata->fileType_string();
+	const char *sysName = romdata->systemName(RomData::SYSNAME_TYPE_LONG | RomData::SYSNAME_REGION_GENERIC);
+	const char *fileType = romdata->fileType_string();
 
 	os << "{\"system\":";
 	if (sysName) {
@@ -702,20 +727,23 @@ std::ostream& operator<<(std::ostream& os, const JSONROMOutput& fo) {
 
 	int supported = romdata->supportedImageTypes();
 
-	os << ",\n\"imgint\":[";
 	bool first = true;
 	for (int i = RomData::IMG_INT_MIN; i <= RomData::IMG_INT_MAX; i++) {
 		if (!(supported & (1 << i)))
 			continue;
 
-		if (first) first = false;
-		else os << ",";
+		if (first) {
+			os << ",\n\"imgint\":[";
+			first = false;
+		} else {
+			os << ',';
+		}
 
 		os << "{\"type\":" << JSONString(RomData::getImageTypeName((RomData::ImageType)i));
 		auto image = romdata->image((RomData::ImageType)i);
 		if (image && image->isValid()) {
 			os << ",\"format\":" << JSONString(rp_image::getFormatName(image->format()));
-			os << ",\"size\":[" << image->width() << "," << image->height() << "]";
+			os << ",\"size\":[" << image->width() << ',' << image->height() << ']';
 			int ppf = romdata->imgpf((RomData::ImageType) i);
 			if (ppf) {
 				os << ",\"postprocessing\":" << ppf;
@@ -726,30 +754,46 @@ std::ostream& operator<<(std::ostream& os, const JSONROMOutput& fo) {
 					os << ",\"frames\":" << animdata->count;
 					os << ",\"sequence\":[";
 					for (int i = 0; i < animdata->seq_count; i++) {
-						if (i) os << ",";
+						if (i) os << ',';
 						os << (unsigned)animdata->seq_index[i];
 					}
 					os << "],\"delay\":[";
 					for (int i = 0; i < animdata->seq_count; i++) {
-						if (i) os << ",";
+						if (i) os << ',';
 						os << animdata->delays[i].ms;
 					}
-					os << "]";
+					os << ']';
 				}
 			}
 		}
-		os << "}";
+		os << '}';
+	}
+	if (!first) {
+		os << ']';
 	}
 
-	os << "],\n\"imgext\":[";
 	first = true;
 	std::vector<RomData::ExtURL> extURLs;
 	for (int i = RomData::IMG_EXT_MIN; i <= RomData::IMG_EXT_MAX; i++) {
 		if (!(supported & (1 << i)))
 			continue;
 
-		if (first) first = false;
-		else os << ",";
+		// NOTE: extURLs may be empty even though the class supports it.
+		// Check extURLs before doing anything else.
+
+		extURLs.clear();	// NOTE: May not be needed...
+		// TODO: Customize the image size parameter?
+		// TODO: Option to retrieve supported image size?
+		int ret = romdata->extURLs((RomData::ImageType)i, &extURLs, RomData::IMAGE_SIZE_DEFAULT);
+		if (ret != 0 || extURLs.empty())
+			continue;
+
+		if (first) {
+			os << ",\n\"imgext\":[";
+			first = false;
+		} else {
+			os << ',';
+		}
 
 		os << "{\"type\":" << JSONString(RomData::getImageTypeName((RomData::ImageType)i));
 		int ppf = romdata->imgpf((RomData::ImageType) i);
@@ -760,20 +804,17 @@ std::ostream& operator<<(std::ostream& os, const JSONROMOutput& fo) {
 		os << ",\"exturls\":[";
 		bool firsturl = true;
 
-		extURLs.clear();	// NOTE: May not be needed...
-		// TODO: Customize the image size parameter?
-		// TODO: Option to retrieve supported image size?
-		int ret = romdata->extURLs((RomData::ImageType)i, &extURLs, RomData::IMAGE_SIZE_DEFAULT);
-		if (ret != 0 || extURLs.empty())
-			continue;
-
 		for (auto iter = extURLs.cbegin(); iter != extURLs.end(); ++iter) {
 			if (firsturl) firsturl = false;
-			else os << ",";
+			else os << ',';
 
 			os << "{\"url\":" << JSONString(iter->url.c_str());
-			os << ",\"cache_key\":" << JSONString(iter->cache_key.c_str()) << "}";
+			os << ",\"cache_key\":" << JSONString(iter->cache_key.c_str()) << '}';
 		}
 	}
-	return os << "]}";
+	if (!first) {
+		os << ']';
+	}
+
+	return os << '}';
 }

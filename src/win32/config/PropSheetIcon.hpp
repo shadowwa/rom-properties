@@ -45,6 +45,12 @@ class PropSheetIcon
 		 * @return Small property sheet icon, or nullptr on error.
 		 */
 		static HICON getSmallIcon(void);
+
+		/**
+		 * Get the 96x96 icon.
+		 * @return 96x96 icon, or nullptr on error.
+		 */
+		static HICON get96Icon(void);
 };
 
 #endif /* __ROMPROPERTIES_WIN32_CONFIG_PROPSHEETICON_HPP__ */

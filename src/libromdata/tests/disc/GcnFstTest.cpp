@@ -23,13 +23,12 @@
 #include "gtest/gtest.h"
 
 // MiniZip
-#include "unzip.h"
-#ifdef _WIN32
-#include "iowin32.h"
-#endif
+#include "mz_zip.h"
+#include "mz_compat.h"
 
 // librpbase
 #include "librpbase/TextFuncs.hpp"
+#include "librpbase/TextFuncs_utf8.hpp"
 #include "librpbase/file/FileSystem.hpp"
 using namespace LibRpBase;
 
@@ -53,6 +52,7 @@ using LibRomData::GcnFst;
 #include <string>
 #include <unordered_set>
 using std::istringstream;
+using std::ostream;
 using std::string;
 using std::stringstream;
 using std::unordered_set;
@@ -70,6 +70,13 @@ struct GcnFstTest_mode
 
 	GcnFstTest_mode(
 		const char *fst_filename,
+		uint8_t offsetShift)
+		: fst_filename(fst_filename)
+		, offsetShift(offsetShift)
+	{ }
+
+	GcnFstTest_mode(
+		const string &fst_filename,
 		uint8_t offsetShift)
 		: fst_filename(fst_filename)
 		, offsetShift(offsetShift)
@@ -103,7 +110,7 @@ class GcnFstTest : public ::testing::TestWithParam<GcnFstTest_mode>
 		 * @param filename Zip filename.
 		 * @return Zip file, or nullptr on error.
 		 */
-		static unzFile openZip(const rp_char *filename);
+		static unzFile openZip(const char *filename);
 
 		/**
 		 * Get a file from a Zip file.
@@ -113,7 +120,7 @@ class GcnFstTest : public ::testing::TestWithParam<GcnFstTest_mode>
 		 * @param max_filesize	[in,opt] Maximum file size. (default is MAX_GCN_FST_BIN_FILESIZE)
 		 * @return Number of bytes read, or negative on error.
 		 */
-		static int getFileFromZip(const rp_char *filename,
+		static int getFileFromZip(const char *zip_filename,
 			const char *int_filename,
 			ao::uvector<uint8_t>& buf,
 			int max_filesize = MAX_GCN_FST_BIN_FILESIZE);
@@ -127,7 +134,17 @@ class GcnFstTest : public ::testing::TestWithParam<GcnFstTest_mode>
 		 * Recursively check a subdirectory for duplicate filenames.
 		 * @param subdir Subdirectory path.
 		 */
-		void checkNoDuplicateFilenames(const rp_char *subdir);
+		void checkNoDuplicateFilenames(const char *subdir);
+
+		/**
+		 * Print a uint32_t using en_US formatting.
+		 * This is needed in order to work around issues
+		 * caused by locales with number formatting that
+		 * doesn't match en_US.
+		 * @param os	[out] ostream.
+		 * @param val	[in] Number.
+		 */
+		static void print_uint32_en_US(ostream &os, uint32_t val);
 
 	public:
 		/** Test case parameters. **/
@@ -158,13 +175,15 @@ void GcnFstTest::SetUp(void)
 	const GcnFstTest_mode &mode = GetParam();
 
 	// Open the Zip file.
-	const rp_char *zip_filename = nullptr;
+	// NOTE: MiniZip 2.2.3's compatibility functions
+	// take UTF-8 on Windows, not UTF-16.
+	const char *zip_filename = nullptr;
 	switch (mode.offsetShift) {
 		case 0:
-			zip_filename = _RP("GameCube.fst.bin.zip");
+			zip_filename = "GameCube.fst.bin.zip";
 			break;
 		case 2:
-			zip_filename = _RP("Wii.fst.bin.zip");
+			zip_filename = "Wii.fst.bin.zip";
 			break;
 		default:
 			ASSERT_TRUE(false) << "offsetShift is " << (int)mode.offsetShift << "; should be either 0 or 2.";
@@ -192,22 +211,24 @@ void GcnFstTest::TearDown(void)
  * @param filename Zip filename.
  * @return Zip file, or nullptr on error.
  */
-unzFile GcnFstTest::openZip(const rp_char *filename)
+unzFile GcnFstTest::openZip(const char *filename)
 {
 	// Prepend fst_data.
-	rp_string path = _RP("fst_data");
-	path += _RP_CHR(DIR_SEP_CHR);
+	string path = "fst_data";
+	path += DIR_SEP_CHR;
 	path += filename;
 
 #ifdef _WIN32
+	// NOTE: MiniZip 2.2.3's compatibility functions
+	// take UTF-8 on Windows, not UTF-16.
 	zlib_filefunc64_def ffunc;
 	fill_win32_filefunc64W(&ffunc);
-	return unzOpen2_64(RP2W_s(path), &ffunc);
+	return unzOpen2_64(path.c_str(), &ffunc);
 #else /* !_WIN32 */
 #ifdef RP_UTF8
 	return unzOpen(path.c_str());
 #else /* RP_UTF16 */
-	return unzOpen(rp_string_to_utf8(path));
+	return unzOpen(path.c_str());
 #endif
 #endif /* _WIN32 */
 }
@@ -220,15 +241,17 @@ unzFile GcnFstTest::openZip(const rp_char *filename)
  * @param max_filesize	[in,opt] Maximum file size. (default is MAX_GCN_FST_BIN_FILESIZE)
  * @return Number of bytes read, or negative on error.
  */
-int GcnFstTest::getFileFromZip(const rp_char *zip_filename,
+int GcnFstTest::getFileFromZip(const char *zip_filename,
 	const char *int_filename,
 	ao::uvector<uint8_t>& buf,
 	int max_filesize)
 {
 	// Open the Zip file.
+	// NOTE: MiniZip 2.2.3's compatibility functions
+	// take UTF-8 on Windows, not UTF-16.
 	unzFile unz = openZip(zip_filename);
 	EXPECT_TRUE(unz != nullptr) <<
-		"Could not open '" << rp_string_to_utf8(zip_filename) << "', check the test directory!";
+		"Could not open '" << zip_filename << "', check the test directory!";
 	if (!unz) {
 		return -1;
 	}
@@ -270,12 +293,34 @@ int GcnFstTest::getFileFromZip(const rp_char *zip_filename,
 	}
 
 	// Read the FST file.
+	// NOTE: zlib and minizip are only guaranteed to be able to
+	// read UINT16_MAX (64 KB) at a time, and the updated MiniZip
+	// from https://github.com/nmoinvaz/minizip enforces this.
 	buf.resize((size_t)file_info.uncompressed_size);
-	ret = unzReadCurrentFile(unz, buf.data(), (unsigned int)buf.size());
-	EXPECT_GT(ret, 0);
-	if (ret <= 0) {
+	uint8_t *p = buf.data();
+	size_t size = buf.size();
+	while (size > 0) {
+		int to_read = (int)(size > UINT16_MAX ? UINT16_MAX : size);
+		ret = unzReadCurrentFile(unz, p, to_read);
+		EXPECT_EQ(to_read, ret);
+		if (ret != to_read) {
+			unzClose(unz);
+			return -6;
+		}
+
+		// ret == number of bytes read.
+		p += ret;
+		size -= ret;
+	}
+
+	// Read one more byte to ensure unzReadCurrentFile() returns 0 for EOF.
+	// NOTE: MiniZip will zero out tmp if there's no data available.
+	uint8_t tmp;
+	ret = unzReadCurrentFile(unz, &tmp, 1);
+	EXPECT_EQ(0, ret);
+	if (ret != 0) {
 		unzClose(unz);
-		return -6;
+		return -7;
 	}
 
 	// Close the FST file.
@@ -284,7 +329,7 @@ int GcnFstTest::getFileFromZip(const rp_char *zip_filename,
 	EXPECT_EQ(UNZ_OK, ret);
 	if (ret != UNZ_OK) {
 		unzClose(unz);
-		return -7;
+		return -8;
 	}
 
 	// Close the Zip file.
@@ -296,10 +341,10 @@ int GcnFstTest::getFileFromZip(const rp_char *zip_filename,
  * Recursively check a subdirectory for duplicate filenames.
  * @param subdir Subdirectory path.
  */
-void GcnFstTest::checkNoDuplicateFilenames(const rp_char *subdir)
+void GcnFstTest::checkNoDuplicateFilenames(const char *subdir)
 {
-	unordered_set<rp_string> filenames;
-	unordered_set<rp_string> subdirs;
+	unordered_set<string> filenames;
+	unordered_set<string> subdirs;
 
 	IFst::Dir *dirp = m_fst->opendir(subdir);
 	ASSERT_TRUE(dirp != nullptr) <<
@@ -310,7 +355,7 @@ void GcnFstTest::checkNoDuplicateFilenames(const rp_char *subdir)
 		// Make sure we haven't seen this filename in
 		// the current subdirectory yet.
 		EXPECT_TRUE(filenames.find(dirent->name) == filenames.end()) <<
-			"Directory '" << rp_string_to_utf8(subdir) << "' has duplicate filename '" << dirent->name << "'.";
+			"Directory '" << subdir << "' has duplicate filename '" << dirent->name << "'.";
 
 		// Filename has been seen now.
 		filenames.insert(dirent->name);
@@ -326,9 +371,9 @@ void GcnFstTest::checkNoDuplicateFilenames(const rp_char *subdir)
 
 	// Check subdirectories.
 	for (auto iter = subdirs.cbegin(); iter != subdirs.cend(); ++iter) {
-		rp_string path = subdir;
+		string path = subdir;
 		if (!path.empty() && path[path.size()-1] != '/') {
-			path += _RP_CHR('/');
+			path += '/';
 		}
 		path += iter->c_str();
 		checkNoDuplicateFilenames(path.c_str());
@@ -339,11 +384,43 @@ void GcnFstTest::checkNoDuplicateFilenames(const rp_char *subdir)
 }
 
 /**
+ * Print a uint32_t using en_US formatting.
+ * This is needed in order to work around issues
+ * caused by locales with number formatting that
+ * doesn't match en_US.
+ * @param os	[out] ostream.
+ * @param val	[in] Number.
+ */
+void GcnFstTest::print_uint32_en_US(ostream &os, uint32_t val)
+{
+	char buf[16];
+	char *p = &buf[0];
+	unsigned int digits = 0;
+	do {
+		if (digits > 0 && (digits % 3 == 0)) {
+			// en_US thousands separator.
+			*p++ = ',';
+		}
+		assert(p < &buf[sizeof(buf)]);
+		*p++ = '0' + (val % 10);
+		val /= 10;
+		digits++;
+	} while (val != 0);
+	assert(p < &buf[sizeof(buf)]);
+	*p = 0;
+
+	// Number is formatted, but it's in reverse-order.
+	while (p > &buf[0]) {
+		os << *--p;
+	}
+}
+
+/**
  * Make sure there aren't any duplicate filenames in all subdirectories.
  */
 TEST_P(GcnFstTest, NoDuplicateFilenames)
 {
-	ASSERT_NO_FATAL_FAILURE(checkNoDuplicateFilenames(_RP("/")));
+	ASSERT_NO_FATAL_FAILURE(checkNoDuplicateFilenames("/"));
 	EXPECT_FALSE(m_fst->hasErrors());
 }
 
@@ -356,13 +433,15 @@ TEST_P(GcnFstTest, FstPrint)
 	const GcnFstTest_mode &mode = GetParam();
 
 	// Open the Zip file.
-	const rp_char *zip_filename = nullptr;
+	// NOTE: MiniZip 2.2.3's compatibility functions
+	// take UTF-8 on Windows, not UTF-16.
+	const char *zip_filename = nullptr;
 	switch (mode.offsetShift) {
 		case 0:
-			zip_filename = _RP("GameCube.fst.txt.zip");
+			zip_filename = "GameCube.fst.txt.zip";
 			break;
 		case 2:
-			zip_filename = _RP("Wii.fst.txt.zip");
+			zip_filename = "Wii.fst.txt.zip";
 			break;
 		default:
 			ASSERT_TRUE(false) << "offsetShift is " << (int)mode.offsetShift << "; should be either 0 or 2.";
@@ -385,8 +464,17 @@ TEST_P(GcnFstTest, FstPrint)
 		string(reinterpret_cast<const char*>(fst_txt_buf.data()), fst_txt_buf.size()));
 
 	// Print the FST.bin to a new stringstream.
+	FstFileCount fc = {0, 0};
 	stringstream fst_text_actual;
-	fstPrint(m_fst, fst_text_actual);
+	fstPrint(m_fst, fst_text_actual, &fc);
+
+	// Print the directory/file count manually in order to
+	// avoid locale issues. (Test data uses en_US.)
+	fst_text_actual << '\n';
+	print_uint32_en_US(fst_text_actual, fc.dirs);
+	fst_text_actual << ' ' << (fc.dirs == 1 ? "directory" : "directories") << ", ";
+	print_uint32_en_US(fst_text_actual, fc.files);
+	fst_text_actual << ' ' << (fc.files == 1 ? "file" : "files") << '\n';
 
 	// Compare the two stringstreams.
 	// NOTE: Only Unix line endings are supported.
@@ -431,13 +519,15 @@ std::vector<GcnFstTest_mode> GcnFstTest::ReadTestCasesFromDisk(uint8_t offsetShi
 	std::vector<GcnFstTest_mode> files;
 
 	// Open the Zip file.
-	const rp_char *zip_filename;
+	// NOTE: MiniZip 2.2.3's compatibility functions
+	// take UTF-8 on Windows, not UTF-16.
+	const char *zip_filename;
 	switch (offsetShift) {
 		case 0:
-			zip_filename = _RP("GameCube.fst.bin.zip");
+			zip_filename = "GameCube.fst.bin.zip";
 			break;
 		case 2:
-			zip_filename = _RP("Wii.fst.bin.zip");
+			zip_filename = "Wii.fst.bin.zip";
 			break;
 		default:
 			EXPECT_TRUE(false) << "offsetShift is " << (int)offsetShift << "; should be either 0 or 2.";
@@ -446,13 +536,21 @@ std::vector<GcnFstTest_mode> GcnFstTest::ReadTestCasesFromDisk(uint8_t offsetShi
 
 	unzFile unz = openZip(zip_filename);
 	EXPECT_TRUE(unz != nullptr) <<
-		"Could not open '" << rp_string_to_utf8(zip_filename) << "', check the test directory!";
+		"Could not open '" << zip_filename << "', check the test directory!";
 	if (!unz) {
 		return files;
 	}
 
+	// MiniZip 2.x (up to 2.2.3) doesn't automatically go to the first file.
+	// Hence, we'll need to do that here.
+	int ret = unzGoToFirstFile(unz);
+	EXPECT_EQ(0, ret) << "unzGoToFirstFile failed in '" << zip_filename << "'.";
+	if (ret != 0) {
+		unzClose(unz);
+		return files;
+	}
+
 	// Read the filenames.
-	int ret = UNZ_OK;
 	char filename[256];
 	unz_file_info64 file_info;
 	do {
@@ -464,11 +562,20 @@ std::vector<GcnFstTest_mode> GcnFstTest::ReadTestCasesFromDisk(uint8_t offsetShi
 		if (ret != UNZ_OK)
 			break;
 
+		// Make sure the filename isn't empty.
+		EXPECT_GT(file_info.size_filename, 0) << "A filename in the ZIP file has no name. Skipping...";
+
+		// Make sure the file isn't too big.
 		EXPECT_LE(file_info.uncompressed_size, (uLong)MAX_GCN_FST_BIN_FILESIZE) <<
 			"GCN FST file '" << filename << "' is too big. (maximum size is 1 MB)";
-		if (file_info.uncompressed_size <= (uLong)MAX_GCN_FST_BIN_FILESIZE) {
+
+		if (file_info.size_filename > 0 &&
+		    file_info.uncompressed_size <= (uLong)MAX_GCN_FST_BIN_FILESIZE)
+		{
 			// Add this filename to the list.
-			GcnFstTest_mode mode(filename, offsetShift);
+			// NOTE: Filename might not be NULL-terminated,
+			// so use the explicit length.
+			GcnFstTest_mode mode(string(filename, file_info.size_filename), offsetShift);
 			files.push_back(mode);
 		}
 

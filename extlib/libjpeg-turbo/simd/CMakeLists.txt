@@ -29,14 +29,23 @@ IF(WIN32)
 		SET(ProgramFiles "$ENV{ProgramFiles}")
 	ENDIF(DEFINED ENV{ProgramW6432})
 
-	FIND_PROGRAM(NASM nasm
+	# Replace backslashes with slashes.
+	STRING(REPLACE "\\" "/" LocalAppData    "${LocalAppData}")
+	STRING(REPLACE "\\" "/" ProgramFiles    "${ProgramFiles}")
+	STRING(REPLACE "\\" "/" ProgramFilesX86 "${ProgramFilesX86}")
+
+	# TODO: Default yasm paths.
+
+	# Find NASM.
+	find_program(NASM NAMES nasm yasm
+		DOC	"Path to NASM/YASM executable"
 		PATHS	"${LocalAppData}/NASM"
 			"${ProgramFiles}/NASM"
 			"${ProgramFilesX86}/NASM"
 		)
 ELSE(WIN32)
 	# Not Windows. Just search for nasm directly.
-	FIND_PROGRAM(NASM nasm)
+	find_program(NASM NAMES nasm yasm DOC "Path to NASM/YASM executable")
 ENDIF(WIN32)
 IF(NOT NASM)
 	MESSAGE(FATAL_ERROR "NASM is required for libjpeg-turbo SIMD functions.")

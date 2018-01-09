@@ -34,18 +34,6 @@ using LibRpBase::KeyManager;
 // C includes. (C++ namespace)
 #include <cassert>
 #include <cerrno>
-#include <cstring>
-
-// Use 64-bit arithmetic on 64-bit systems.
-// TODO: Check the assembly and verify that this actually improves performance.
-#if defined(__LP64__) || defined(__LLP64__) || \
-    defined(_M_X64) || defined(_M_IA64) || defined(_M_ARM64)
-// Use 64-bit arithmetic.
-#define USE64 1
-#else
-// Use 32-bit arithmetic.
-#define USE64 0
-#endif
 
 namespace LibRomData {
 
@@ -57,29 +45,20 @@ class CtrKeyScramblerPrivate
 		RP_DISABLE_COPY(CtrKeyScramblerPrivate);
 
 	public:
-		// Encryption key indexes.
-		enum EncryptionKeys {
-			// Retail
-			Key_Twl_Scrambler,
-			Key_Ctr_Scrambler,
-
-			Key_Max
-		};
-
 		// Verification key names.
-		static const char *const EncryptionKeyNames[Key_Max];
+		static const char *const EncryptionKeyNames[CtrKeyScrambler::Key_Max];
 
 		// Verification key data.
-		static const uint8_t EncryptionKeyVerifyData[Key_Max][16];
+		static const uint8_t EncryptionKeyVerifyData[CtrKeyScrambler::Key_Max][16];
 };
 
 // Verification key names.
-const char *const CtrKeyScramblerPrivate::EncryptionKeyNames[Key_Max] = {
+const char *const CtrKeyScramblerPrivate::EncryptionKeyNames[CtrKeyScrambler::Key_Max] = {
 	"twl-scrambler",
 	"ctr-scrambler",
 };
 
-const uint8_t CtrKeyScramblerPrivate::EncryptionKeyVerifyData[Key_Max][16] = {
+const uint8_t CtrKeyScramblerPrivate::EncryptionKeyVerifyData[CtrKeyScrambler::Key_Max][16] = {
 	// twl-scrambler
 	{0x65,0xCF,0x82,0xC5,0xDB,0x79,0x93,0x8C,
 	 0x01,0x33,0x65,0x87,0x72,0xDF,0x60,0x94},
@@ -94,7 +73,7 @@ const uint8_t CtrKeyScramblerPrivate::EncryptionKeyVerifyData[Key_Max][16] = {
  */
 int CtrKeyScrambler::encryptionKeyCount_static(void)
 {
-	return CtrKeyScramblerPrivate::Key_Max;
+	return Key_Max;
 }
 
 /**
@@ -104,7 +83,9 @@ int CtrKeyScrambler::encryptionKeyCount_static(void)
  */
 const char *CtrKeyScrambler::encryptionKeyName_static(int keyIdx)
 {
-	if (keyIdx < 0 || keyIdx >= CtrKeyScramblerPrivate::Key_Max)
+	assert(keyIdx >= 0);
+	assert(keyIdx < Key_Max);
+	if (keyIdx < 0 || keyIdx >= Key_Max)
 		return nullptr;
 	return CtrKeyScramblerPrivate::EncryptionKeyNames[keyIdx];
 }
@@ -116,7 +97,9 @@ const char *CtrKeyScrambler::encryptionKeyName_static(int keyIdx)
  */
 const uint8_t *CtrKeyScrambler::encryptionVerifyData_static(int keyIdx)
 {
-	if (keyIdx < 0 || keyIdx >= CtrKeyScramblerPrivate::Key_Max)
+	assert(keyIdx >= 0);
+	assert(keyIdx < Key_Max);
+	if (keyIdx < 0 || keyIdx >= Key_Max)
 		return nullptr;
 	return CtrKeyScramblerPrivate::EncryptionKeyVerifyData[keyIdx];
 }
@@ -128,17 +111,8 @@ const uint8_t *CtrKeyScrambler::encryptionVerifyData_static(int keyIdx)
  */
 static inline void bswap_u128_t(u128_t &dest, const u128_t &src)
 {
-#if USE64
-	static_assert(sizeof(void*) == 8, "USE64 == 1 but sizeof(void*) != 8");
 	dest.u64[0] = __swab64(src.u64[0]);
 	dest.u64[1] = __swab64(src.u64[1]);
-#else /* !USE64 */
-	static_assert(sizeof(void*) == 4, "USE64 == 0 but sizeof(void*) != 4");
-	dest.u32[0] = __swab32(src.u32[0]);
-	dest.u32[1] = __swab32(src.u32[1]);
-	dest.u32[2] = __swab32(src.u32[2]);
-	dest.u32[3] = __swab32(src.u32[3]);
-#endif /* USE64 */
 }
 
 /**
@@ -155,9 +129,8 @@ int CtrKeyScrambler::CtrScramble(u128_t *keyNormal,
 {
 	// CTR key scrambler: KeyNormal = (((KeyX <<< 2) ^ KeyY) + constant) <<< 87
 	// NOTE: Since C doesn't have 128-bit types, we'll operate on
-	// 32-bit types. This requires some byteswapping, since the
+	// 64-bit types. This requires some byteswapping, since the
 	// key is handled as if it's big-endian.
-	// TODO: Operate on 64-bit types if building for 64-bit?
 
 	assert(keyNormal != nullptr);
 	assert(keyX != nullptr);
@@ -177,9 +150,6 @@ int CtrKeyScrambler::CtrScramble(u128_t *keyNormal,
 	const u128_t &ctr_scrambler_tmp = *ctr_scrambler;
 #endif
 
-#if USE64
-	// 64-bit version.
-
 	// Rotate KeyX left by two.
 	u128_t keyTmp;
 	keyTmp.u64[0] = (keyXtmp.u64[0] << 2) | (keyXtmp.u64[1] >> 62);
@@ -198,36 +168,6 @@ int CtrKeyScrambler::CtrScramble(u128_t *keyNormal,
 	// This is effectively "rotate left by 23" with adjusted DWORD indexes.
 	keyNormal->u64[1] = cpu_to_be64((keyTmp.u64[0] << 23) | (keyTmp.u64[1] >> 41));
 	keyNormal->u64[0] = cpu_to_be64((keyTmp.u64[1] << 23) | (keyTmp.u64[0] >> 41));
-#else /* !USE64 */
-	// 32-bit version.
-
-	// Rotate KeyX left by two.
-	u128_t keyTmp;
-	keyTmp.u32[0] = (keyXtmp.u32[0] << 2) | (keyXtmp.u32[1] >> 30);
-	keyTmp.u32[1] = (keyXtmp.u32[1] << 2) | (keyXtmp.u32[2] >> 30);
-	keyTmp.u32[2] = (keyXtmp.u32[2] << 2) | (keyXtmp.u32[3] >> 30);
-	keyTmp.u32[3] = (keyXtmp.u32[3] << 2) | (keyXtmp.u32[0] >> 30);
-
-	// XOR by KeyY.
-	keyTmp.u32[0] ^= be32_to_cpu(keyY->u32[0]);
-	keyTmp.u32[1] ^= be32_to_cpu(keyY->u32[1]);
-	keyTmp.u32[2] ^= be32_to_cpu(keyY->u32[2]);
-	keyTmp.u32[3] ^= be32_to_cpu(keyY->u32[3]);
-
-	// Add the constant.
-	// Reference for carry functionality: https://accu.org/index.php/articles/1849
-	keyTmp.u32[3] += ctr_scrambler_tmp.u32[3];
-	keyTmp.u32[2] += ctr_scrambler_tmp.u32[2] + (keyTmp.u32[3] < ctr_scrambler_tmp.u32[3]);
-	keyTmp.u32[1] += ctr_scrambler_tmp.u32[1] + (keyTmp.u32[2] < ctr_scrambler_tmp.u32[2]);
-	keyTmp.u32[0] += ctr_scrambler_tmp.u32[0] + (keyTmp.u32[1] < ctr_scrambler_tmp.u32[1]);
-
-	// Rotate left by 87.
-	// This is effectively "rotate left by 23" with adjusted DWORD indexes.
-	keyNormal->u32[2] = cpu_to_be32((keyTmp.u32[0] << 23) | (keyTmp.u32[1] >> 9));
-	keyNormal->u32[3] = cpu_to_be32((keyTmp.u32[1] << 23) | (keyTmp.u32[2] >> 9));
-	keyNormal->u32[0] = cpu_to_be32((keyTmp.u32[2] << 23) | (keyTmp.u32[3] >> 9));
-	keyNormal->u32[1] = cpu_to_be32((keyTmp.u32[3] << 23) | (keyTmp.u32[0] >> 9));
-#endif /* USE64 */
 
 	// We're done here.
 	return 0;
@@ -264,8 +204,8 @@ int CtrKeyScrambler::CtrScramble(u128_t *keyNormal,
 
 	KeyManager::KeyData_t keyData;
 	KeyManager::VerifyResult res = keyManager->getAndVerify(
-		CtrKeyScramblerPrivate::EncryptionKeyNames[CtrKeyScramblerPrivate::Key_Ctr_Scrambler], &keyData,
-		CtrKeyScramblerPrivate::EncryptionKeyVerifyData[CtrKeyScramblerPrivate::Key_Ctr_Scrambler], 16);
+		CtrKeyScramblerPrivate::EncryptionKeyNames[Key_Ctr_Scrambler], &keyData,
+		CtrKeyScramblerPrivate::EncryptionKeyVerifyData[Key_Ctr_Scrambler], 16);
 	if (res != KeyManager::VERIFY_OK) {
 		// Key error.
 		// TODO: Return the key error?

@@ -24,6 +24,9 @@
 
 #include "../config/ConfReader.hpp"
 
+// C includes.
+#include <stdint.h>
+
 namespace LibRpBase {
 
 class KeyManager : public ConfReader
@@ -69,7 +72,7 @@ class KeyManager : public ConfReader
 		 * @param res VerifyResult.
 		 * @return Description, or nullptr if invalid.
 		 */
-		static const rp_char *verifyResultToString(VerifyResult res);
+		static const char *verifyResultToString(VerifyResult res);
 
 #ifdef ENABLE_DECRYPTION
 	public:
@@ -116,6 +119,16 @@ class KeyManager : public ConfReader
 		// Verification test string.
 		// NOTE: This string is NOT NULL-terminated!
 		static const char verifyTestString[16];
+
+		/**
+		 * Convert string data from hexadecimal to bytes.
+		 * @param str	[in] String data. (Must be len*2 characters.)
+		 * @param buf	[out] Output buffer.
+		 * @param len	[in] Size of buf, in bytes.
+		 * @return 0 on success; non-zero on error.
+		 */
+		template<typename Char>
+		static int hexStringToBytes(const Char *str, uint8_t *buf, unsigned int len);
 #endif /* ENABLE_DECRYPTION */
 };
 

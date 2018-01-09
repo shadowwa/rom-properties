@@ -157,9 +157,9 @@ AesCAPI::~AesCAPI()
  * Get the name of the AesCipher implementation.
  * @return Name.
  */
-const rp_char *AesCAPI::name(void) const
+const char *AesCAPI::name(void) const
 {
-	return _RP("CryptoAPI");
+	return "CryptoAPI";
 }
 
 /**
@@ -178,7 +178,7 @@ bool AesCAPI::isInit(void) const
  * @param len Key length, in bytes.
  * @return 0 on success; negative POSIX error code on error.
  */
-int AesCAPI::setKey(const uint8_t *key, unsigned int len)
+int AesCAPI::setKey(const uint8_t *RESTRICT key, unsigned int len)
 {
 	// Acceptable key lengths:
 	// - 16 (AES-128)
@@ -288,7 +288,7 @@ int AesCAPI::setChainingMode(ChainingMode mode)
  * @param len IV/counter length, in bytes.
  * @return 0 on success; negative POSIX error code on error.
  */
-int AesCAPI::setIV(const uint8_t *iv, unsigned int len)
+int AesCAPI::setIV(const uint8_t *RESTRICT iv, unsigned int len)
 {
 	RP_D(AesCAPI);
 	if (!iv || len != 16) {
@@ -325,7 +325,7 @@ int AesCAPI::setIV(const uint8_t *iv, unsigned int len)
  * @param data_len Length of data block.
  * @return Number of bytes decrypted on success; 0 on error.
  */
-unsigned int AesCAPI::decrypt(uint8_t *data, unsigned int data_len)
+unsigned int AesCAPI::decrypt(uint8_t *RESTRICT data, unsigned int data_len)
 {
 	RP_D(AesCAPI);
 	if (d->hKey == 0) {
@@ -355,13 +355,24 @@ unsigned int AesCAPI::decrypt(uint8_t *data, unsigned int data_len)
 	if (d->chainingMode == CM_CTR) {
 		// CTR isn't supported by CryptoAPI directly.
 		// Need to decrypt each block manually.
-		uint8_t ctr_crypt[16];
+
+		// Using a union to allow 64-bit XORs
+		// for improved performance.
+		// NOTE: Can't use u128_t, since that's in libromdata. (N3DSVerifyKeys.hpp)
+		union ctr_block {
+			uint8_t u8[16];
+			uint64_t u64[2];
+		};
+
+		// TODO: Verify data alignment.
+		ctr_block ctr_crypt;
+		ctr_block *ctr_data = reinterpret_cast<ctr_block*>(data);
 		dwLen = 0;
-		for (; data_len > 0; data_len -= 16, data += 16) {
+		for (; data_len > 0; data_len -= 16, ctr_data++) {
 			// Encrypt the current counter.
-			memcpy(ctr_crypt, d->ctr, sizeof(ctr_crypt));
+			memcpy(ctr_crypt.u8, d->ctr, sizeof(ctr_crypt.u8));
 			DWORD dwTempLen = 16;
-			bRet = CryptEncrypt(hMyKey, 0, FALSE, 0, ctr_crypt, &dwTempLen, sizeof(ctr_crypt));
+			bRet = CryptEncrypt(hMyKey, 0, FALSE, 0, ctr_crypt.u8, &dwTempLen, sizeof(ctr_crypt.u8));
 			if (!bRet) {
 				// Encryption failed.
 				return 0;
@@ -369,10 +380,8 @@ unsigned int AesCAPI::decrypt(uint8_t *data, unsigned int data_len)
 			dwLen += dwTempLen;
 
 			// XOR with the ciphertext.
-			// TODO: Optimized XOR.
-			for (int i = 15; i >= 0; i--) {
-				data[i] ^= ctr_crypt[i];
-			}
+			ctr_data->u64[0] ^= ctr_crypt.u64[0];
+			ctr_data->u64[1] ^= ctr_crypt.u64[1];
 
 			// Increment the counter.
 			for (int i = 15; i >= 0; i--) {
@@ -400,8 +409,8 @@ unsigned int AesCAPI::decrypt(uint8_t *data, unsigned int data_len)
  * @param iv_len Length of the IV/counter.
  * @return Number of bytes decrypted on success; 0 on error.
  */
-unsigned int AesCAPI::decrypt(uint8_t *data, unsigned int data_len,
-	const uint8_t *iv, unsigned int iv_len)
+unsigned int AesCAPI::decrypt(uint8_t *RESTRICT data, unsigned int data_len,
+	const uint8_t *RESTRICT iv, unsigned int iv_len)
 {
 	RP_D(AesCAPI);
 	if (!iv || iv_len != 16) {

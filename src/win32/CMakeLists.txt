@@ -1,12 +1,14 @@
 PROJECT(rom-properties-win32)
 
+# Create the manifest file.
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/rom-properties.dll.manifest.in" "${CMAKE_CURRENT_BINARY_DIR}/rom-properties.dll.manifest" @ONLY)
+
 # Sources and headers.
 SET(rom-properties-win32_SRCS
 	DllMain.cpp
 	RP_ExtractIcon.cpp
 	RP_ExtractIcon_Register.cpp
 	RP_ExtractIcon_Fallback.cpp
-	RP_ComBase.cpp
 	RP_ExtractImage.cpp
 	RP_ExtractImage_Register.cpp
 	RP_ExtractImage_Fallback.cpp
@@ -17,19 +19,21 @@ SET(rom-properties-win32_SRCS
 	RP_ThumbnailProvider.cpp
 	RP_ThumbnailProvider_Register.cpp
 	RP_ThumbnailProvider_Fallback.cpp
+	CreateThumbnail.cpp
 	config/ConfigDialog.cpp
 	config/PropSheetIcon.cpp
 	config/RP_EmptyVolumeCacheCallback.cpp
 	config/ImageTypesTab.cpp
 	config/DownloadsTab.cpp
 	config/CacheTab.cpp
+	config/KeyStore_OwnerDataCallback.cpp
+	config/AboutTab.cpp
 	resource.rc
 	)
 SET(rom-properties-win32_H
 	RP_ExtractIcon.hpp
 	RP_ExtractIcon_p.hpp
 	RP_ClassFactory.hpp
-	RP_ComBase.hpp
 	RP_ExtractImage.hpp
 	RP_ExtractImage_p.hpp
 	RpImageWin32.hpp
@@ -37,6 +41,7 @@ SET(rom-properties-win32_H
 	RpFile_IStream.hpp
 	RP_ThumbnailProvider.hpp
 	RP_ThumbnailProvider_p.hpp
+	CreateThumbnail.hpp
 	config/ConfigDialog.hpp
 	config/PropSheetIcon.hpp
 	config/RP_EmptyVolumeCacheCallback.hpp
@@ -44,9 +49,21 @@ SET(rom-properties-win32_H
 	config/ImageTypesTab.hpp
 	config/DownloadsTab.hpp
 	config/CacheTab.hpp
-	QITab.h
+	config/KeyStore_OwnerDataCallback.hpp
+	config/AboutTab.hpp
 	resource.h
 	)
+
+IF(ENABLE_DECRYPTION)
+	SET(rom-properties-win32_CRYPTO_SRCS
+		config/KeyManagerTab.cpp
+		config/KeyStoreWin32.cpp
+		)
+	SET(rom-properties-win32_CRYPTO_H
+		config/KeyManagerTab.hpp
+		config/KeyStoreWin32.hpp
+		)
+ENDIF(ENABLE_DECRYPTION)
 
 IF(MSVC)
 	# Precompiled headers.
@@ -79,12 +96,10 @@ ENDIF(MSVC)
 # the 'lib' directory. Use SHARED instead.
 # TODO: Disable building of import libraries.
 ADD_LIBRARY(rom-properties SHARED
-	${rom-properties-win32_PCH_SRC}
-	${rom-properties-win32_PCH_H}
-	${rom-properties-win32-DELAY_LOAD_SRC}
-	${rom-properties-win32-DELAY_LOAD_H}
-	${rom-properties-win32_SRCS}
-	${rom-properties-win32_H}
+	${rom-properties-win32_PCH_SRC} ${rom-properties-win32_PCH_H}
+	${rom-properties-win32-DELAY_LOAD_SRC} ${rom-properties-win32-DELAY_LOAD_H}
+	${rom-properties-win32_SRCS} ${rom-properties-win32_H}
+	${rom-properties-win32_CRYPTO_SRCS} ${rom-properties-win32_CRYPTO_H}
 	)
 # NOTE: Only enabling PCH for MSVC.
 IF(MSVC)
@@ -107,8 +122,16 @@ TARGET_INCLUDE_DIRECTORIES(rom-properties
 		$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>
 		$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
 	)
-TARGET_LINK_LIBRARIES(rom-properties cachemgr16 romdata16 rpbase16)
-TARGET_LINK_LIBRARIES(rom-properties comctl32 advapi32)
+TARGET_LINK_LIBRARIES(rom-properties cachemgr romdata rpbase win32common)
+TARGET_LINK_LIBRARIES(rom-properties comctl32 advapi32 wtsapi32)
+
+# Add zlib and png directories for the About tab.
+IF(HAVE_ZLIB)
+	TARGET_INCLUDE_DIRECTORIES(rom-properties PRIVATE ${ZLIB_INCLUDE_DIRS})
+ENDIF(HAVE_ZLIB)
+IF(HAVE_PNG)
+	TARGET_INCLUDE_DIRECTORIES(rom-properties PRIVATE ${PNG_INCLUDE_DIRS})
+ENDIF(HAVE_PNG)
 
 # Delay-load some Windows system libraries.
 # TODO: MinGW delay-load?

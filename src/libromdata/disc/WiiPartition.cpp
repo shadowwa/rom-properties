@@ -22,15 +22,15 @@
 #include "librpbase/config.librpbase.h"
 #include "WiiPartition.hpp"
 
-#include "gcn_structs.h"
+#include "Console/gcn_structs.h"
 #include "GcnFst.hpp"
 
 // librpbase
 #include "librpbase/byteswap.h"
 #include "librpbase/crypto/KeyManager.hpp"
 #ifdef ENABLE_DECRYPTION
-#include "librpbase/crypto/AesCipherFactory.hpp"
 #include "librpbase/crypto/IAesCipher.hpp"
+#include "librpbase/crypto/AesCipherFactory.hpp"
 #endif /* ENABLE_DECRYPTION */
 using namespace LibRpBase;
 
@@ -111,27 +111,11 @@ class WiiPartitionPrivate : public GcnPartitionPrivate
 		int readSector(uint32_t sector_num);
 
 	public:
-		// Encryption key indexes.
-		// TODO: Combine with WiiPartition::EncKey.
-		enum EncryptionKeys {
-			// Retail
-			Key_Rvl_Common,
-			Key_Rvl_Korean,
-			Key_Rvl_SD_AES,
-			Key_Rvl_SD_IV,
-			Key_Rvl_SD_MD5,
-
-			// Debug
-			Key_Rvt_Debug,
-
-			Key_Max
-		};
-
 		// Verification key names.
-		static const char *const EncryptionKeyNames[Key_Max];
+		static const char *const EncryptionKeyNames[WiiPartition::Key_Max];
 
 		// Verification key data.
-		static const uint8_t EncryptionKeyVerifyData[Key_Max][16];
+		static const uint8_t EncryptionKeyVerifyData[WiiPartition::Key_Max][16];
 #endif
 };
 
@@ -140,10 +124,11 @@ class WiiPartitionPrivate : public GcnPartitionPrivate
 #ifdef ENABLE_DECRYPTION
 
 // Verification key names.
-const char *const WiiPartitionPrivate::EncryptionKeyNames[Key_Max] = {
+const char *const WiiPartitionPrivate::EncryptionKeyNames[WiiPartition::Key_Max] = {
 	// Retail
 	"rvl-common",
 	"rvl-korean",
+	"wup-vwii-common",
 	"rvl-sd-aes",
 	"rvl-sd-iv",
 	"rvl-sd-md5",
@@ -152,7 +137,7 @@ const char *const WiiPartitionPrivate::EncryptionKeyNames[Key_Max] = {
 	"rvt-debug",
 };
 
-const uint8_t WiiPartitionPrivate::EncryptionKeyVerifyData[Key_Max][16] = {
+const uint8_t WiiPartitionPrivate::EncryptionKeyVerifyData[WiiPartition::Key_Max][16] = {
 	/** Retail **/
 
 	// rvl-common
@@ -161,6 +146,9 @@ const uint8_t WiiPartitionPrivate::EncryptionKeyVerifyData[Key_Max][16] = {
 	// rvl-korean
 	{0x98,0x1C,0xD4,0x51,0x17,0xF2,0x23,0xB6,
 	 0xC8,0x84,0x4A,0x97,0xA6,0x93,0xF2,0xE3},
+	// wup-vwii-common
+	{0x04,0xF1,0x33,0x3F,0xF8,0x05,0x7B,0x8F,
+	 0xA7,0xF1,0xED,0x6E,0xAC,0x23,0x33,0xFA},
 	// rvl-sd-aes
 	{0x8C,0x1C,0xBA,0x01,0x02,0xB9,0x6F,0x65,
 	 0x24,0x7C,0x85,0x3C,0x0F,0x3B,0x8C,0x37},
@@ -218,7 +206,7 @@ WiiPartitionPrivate::WiiPartitionPrivate(WiiPartition *q, IDiscReader *discReade
 	}
 
 	// Make sure the signature type is correct.
-	if (be32_to_cpu(partitionHeader.ticket.signature_type) != RVL_SIGNATURE_TYPE_RSA2048) {
+	if (partitionHeader.ticket.signature_type != cpu_to_be32(RVL_SIGNATURE_TYPE_RSA2048)) {
 		// TODO: Better error?
 		q->m_lastError = EIO;
 		return;
@@ -305,19 +293,23 @@ KeyManager::VerifyResult WiiPartitionPrivate::initDecryption(void)
 	}
 
 	// Determine the encryption key to use.
-	WiiPartitionPrivate::EncryptionKeys keyIdx;
+	WiiPartition::EncryptionKeys keyIdx;
 	switch (encKey) {
 		case WiiPartition::ENCKEY_COMMON:
 			// Wii common key.
-			keyIdx = WiiPartitionPrivate::Key_Rvl_Common;
+			keyIdx = WiiPartition::Key_Rvl_Common;
 			break;
 		case WiiPartition::ENCKEY_KOREAN:
 			// Korean key.
-			keyIdx = WiiPartitionPrivate::Key_Rvl_Korean;
+			keyIdx = WiiPartition::Key_Rvl_Korean;
+			break;
+		case WiiPartition::ENCKEY_VWII:
+			// vWii common key.
+			keyIdx = WiiPartition::Key_Wup_vWii_Common;
 			break;
 		case WiiPartition::ENCKEY_DEBUG:
 			// Debug key. (RVT-R)
-			keyIdx = WiiPartitionPrivate::Key_Rvt_Debug;
+			keyIdx = WiiPartition::Key_Rvt_Debug;
 			break;
 		default:
 			// Unknown key...
@@ -394,7 +386,7 @@ KeyManager::VerifyResult WiiPartitionPrivate::initDecryption(void)
 	// If it isn't, the key is probably wrong.
 	const GCN_DiscHeader *discHeader =
 		reinterpret_cast<const GCN_DiscHeader*>(&sector_buf[SECTOR_SIZE_DECRYPTED_OFFSET]);
-	if (be32_to_cpu(discHeader->magic_wii) != WII_MAGIC) {
+	if (discHeader->magic_wii != cpu_to_be32(WII_MAGIC)) {
 		// Invalid disc header.
 		verifyResult = KeyManager::VERIFY_WRONG_KEY;
 		return verifyResult;
@@ -695,7 +687,7 @@ WiiPartition::EncKey WiiPartition::encKey(void) const
  */
 int WiiPartition::encryptionKeyCount_static(void)
 {
-	return WiiPartitionPrivate::Key_Max;
+	return Key_Max;
 }
 
 /**
@@ -705,7 +697,9 @@ int WiiPartition::encryptionKeyCount_static(void)
  */
 const char *WiiPartition::encryptionKeyName_static(int keyIdx)
 {
-	if (keyIdx < 0 || keyIdx >= WiiPartitionPrivate::Key_Max)
+	assert(keyIdx >= 0);
+	assert(keyIdx < Key_Max);
+	if (keyIdx < 0 || keyIdx >= Key_Max)
 		return nullptr;
 	return WiiPartitionPrivate::EncryptionKeyNames[keyIdx];
 }
@@ -717,7 +711,9 @@ const char *WiiPartition::encryptionKeyName_static(int keyIdx)
  */
 const uint8_t *WiiPartition::encryptionVerifyData_static(int keyIdx)
 {
-	if (keyIdx < 0 || keyIdx >= WiiPartitionPrivate::Key_Max)
+	assert(keyIdx >= 0);
+	assert(keyIdx < Key_Max);
+	if (keyIdx < 0 || keyIdx >= Key_Max)
 		return nullptr;
 	return WiiPartitionPrivate::EncryptionKeyVerifyData[keyIdx];
 }

@@ -21,7 +21,6 @@
 
 #include "CurlDownloader.hpp"
 #include "librpbase/TextFuncs.hpp"
-using LibRpBase::rp_string;
 
 // C includes. (C++ namespace)
 #include <cassert>
@@ -41,11 +40,11 @@ CurlDownloader::CurlDownloader()
 	: super()
 { }
 
-CurlDownloader::CurlDownloader(const rp_char *url)
+CurlDownloader::CurlDownloader(const char *url)
 	: super(url)
 { }
 
-CurlDownloader::CurlDownloader(const rp_string &url)
+CurlDownloader::CurlDownloader(const string &url)
 	: super(url)
 { }
 
@@ -190,31 +189,38 @@ int CurlDownloader::download(void)
 		return -1;	// TODO: Better error?
 	}
 
-	// Convert the URL to UTF-8.
-	// TODO: Only if not RP_UTF8?
-	string url8 = LibRpBase::rp_string_to_utf8(m_url);
-
 	// Proxy settings.
 	if (!m_proxyUrl.empty()) {
-		// TODO: Only if not RP_UTF8?
-		string proxyUrl8 = LibRpBase::rp_string_to_utf8(m_proxyUrl);
-		curl_easy_setopt(curl, CURLOPT_PROXY, proxyUrl8.c_str());
+		curl_easy_setopt(curl, CURLOPT_PROXY, m_proxyUrl.c_str());
 	}
 
 	// TODO: Send a HEAD request first?
 
 	// Set options for curl's "easy" mode.
-	curl_easy_setopt(curl, CURLOPT_URL, url8.c_str());
+	curl_easy_setopt(curl, CURLOPT_URL, m_url.c_str());
 	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, true);
 	// Fail on HTTP errors. (>= 400)
 	curl_easy_setopt(curl, CURLOPT_FAILONERROR, true);
 	// Redirection is required for http://amiibo.life/nfc/%08X-%08X
 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, true);
+
 	// Header and data functions.
 	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, parse_header);
 	curl_easy_setopt(curl, CURLOPT_HEADERDATA, this);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, this);
+
+	// Don't use signals. We're running as a plugin, so using
+	// signals might interfere.
+	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1);
+
+	// Set timeouts to ensure we don't take forever.
+	// TODO: User configuration?
+	// - Connect timeout: 2 seconds.
+	// - Total timeout: 20 seconds.
+	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 2);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 20);
+
 	// TODO: Set the User-Agent?
 	CURLcode res = curl_easy_perform(curl);
 	curl_easy_cleanup(curl);

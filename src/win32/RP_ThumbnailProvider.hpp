@@ -26,7 +26,7 @@
 #include "librpbase/common.h"
 
 // Reference: http://www.codeproject.com/Articles/338268/COM-in-C
-#include "RP_ComBase.hpp"
+#include "libwin32common/ComBase.hpp"
 
 // IThumbnailProvider
 #include "thumbcache.h"
@@ -46,14 +46,14 @@ namespace LibWin32Common {
 class RP_ThumbnailProvider_Private;
 
 class UUID_ATTR("{4723DF58-463E-4590-8F4A-8D9DD4F4355A}")
-RP_ThumbnailProvider : public RP_ComBase2<IInitializeWithStream, IThumbnailProvider>
+RP_ThumbnailProvider : public LibWin32Common::ComBase2<IInitializeWithStream, IThumbnailProvider>
 {
 	public:
 		RP_ThumbnailProvider();
 		virtual ~RP_ThumbnailProvider();
 
 	private:
-		typedef RP_ComBase2<IInitializeWithStream, IThumbnailProvider> super;
+		typedef LibWin32Common::ComBase2<IInitializeWithStream, IThumbnailProvider> super;
 		RP_DISABLE_COPY(RP_ThumbnailProvider)
 	private:
 		friend class RP_ThumbnailProvider_Private;
@@ -98,24 +98,6 @@ RP_ThumbnailProvider : public RP_ComBase2<IInitializeWithStream, IThumbnailProvi
 
 		// IThumbnailProvider
 		IFACEMETHODIMP GetThumbnail(UINT cx, HBITMAP *phbmp, WTS_ALPHATYPE *pdwAlpha) override final;
-
-	protected:
-		// Thumbnail resize policy.
-		// TODO: Make this configurable.
-		enum ResizePolicy {
-			RESIZE_NONE,	// No resizing.
-
-			// Only resize images that are less than or equal to half the
-			// requested thumbnail size. This is a compromise to allow
-			// small icons like Nintendo DS icons to be enlarged while
-			// larger but not-quite 256px images like GameTDB disc scans'
-			// (160px) will remain as-is.
-			RESIZE_HALF,
-
-			// Resize all images that are smaller than the requested
-			// thumbnail size.
-			RESIZE_ALL,
-		};
 };
 
 #ifdef __CRT_UUID_DECL

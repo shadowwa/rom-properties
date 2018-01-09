@@ -20,7 +20,6 @@
  ***************************************************************************/
 
 #include "NEResourceReader.hpp"
-#include "../exe_structs.h"
 
 // librpbase
 #include "librpbase/common.h"
@@ -32,6 +31,7 @@ using namespace LibRpBase;
 
 // C includes. (C++ namespace)
 #include <cassert>
+#include <cerrno>
 
 // C++ includes.
 #include <memory>
@@ -194,16 +194,10 @@ int NEResourceReaderPrivate::loadResTbl(void)
 	// We're only interested in the first three sections.
 
 	// Load the resource table.
-	int ret = file->seek(rsrc_tbl_addr);
-	if (ret != 0) {
-		// Seek error.
-		q->m_lastError = file->lastError();
-		return q->m_lastError;
-	}
 	unique_ptr<uint8_t[]> rsrcTblData(new uint8_t[rsrc_tbl_size]);
-	size_t size = file->read(rsrcTblData.get(), rsrc_tbl_size);
+	size_t size = file->seekAndRead(rsrc_tbl_addr, rsrcTblData.get(), rsrc_tbl_size);
 	if (size != rsrc_tbl_size) {
-		// Read error.
+		// Seek and/or read error.
 		q->m_lastError = file->lastError();
 		return q->m_lastError;
 	}
@@ -222,7 +216,7 @@ int NEResourceReaderPrivate::loadResTbl(void)
 
 	// TODO: Overflow prevention.
 	// TODO: Use pointers for pos and endpos?
-	ret = -EIO;
+	int ret = -EIO;
 	while (pos < rsrc_tbl_size) {
 		// Read the next type ID.
 		if ((pos + 2) >= rsrc_tbl_size) {
@@ -332,7 +326,7 @@ int NEResourceReaderPrivate::load_VS_VERSION_INFO_header(IRpFile *file, const ch
 	// DWORD alignment: Make sure we end on a multiple of 4 bytes.
 	// NOTE: sizeof(fields) == 4, so it's already WORD-aligned.
 	unsigned int keyData_len = key_len + 1;
-	keyData_len = (keyData_len + 3) & ~3;
+	keyData_len = ALIGN(4, keyData_len);
 	unique_ptr<char[]> keyData(new char[keyData_len]);
 	size = file->read(keyData.get(), keyData_len);
 	if (size != keyData_len) {
@@ -366,7 +360,7 @@ inline int NEResourceReaderPrivate::alignFileDWORD(IRpFile *file)
 	int ret = 0;
 	int64_t pos = file->tell();
 	if (pos % 4 != 0) {
-		pos = (pos + 3) & ~3LL;
+		pos = ALIGN(4, pos);
 		ret = file->seek(pos);
 	}
 	return ret;
@@ -400,7 +394,7 @@ int NEResourceReaderPrivate::load_StringTable(IRpFile *file, IResourceReader::St
 
 	// wLength contains the total string table length.
 	// wValueLength should be 0.
-	if (le16_to_cpu(fields[1]) != 0) {
+	if (fields[1] != cpu_to_le16(0)) {
 		// Not a string table.
 		return -EIO;
 	}
@@ -477,7 +471,7 @@ int NEResourceReaderPrivate::load_StringTable(IRpFile *file, IResourceReader::St
 
 		// DWORD alignment is required here.
 		tblPos += (key_len + 1);
-		tblPos  = (tblPos + 3) & ~3;
+		tblPos  = ALIGN(4, tblPos);
 
 		// Value must be NULL-terminated.
 		const char *value = reinterpret_cast<const char*>(&strTblData[tblPos]);
@@ -492,13 +486,13 @@ int NEResourceReaderPrivate::load_StringTable(IRpFile *file, IResourceReader::St
 		}
 
 		// FIXME: Proper codepage conversion.
-		st.push_back(std::pair<rp_string, rp_string>(
-			latin1_to_rp_string(key, key_len),
-			latin1_to_rp_string(value, value_len)));
+		st.push_back(std::pair<string, string>(
+			latin1_to_utf8(key, key_len),
+			latin1_to_utf8(value, value_len)));
 
 		// DWORD alignment is required here.
 		tblPos += wValueLength;
-		tblPos  = (tblPos + 3) & ~3;
+		tblPos  = ALIGN(4, tblPos);
 	}
 
 	// String table loaded successfully.

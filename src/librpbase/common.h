@@ -69,12 +69,73 @@
 #endif /* __cplusplus */
 
 // Deprecated function attribute.
-#if defined(__GNUC__)
-#define DEPRECATED __attribute__ ((deprecated))
-#elif defined(_MSC_VER)
-#define DEPRECATED __declspec(deprecated)
+#ifndef DEPRECATED
+# if defined(__GNUC__)
+#  define DEPRECATED __attribute__ ((deprecated))
+# elif defined(_MSC_VER)
+#  define DEPRECATED __declspec(deprecated)
+# else
+#  define DEPRECATED
+# endif
+#endif
+
+// Force inline attribute.
+#if !defined(FORCEINLINE)
+# if (!defined(_DEBUG) || defined(NDEBUG))
+#  if defined(__GNUC__)
+#   define FORCEINLINE inline __attribute__((always_inline))
+#  elif defined(_MSC_VER)
+#   define FORCEINLINE __forceinline
+#  else
+#   define FORCEINLINE inline
+#  endif
+# else
+#  ifdef _MSC_VER
+#   define FORCEINLINE __inline
+#  else
+#   define FORCEINLINE inline
+#  endif
+# endif
+#endif /* !defined(FORCEINLINE) */
+
+// gcc branch prediction hints.
+// Should be used in combination with profile-guided optimization.
+#ifdef __GNUC__
+# define likely(x)	__builtin_expect(!!(x), 1)
+# define unlikely(x)	__builtin_expect(!!(x), 0)
 #else
-#define DEPRECATED
+# define likely(x)	x
+# define unlikely(x)	x
+#endif
+
+// C99 restrict macro.
+// NOTE: gcc only defines restrict in C, not C++,
+// so use __restrict on both gcc and MSVC.
+#define RESTRICT __restrict
+
+// typeof() for MSVC.
+#ifdef _MSC_VER
+#define __typeof__(x) decltype(x)
+#endif
+
+/**
+ * Alignment macro.
+ * @param a	Alignment value.
+ * @param x	Byte count to align.
+ */
+#define ALIGN(a, x)	(((x)+((a)-1))&~((__typeof__(x))((a)-1)))
+
+/**
+ * Alignment assertion macro.
+ */
+#define ASSERT_ALIGNMENT(a, ptr)	assert(reinterpret_cast<uintptr_t>(ptr) % 16 == 0);
+
+// C API declaration for MSVC.
+// Required when using stdcall as the default calling convention.
+#ifdef _MSC_VER
+# define RP_C_API __cdecl
+#else
+# define RP_C_API
 #endif
 
 #endif /* __ROMPROPERTIES_LIBRPBASE_COMMON_H__ */

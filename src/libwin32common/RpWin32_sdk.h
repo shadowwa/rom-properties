@@ -51,7 +51,7 @@
 //#define NOWINMESSAGES 1
 //#define NOWINSTYLES 1
 //#define NOSYSMETRICS 1
-#define NOMENUS 1
+//#define NOMENUS 1
 #define NOICONS 1
 #define NOKEYSTATES 1
 #define NOSYSCOMMANDS 1
@@ -75,7 +75,7 @@
 #define NOSERVICE 1
 //#define NOSOUND 1
 //#define NOTEXTMETRIC 1
-#define NOWH 1
+//#define NOWH 1
 //#define NOWINOFFSETS 1
 #define NOCOMM 1
 #define NOKANJI 1
@@ -86,20 +86,20 @@
 
 #include <windows.h>
 
-#if defined(__GNUC__) && defined(__MINGW32__) && _WIN32_WINNT < 0x0502
+#if defined(__GNUC__) && defined(__MINGW32__) && _WIN32_WINNT < 0x0502 && defined(__cplusplus)
 /**
  * MinGW-w64 only defines ULONG overloads for the various atomic functions
- * if _WIN32_WINNT > 0x0502.
+ * if _WIN32_WINNT >= 0x0502.
  */
 static inline ULONG InterlockedIncrement(ULONG volatile *Addend)
 {
-	return (ULONG)(InterlockedIncrement(reinterpret_cast<LONG volatile*>(Addend)));
+	return (ULONG)(InterlockedIncrement((LONG volatile*)Addend));
 }
 static inline ULONG InterlockedDecrement(ULONG volatile *Addend)
 {
-	return (ULONG)(InterlockedDecrement(reinterpret_cast<LONG volatile*>(Addend)));
+	return (ULONG)(InterlockedDecrement((LONG volatile*)Addend));
 }
-#endif /* __GNUC__ && __MINGW32__ && _WIN32_WINNT < 0x0502 */
+#endif /* __GNUC__ && __MINGW32__ && _WIN32_WINNT < 0x0502 && __cplusplus */
 
 // UUID attribute.
 #ifdef _MSC_VER
@@ -121,5 +121,11 @@ static inline ULONG InterlockedDecrement(ULONG volatile *Addend)
 #ifndef _Outptr_
 #define _Outptr_
 #endif
+
+// Current image instance.
+// This is filled in by the linker.
+// Reference: https://blogs.msdn.microsoft.com/oldnewthing/20041025-00/?p=37483
+EXTERN_C IMAGE_DOS_HEADER __ImageBase;
+#define HINST_THISCOMPONENT ((HINSTANCE)&__ImageBase)
 
 #endif /* __ROMPROPERTIES_LIBWIN32COMMON_RPWIN32_SDK_H__ */

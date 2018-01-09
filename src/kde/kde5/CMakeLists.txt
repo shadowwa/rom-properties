@@ -4,6 +4,9 @@ PROJECT(rom-properties-kde5)
 # Find KDE5 Extra CMake Modules.
 FIND_PACKAGE(ECM 0.0.11 NO_MODULE)
 IF(ECM_MODULE_PATH AND ECM_KDE_MODULE_DIR)
+	# Make sure ECM's CMake files don't create an uninstall rule.
+	SET(KDE_SKIP_UNINSTALL_TARGET TRUE)
+
 	# Don't add KDE tests to the CTest build.
 	SET(KDE_SKIP_TEST_SETTINGS TRUE)
 
@@ -15,6 +18,10 @@ IF(ECM_MODULE_PATH AND ECM_KDE_MODULE_DIR)
 
 	# Get rid of the explicit C90 setting.
 	STRING(REPLACE "-std=iso9899:1990" "" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+
+	# Qt5 requires "-fpic -fPIC" due to reduced relocations.
+	SET(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS} -fpic -fPIC")
+	SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fpic -fPIC")
 
 	# Find Qt5.
 	SET(Qt5_NO_LINK_QTMAIN 1)
@@ -42,9 +49,10 @@ IF(ECM_MODULE_PATH AND ECM_KDE_MODULE_DIR)
 		IF(NOT PLUGIN_INSTALL_DIR)
 			MESSAGE(FATAL_ERROR "`qtpaths` isn't working correctly.")
 		ENDIF(NOT PLUGIN_INSTALL_DIR)
-		EXEC_PROGRAM(qtpaths ARGS --install-prefix OUTPUT_VARIABLE QT5_INSTALL_PREFIX)
+		# FIXME: Mageia has the Qt path set to "/usr/lib64/qt5" instead of "/usr".
+		# Reference: https://github.com/GerbilSoft/rom-properties/issues/69
 		INCLUDE(ReplaceHardcodedPrefix)
-		REPLACE_HARDCODED_PREFIX(PLUGIN_INSTALL_DIR "${QT5_INSTALL_PREFIX}")
+		REPLACE_HARDCODED_PREFIX(PLUGIN_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}")
 		SET(QT_PLUGIN_INSTALL_DIR "${PLUGIN_INSTALL_DIR}")
 
 		# Find KDE5. (TODO: Version?)
@@ -65,12 +73,19 @@ ENDIF()
 # Sources and headers. (common)
 STRING(REGEX REPLACE "([^;]+)" "../\\1" rom-properties-kde5_SRCS "${rom-properties-kde_SRCS}")
 STRING(REGEX REPLACE "([^;]+)" "../\\1" rom-properties-kde5_H "${rom-properties-kde_H}")
+STRING(REGEX REPLACE "([^;]+)" "../\\1" rom-properties-kde5_UIS "${rom-properties-kde_UIS}")
 
 # Sources and headers. (KDE5-specific)
 SET(rom-properties-kde5_SRCS
 	${rom-properties-kde5_SRCS}
 	RomPropertiesDialogPluginFactoryKDE5.cpp
 	)
+
+IF(COMMAND QT5_WRAP_UI)
+	# Wrap UI files.
+	QT5_WRAP_UI(rom-properties-kde5_UIS_H ${rom-properties-kde5_UIS})
+	ADD_CUSTOM_TARGET(kde5_generate_ui_h DEPENDS ${rom-properties-kde5_UIS_H})
+ENDIF(COMMAND QT5_WRAP_UI)
 
 #####################
 # Build the plugin. #
@@ -80,21 +95,31 @@ IF(BUILD_KDE5)
 	# Reference: https://community.kde.org/Frameworks/Porting_Notes
 	ADD_LIBRARY(rom-properties-kde5 MODULE
 		${rom-properties-kde5_SRCS}
+		${rom-properties-kde5_H}
 		${rom-properties-kde5_UIS_H}
 		)
 	SET_TARGET_PROPERTIES(rom-properties-kde5 PROPERTIES PREFIX "")
 	DO_SPLIT_DEBUG(rom-properties-kde5)
 	TARGET_INCLUDE_DIRECTORIES(rom-properties-kde5
-		PUBLIC	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-			$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
-		PRIVATE	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
-			$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>
-			$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>
-			$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>
+		PUBLIC	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>		# kde5
+			$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>		# kde5
+		PRIVATE	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>	# kde
+			$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>	# kde
+			$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>	# src
+			$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>	# src
 		)
-	TARGET_LINK_LIBRARIES(rom-properties-kde5 cachemgr16 romdata16 rpbase16)
+	TARGET_LINK_LIBRARIES(rom-properties-kde5 cachemgr romdata rpbase)
+	TARGET_LINK_LIBRARIES(rom-properties-kde5 ${ZLIB_LIBRARY})
 	TARGET_LINK_LIBRARIES(rom-properties-kde5 KF5::KIOWidgets)
 	TARGET_LINK_LIBRARIES(rom-properties-kde5 Qt5::Widgets Qt5::Gui Qt5::Core)
+
+	# Add zlib and png directories for the About tab.
+	IF(HAVE_ZLIB)
+		TARGET_INCLUDE_DIRECTORIES(rom-properties-kde5 PRIVATE ${ZLIB_INCLUDE_DIRS})
+	ENDIF(HAVE_ZLIB)
+	IF(HAVE_PNG)
+		TARGET_INCLUDE_DIRECTORIES(rom-properties-kde5 PRIVATE ${PNG_INCLUDE_DIRS})
+	ENDIF(HAVE_PNG)
 ENDIF(BUILD_KDE5)
 
 # Define -DQT_NO_DEBUG in release builds.

@@ -56,12 +56,15 @@ ENDIF()
 # Enable decryption for newer ROM and disc images.
 OPTION(ENABLE_DECRYPTION "Enable decryption for newer ROM and disc images." ON)
 
+# Enable S3TC decompression. If disabled, uses S2TC.
+OPTION(ENABLE_S3TC "Enable S3TC decompression. If disabled, uses S2TC." ON)
+
 # Link-time optimization.
-# FIXME: Not working in clang builds...
-IF(CMAKE_CXX_COMPILER_ID MATCHES "(Apple)?[Cc]lang")
-	SET(LTO_DEFAULT OFF)
-ELSEIF(CMAKE_COMPILER_IS_GNUCXX OR MSVC)
+# FIXME: Not working in clang builds and Ubuntu's gcc...
+IF(MSVC)
 	SET(LTO_DEFAULT ON)
+ELSE()
+	SET(LTO_DEFAULT OFF)
 ENDIF()
 OPTION(ENABLE_LTO "Enable link-time optimization in release builds." ${LTO_DEFAULT})
 
@@ -77,3 +80,11 @@ ENDIF(INSTALL_DEBUG AND NOT SPLIT_DEBUG)
 
 # Enable coverage checking. (gcc/clang only)
 OPTION(ENABLE_COVERAGE "Enable code coverage checking. (gcc/clang only)" OFF)
+
+# Enable NLS. (internationalization)
+# TODO: Get this working on Windows.
+IF(NOT WIN32)
+OPTION(ENABLE_NLS "Enable NLS using gettext for localized messages." ON)
+ELSE()
+SET(ENABLE_NLS OFF)
+ENDIF()

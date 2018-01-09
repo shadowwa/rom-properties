@@ -25,21 +25,37 @@ SET(RP_C_FLAGS_COMMON "${RP_C_FLAGS_COMMON} ${RP_STACK_CFLAG}")
 SET(RP_CXX_FLAGS_COMMON "${RP_CXX_FLAGS_COMMON} ${RP_STACK_CFLAG}")
 UNSET(RP_STACK_CFLAG)
 
-# Test for "/sdl".
+# Test for "/sdl" and "/guard:cf".
 INCLUDE(CheckCCompilerFlag)
-FOREACH(FLAG_TEST "-sdl")
-	CHECK_C_COMPILER_FLAG("${FLAG_TEST}" CFLAG_${FLAG_TEST})
-	IF(CFLAG_${FLAG_TEST})
+FOREACH(FLAG_TEST "/sdl" "/guard:cf")
+	# CMake doesn't like certain characters in variable names.
+	STRING(REGEX REPLACE "/|:" "_" FLAG_TEST_VARNAME "${FLAG_TEST}")
+
+	CHECK_C_COMPILER_FLAG("${FLAG_TEST}" CFLAG_${FLAG_TEST_VARNAME})
+	IF(CFLAG_${FLAG_TEST_VARNAME})
 		SET(RP_C_FLAGS_COMMON "${RP_C_FLAGS_COMMON} ${FLAG_TEST}")
 		SET(RP_CXX_FLAGS_COMMON "${RP_CXX_FLAGS_COMMON} ${FLAG_TEST}")
-	ENDIF(CFLAG_${FLAG_TEST})
-	UNSET(CFLAG_${FLAG_TEST})
+		IF(FLAG_TEST STREQUAL "/guard:cf")
+			# "/guard:cf" must be added to linker flags as well.
+			SET(RP_EXE_LINKER_FLAGS_COMMON "${RP_EXE_LINKER_FLAGS_COMMON} ${FLAG_TEST}")
+			SET(RP_SHARED_LINKER_FLAGS_COMMON "${RP_SHARED_LINKER_FLAGS_COMMON} ${FLAG_TEST}")
+			SET(RP_MODULE_LINKER_FLAGS_COMMON "${RP_MODULE_LINKER_FLAGS_COMMON} ${FLAG_TEST}")
+		ENDIF(FLAG_TEST STREQUAL "/guard:cf")
+	ENDIF(CFLAG_${FLAG_TEST_VARNAME})
+	UNSET(CFLAG_${FLAG_TEST_VARNAME})
 ENDFOREACH()
 
 # Disable warning C4996 (deprecated), then re-enable it.
 # Otherwise, it gets handled as an error due to /sdl.
 SET(RP_C_FLAGS_COMMON "${RP_C_FLAGS_COMMON} /wd4996 /w34996")
 SET(RP_CXX_FLAGS_COMMON "${RP_CXX_FLAGS_COMMON} /wd4996 /w34996")
+
+# MSVC 2015 uses thread-safe statics by default.
+# This doesn't work on XP, so disable it.
+IF(MSVC_VERSION GREATER 1899)
+	SET(RP_C_FLAGS_COMMON   "${RP_C_FLAGS_COMMON} /Zc:threadSafeInit-")
+	SET(RP_CXX_FLAGS_COMMON "${RP_CXX_FLAGS_COMMON} /Zc:threadSafeInit-")
+ENDIF()
 
 # Disable the RC and MASM "logo".
 # FIXME: Setting CMAKE_RC_FLAGS causes msbuild to fail,
@@ -57,13 +73,15 @@ SET(RP_CXX_FLAGS_COMMON "${RP_CXX_FLAGS_COMMON} /wd4996 /w34996")
 SET(CMAKE_ASM_MASM_FLAGS "/W0 /safeseh" CACHE STRING
      "Flags used by the assembler during all build types.")
 
+# CPU architecture.
+STRING(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" arch)
+
 # Check if CMAKE_SIZEOF_VOID_P is set correctly.
 IF(NOT CMAKE_SIZEOF_VOID_P)
 	# CMAKE_SIZEOF_VOID_P isn't set.
 	# Set it based on CMAKE_SYSTEM_PROCESSOR.
 	# FIXME: This won't work if we're cross-compiling, e.g. using
 	# the x86_amd64 or amd64_x86 toolchains.
-	STRING(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" arch)
 	IF(arch MATCHES "^x86_64$|^amd64$|^ia64$")
 		SET(CMAKE_SIZEOF_VOID_P 8)
 	ELSEIF(arch MATCHES "^(i.|x)86$")
@@ -72,8 +90,16 @@ IF(NOT CMAKE_SIZEOF_VOID_P)
 		# Assume other CPUs are 32-bit.
 		SET(CMAKE_SIZEOF_VOID_P 4)
 	ENDIF()
-	UNSET(arch)
 ENDIF(NOT CMAKE_SIZEOF_VOID_P)
+
+# Use stdcall on i386.
+# Applies to unexported functions only.
+# Exported functions must have explicit calling conventions.
+IF(arch MATCHES "^(i.|x)86$|^x86_64$|^amd64$|^ia64$" AND NOT CMAKE_CL_64)
+	SET(RP_C_FLAGS_COMMON   "${RP_C_FLAGS_COMMON} /Gz")
+	SET(RP_CXX_FLAGS_COMMON "${RP_CXX_FLAGS_COMMON} /Gz")
+ENDIF()
+UNSET(arch)
 
 # TODO: Code coverage checking for MSVC?
 IF(ENABLE_COVERAGE)

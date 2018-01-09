@@ -46,6 +46,9 @@ IF(NOT HAVE_LOCALTIME_R)
 	CHECK_SYMBOL_EXISTS_OR_INLINE(localtime_s "time.h" "time_t tm; localtime_s(NULL, &tm);" HAVE_LOCALTIME_S)
 ENDIF(NOT HAVE_LOCALTIME_R)
 
+# Create the manifest file.
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/rpcli.exe.manifest.in" "${CMAKE_CURRENT_BINARY_DIR}/rpcli.exe.manifest" @ONLY)
+
 # Write the config.h file.
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/config.rpcli.h.in" "${CMAKE_CURRENT_BINARY_DIR}/config.rpcli.h")
 
@@ -122,7 +125,7 @@ TARGET_INCLUDE_DIRECTORIES(rpcli
 		$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>
 		$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
 	)
-TARGET_LINK_LIBRARIES(rpcli romdata8 rpbase8)
+TARGET_LINK_LIBRARIES(rpcli romdata rpbase)
 
 # CMake-3.7.2 doesn't add include paths to windres.
 IF(MINGW)

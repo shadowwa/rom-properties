@@ -31,12 +31,14 @@
 
 // librpbase
 #include "librpbase/crypto/KeyManager.hpp"
-using LibRpBase::KeyManager;
+#include "librpbase/TextFuncs.hpp"
+#include "libi18n/i18n.h"
+using namespace LibRpBase;
 
 // libromdata
-#include "libromdata/crypto/CtrKeyScrambler.hpp"
 #include "libromdata/disc/WiiPartition.hpp"
-#include "libromdata/disc/NCCHReader.hpp"
+#include "libromdata/crypto/CtrKeyScrambler.hpp"
+#include "libromdata/crypto/N3DSVerifyKeys.hpp"
 using namespace LibRomData;
 
 // C includes. (C++ namespace)
@@ -68,7 +70,7 @@ typedef struct _EncKeyFns_t {
 static const EncKeyFns_t encKeyFns[] = {
 	ENCKEYFNS(WiiPartition),
 	ENCKEYFNS(CtrKeyScrambler),
-	ENCKEYFNS(NCCHReader),
+	ENCKEYFNS(N3DSVerifyKeys),
 
 	{nullptr, nullptr, nullptr, nullptr}
 };
@@ -79,15 +81,12 @@ static const EncKeyFns_t encKeyFns[] = {
  */
 int VerifyKeys(void)
 {
-	// TODO: Add decryption key functions to Nintendo3DS
-	// and stop using NCCHReader.
-
 	// Initialize the key manager.
 	// Get the Key Manager instance.
 	KeyManager *keyManager = KeyManager::instance();
 	assert(keyManager != nullptr);
 	if (!keyManager) {
-		cerr << "*** ERROR initializing KeyManager. Cannot verify keys." << endl;
+		cerr << "*** " << C_("rpcli", "ERROR initializing KeyManager. Cannot verify keys.") << endl;
 		return 1;
 	}
 
@@ -100,13 +99,13 @@ int VerifyKeys(void)
 		}
 		printedOne = true;
 
-		cerr << "*** Checking encryption keys from " << p->name << "..." << endl;
+		cerr << "*** " << rp_sprintf(C_("rpcli", "Checking encryption keys from '%s'..."), p->name) << endl;
 		int keyCount = p->pfnKeyCount();
 		for (int i = 0; i < keyCount; i++) {
 			const char *const keyName = p->pfnKeyName(i);
 			assert(keyName != nullptr);
 			if (!keyName) {
-				cerr << "WARNING: Key " << i << " has no name. Skipping..." << endl;
+				cerr << rp_sprintf(C_("rpcli", "WARNING: Key %d has no name. Skipping..."), i) << endl;
 				ret = 1;
 				continue;
 			}
@@ -115,7 +114,7 @@ int VerifyKeys(void)
 			const uint8_t *const verifyData = p->pfnVerifyData(i);
 			assert(verifyData != nullptr);
 			if (!verifyData) {
-				cerr << "WARNING: Key '" << keyName << "' has no verification data. Skipping..." << endl;
+				cerr << rp_sprintf(C_("rpcli", "WARNING: Key '%s' has no verification data. Skipping..."), keyName) << endl;
 				ret = 1;
 				continue;
 			}
@@ -124,39 +123,10 @@ int VerifyKeys(void)
 			KeyManager::VerifyResult res = keyManager->getAndVerify(keyName, nullptr, verifyData, 16);
 			cerr << keyName << ": ";
 			if (res == KeyManager::VERIFY_OK) {
-				cerr << "OK" << endl;
+				cerr << C_("rpcli", "OK") << endl;
 			} else {
-				cerr << "ERROR: ";
-				switch (res) {
-					case KeyManager::VERIFY_INVALID_PARAMS:
-						cerr << "Invalid parameters.";
-						break;
-					case KeyManager::VERIFY_KEY_DB_NOT_LOADED:
-						cerr << "Key database is not loaded.";
-						break;
-					case KeyManager::VERIFY_KEY_DB_ERROR:
-						cerr << "Key database error.";
-						break;
-					case KeyManager::VERIFY_KEY_NOT_FOUND:
-						cerr << "Key was not found.";
-						break;
-					case KeyManager::VERIFY_KEY_INVALID:
-						cerr << "Key is not valid for this operation.";
-						break;
-					case KeyManager::VERFIY_IAESCIPHER_INIT_ERR:
-						cerr << "AES initialization failed";
-						break;
-					case KeyManager::VERIFY_IAESCIPHER_DECRYPT_ERR:
-						cerr << "AES decryption failed.";
-						break;
-					case KeyManager::VERIFY_WRONG_KEY:
-						cerr << "Key is incorrect.";
-						break;
-					default:
-						cerr << "Unknown error code " << res << ".";
-						break;
-				}
-				cerr << endl;
+				cerr << rp_sprintf(C_("rpcli", "ERROR: %s"),
+					KeyManager::verifyResultToString(res)) << endl;
 				ret = 1;
 			}
 		}

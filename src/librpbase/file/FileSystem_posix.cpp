@@ -21,16 +21,19 @@
 
 #include "FileSystem.hpp"
 
+// libunixcommon
+#include "libunixcommon/userdirs.hpp"
 // libromdata
 #include "TextFuncs.hpp"
-#include "threads/Atomics.h"
+
+// One-time initialization.
+#include "threads/pthread_once.h"
 
 // C includes.
+#include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <pwd.h>
 #include <utime.h>
-#include <pthread.h>
 
 // C includes. (C++ namespace)
 #include <cstring>
@@ -49,9 +52,9 @@ static pthread_once_t once_control = PTHREAD_ONCE_INIT;
 // Configuration directories.
 
 // User's cache directory.
-static rp_string cache_dir;
+static string cache_dir;
 // User's configuration directory.
-static rp_string config_dir;
+static string config_dir;
 
 /**
  * Recursively mkdir() subdirectories.
@@ -66,10 +69,10 @@ static rp_string config_dir;
  * @param path Path to recursively mkdir. (last component is ignored)
  * @return 0 on success; negative POSIX error code on error.
  */
-int rmkdir(const rp_string &path)
+int rmkdir(const string &path)
 {
 	// Linux (and most other systems) use UTF-8 natively.
-	string path8 = rp_string_to_utf8(path);
+	string path8 = RP2U8_s(path);
 
 	// Find all slashes and ensure the directory component exists.
 	size_t slash_pos = path8.find(DIR_SEP_CHR, 0);
@@ -111,14 +114,9 @@ int rmkdir(const rp_string &path)
  * @param mode Mode.
  * @return 0 if the file exists with the specified mode; non-zero if not.
  */
-int access(const rp_string &pathname, int mode)
+int access(const string &pathname, int mode)
 {
-#if defined(RP_UTF16)
-	string pathname8 = rp_string_to_utf8(pathname);
-	return ::access(pathname8.c_str(), mode);
-#elif defined(RP_UTF8)
 	return ::access(pathname.c_str(), mode);
-#endif
 }
 
 /**
@@ -126,16 +124,10 @@ int access(const rp_string &pathname, int mode)
  * @param filename Filename.
  * @return Size on success; -1 on error.
  */
-int64_t filesize(const rp_string &filename)
+int64_t filesize(const string &filename)
 {
 	struct stat buf;
-#if defined(RP_UTF16)
-	string filename8 = rp_string_to_utf8(filename);
-	int ret = stat(filename8.c_str(), &buf);
-#elif defined(RP_UTF8)
 	int ret = stat(filename.c_str(), &buf);
-#endif
-
 	if (ret != 0) {
 		// stat() failed.
 		ret = -errno;
@@ -157,65 +149,27 @@ int64_t filesize(const rp_string &filename)
  */
 static void initConfigDirectories(void)
 {
-	/** Home directory. **/
-	// NOTE: The home directory is NOT cached.
-	// It's only used to determine the other directories.
+	// Use LibUnixCommon to get the XDG directories.
 
-	rp_string home_dir;
-	const char *const home = getenv("HOME");
-	if (home && home[0] != 0) {
-		// HOME variable is set.
-		home_dir = utf8_to_rp_string(home);
-	} else {
-		// HOME variable is not set.
-		// Check the user's pwent.
-		// TODO: Can pwd_result be nullptr?
-		// TODO: Check for ENOMEM?
-		// TODO: Support getpwuid() if the system doesn't support getpwuid_r()?
-		char buf[2048];
-		struct passwd pwd;
-		struct passwd *pwd_result;
-		int ret = getpwuid_r(getuid(), &pwd, buf, sizeof(buf), &pwd_result);
-		if (ret != 0 || !pwd_result) {
-			// getpwuid_r() failed.
-			return;
-		}
-
-		if (pwd_result->pw_dir[0] == 0) {
-			// Empty home directory...
-			return;
-		}
-
-		home_dir = utf8_to_rp_string(pwd_result->pw_dir, strlen(pwd_result->pw_dir));
-	}
-	if (home_dir.empty()) {
-		// Unable to get the home directory...
-		return;
+	// Cache directory.
+	cache_dir = U82RP_s(LibUnixCommon::getCacheDirectory());
+	if (!cache_dir.empty()) {
+		// Add a trailing slash if necessary.
+		if (cache_dir.at(cache_dir.size()-1) != '/')
+			cache_dir += '/';
+		// Append "rom-properties".
+		cache_dir += "rom-properties";
 	}
 
-	/** Cache directory. **/
-	// TODO: Check XDG variables.
-
-	// Unix/Linux: Cache directory is ~/.cache/rom-properties/.
-	// TODO: Mac OS X.
-	cache_dir = home_dir;
-	// Add a trailing slash if necessary.
-	if (cache_dir.at(cache_dir.size()-1) != '/')
-		cache_dir += _RP_CHR('/');
-	// Append ".cache/rom-properties".
-	cache_dir += _RP(".cache/rom-properties");
-
-	/** Configuration directory. **/
-	// TODO: Check XDG variables.
-
-	// Unix/Linux: Cache directory is ~/.config/rom-properties/.
-	// TODO: Mac OS X.
-	config_dir = home_dir;
-	// Add a trailing slash if necessary.
-	if (config_dir.at(config_dir.size()-1) != '/')
-		config_dir += _RP_CHR('/');
-	// Append ".config/rom-properties".
-	config_dir += _RP(".config/rom-properties");
+	// Config directory.
+	config_dir = U82RP_s(LibUnixCommon::getConfigDirectory());
+	if (!config_dir.empty()) {
+		// Add a trailing slash if necessary.
+		if (config_dir.at(config_dir.size()-1) != '/')
+			config_dir += '/';
+		// Append "rom-properties".
+		config_dir += "rom-properties";
+	}
 
 	// Directories have been initialized.
 }
@@ -229,7 +183,7 @@ static void initConfigDirectories(void)
  *
  * @return User's rom-properties cache directory, or empty string on error.
  */
-const rp_string &getCacheDirectory(void)
+const string &getCacheDirectory(void)
 {
 	// TODO: Handle errors.
 	pthread_once(&once_control, initConfigDirectories);
@@ -244,7 +198,7 @@ const rp_string &getCacheDirectory(void)
  *
  * @return User's rom-properties configuration directory, or empty string on error.
  */
-const rp_string &getConfigDirectory(void)
+const string &getConfigDirectory(void)
 {
 	// TODO: Handle errors.
 	pthread_once(&once_control, initConfigDirectories);
@@ -257,7 +211,7 @@ const rp_string &getConfigDirectory(void)
  * @param mtime Modification time.
  * @return 0 on success; negative POSIX error code on error.
  */
-int set_mtime(const rp_string &filename, time_t mtime)
+int set_mtime(const string &filename, time_t mtime)
 {
 	// FIXME: time_t is 32-bit on 32-bit Linux.
 	// TODO: Add a static_warning() macro?
@@ -265,7 +219,7 @@ int set_mtime(const rp_string &filename, time_t mtime)
 	struct utimbuf utbuf;
 	utbuf.actime = time(nullptr);
 	utbuf.modtime = mtime;
-	int ret = utime(rp_string_to_utf8(filename).c_str(), &utbuf);
+	int ret = utime(RP2U8_s(filename), &utbuf);
 
 	return (ret == 0 ? 0 : -errno);
 }
@@ -276,7 +230,7 @@ int set_mtime(const rp_string &filename, time_t mtime)
  * @param pMtime Buffer for the modification timestamp.
  * @return 0 on success; negative POSIX error code on error.
  */
-int get_mtime(const rp_string &filename, time_t *pMtime)
+int get_mtime(const string &filename, time_t *pMtime)
 {
 	if (!pMtime)
 		return -EINVAL;
@@ -285,7 +239,7 @@ int get_mtime(const rp_string &filename, time_t *pMtime)
 	// TODO: Add a static_warning() macro?
 	// - http://stackoverflow.com/questions/8936063/does-there-exist-a-static-warning
 	struct stat buf;
-	int ret = stat(rp_string_to_utf8(filename).c_str(), &buf);
+	int ret = stat(RP2U8_s(filename), &buf);
 	if (ret == 0) {
 		// stat() buffer retrieved.
 		*pMtime = buf.st_mtime;
@@ -299,17 +253,60 @@ int get_mtime(const rp_string &filename, time_t *pMtime)
  * @param filename Filename.
  * @return 0 on success; negative POSIX error code on error.
  */
-int delete_file(const rp_char *filename)
+int delete_file(const char *filename)
 {
-	if (!filename || filename[0] == 0)
+	if (unlikely(!filename || filename[0] == 0))
 		return -EINVAL;
 
-	int ret = unlink(rp_string_to_utf8(filename).c_str());
+	int ret = unlink(RP2U8_c(filename));
 	if (ret != 0) {
 		// Error deleting the file.
 		ret = -errno;
 	}
 
+	return ret;
+}
+
+/**
+ * Check if the specified file is a symbolic link.
+ * @return True if the file is a symbolic link; false if not.
+ */
+bool is_symlink(const char *filename)
+{
+	if (unlikely(!filename || filename[0] == 0))
+		return -EINVAL;
+	
+	struct stat buf;
+	int ret = lstat(RP2U8_c(filename), &buf);
+	if (ret != 0) {
+		// lstat() failed.
+		// Assume this is not a symlink.
+		return false;
+	}
+	return !!S_ISLNK(buf.st_mode);
+}
+
+/**
+ * Resolve a symbolic link.
+ *
+ * If the specified filename is not a symbolic link,
+ * the filename will be returned as-is.
+ *
+ * @param filename Filename of symbolic link.
+ * @return Resolved symbolic link, or empty string on error.
+ */
+string resolve_symlink(const char *filename)
+{
+	if (unlikely(!filename || filename[0] == 0))
+		return string();
+
+	// NOTE: realpath() might not be available on some systems...
+	string ret;
+	char *const resolved_path = realpath(RP2U8_c(filename), nullptr);
+	if (resolved_path != nullptr) {
+		ret = U82RP_cs(resolved_path);
+		free(resolved_path);
+	}
 	return ret;
 }
 

@@ -28,6 +28,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "threads/Atomics.h"
+
 #ifndef _WIN32
 // Unix dlopen()
 #include <dlfcn.h>
@@ -70,7 +72,7 @@ APNG_png_write_frame_tail_t APNG_png_write_frame_tail = NULL;
 /**
  * APNG reference couner.
  */
-static int ref_cnt = 0;
+static volatile int ref_cnt = 0;
 
 /**
  * Check if the PNG library supports APNG.
@@ -166,21 +168,17 @@ static int init_apng(void)
 int APNG_ref(void)
 {
 	assert(ref_cnt >= 0);
-	if (ref_cnt <= 0) {
+	if (ATOMIC_INC_FETCH(&ref_cnt) == 1) {
+		// First APNG reference.
 		// Attempt to load APNG.
 		if (init_apng() != 0) {
 			// Error loading APNG.
+			// NOTE: Not resetting the reference count here.
+			// Caller must call APNG_unref() regardless of
+			// initialization success or failure.
 			return -1;
 		}
-		if (ref_cnt < 0) {
-			// Invalid reference count...
-			ref_cnt = 0;
-		}
 	}
-
-	// Increment the reference counter.
-	// TODO: Atomic increment?
-	ref_cnt++;
 	return 0;
 }
 
@@ -191,14 +189,13 @@ int APNG_ref(void)
 void APNG_unref(void)
 {
 	assert(ref_cnt > 0);
-	if (ref_cnt <= 0)
-		return;
-
-	if (--ref_cnt == 0) {
+	if (ATOMIC_DEC_FETCH(&ref_cnt) == 0) {
 		// Unload APNG.
 		// TODO: Clear the function pointers?
-		dlclose(libpng_dll);
-		libpng_dll = NULL;
+		if (libpng_dll) {
+			dlclose(libpng_dll);
+			libpng_dll = NULL;
+		}
 	}
 }
 
@@ -211,8 +208,10 @@ void APNG_force_unload(void)
 	if (ref_cnt > 0) {
 		// Unload APNG.
 		// TODO: Clear the function pointers?
-		dlclose(libpng_dll);
-		libpng_dll = NULL;
+		if (libpng_dll) {
+			dlclose(libpng_dll);
+			libpng_dll = NULL;
+		}
 		ref_cnt = 0;
 	}
 }

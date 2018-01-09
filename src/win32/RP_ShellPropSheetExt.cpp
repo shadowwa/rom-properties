@@ -43,6 +43,11 @@ using LibWin32Common::AutoGetDC;
 #include "librpbase/img/rp_image.hpp"
 using namespace LibRpBase;
 
+// libi18n
+// NOTE: Using "RomDataView" for the context, since that
+// matches what's used for the KDE and GTK+ frontends.
+#include "libi18n/i18n.h"
+
 // libromdata
 #include "libromdata/RomDataFactory.hpp"
 using LibRomData::RomDataFactory;
@@ -62,6 +67,7 @@ using LibRomData::RomDataFactory;
 using std::unique_ptr;
 using std::unordered_set;
 using std::wostringstream;
+using std::string;
 using std::wstring;
 using std::vector;
 
@@ -117,11 +123,12 @@ class RP_ShellPropSheetExt_Private
 		static const wchar_t D_PTR_PROP[];
 
 	public:
-		// ROM data.
+		// ROM filename.
+		string filename;
+		// ROM data. (Not opened until the properties tab is shown.)
 		RomData *romData;
 
 		// Useful window handles.
-		HWND hDlgProps;		// Property dialog. (parent)
 		HWND hDlgSheet;		// Property sheet.
 
 		// Fonts.
@@ -138,6 +145,8 @@ class RP_ShellPropSheetExt_Private
 		unordered_set<HWND> hwndWarningControls;	// Controls using the "Warning" font.
 		// SysLink controls.
 		unordered_set<HWND> hwndSysLinkControls;
+		// ListView controls. (for toggling LVS_EX_DOUBLEBUFFER)
+		vector<HWND> hwndListViewControls;
 
 		// GDI+ token.
 		ScopedGdiplus gdipScope;
@@ -152,10 +161,15 @@ class RP_ShellPropSheetExt_Private
 		HMODULE hUxTheme_dll;
 		PFNISTHEMEACTIVE pfnIsThemeActive;
 
+		// Alternate row color.
+		COLORREF colorAltRow;
+		bool isFullyInit;		// TRUE if the window is fully initialized.
+
 		// Banner.
 		HBITMAP hbmpBanner;
 		POINT ptBanner;
 		SIZE szBanner;
+		bool nearest_banner;
 
 		// Tab layout.
 		HWND hTabWidget;
@@ -167,10 +181,10 @@ class RP_ShellPropSheetExt_Private
 		int curTabIndex;
 
 		// Animated icon data.
-		const IconAnimData *iconAnimData;
 		std::array<HBITMAP, IconAnimData::MAX_FRAMES> hbmpIconFrames;
 		RECT rectIcon;
 		SIZE szIcon;
+		bool nearest_icon;
 		IconAnimHelper iconAnimHelper;
 		UINT_PTR animTimerID;		// Animation timer ID. (non-zero == running)
 		int last_frame_number;		// Last frame number.
@@ -199,10 +213,12 @@ class RP_ShellPropSheetExt_Private
 
 	private:
 		/**
-		 * Increase an image's size to the minimum size, if necesary.
-		 * @param sz Image size.
+		 * Rescale an image to be as close to the required size as possible.
+		 * @param req_sz	[in] Required size.
+		 * @param sz		[in/out] Image size.
+		 * @return True if nearest-neighbor scaling should be used (size was kept the same or enlarged); false if shrunken (so use interpolation).
 		 */
-		void incSizeToMinimum(SIZE &sz);
+		static bool rescaleImage(const SIZE &req_sz, SIZE &sz);
 
 		/**
 		 * Create the header row.
@@ -242,11 +258,18 @@ class RP_ShellPropSheetExt_Private
 			const RomFields::Field *field);
 
 		/**
-		 * Initialize a ListView control.
-		 * @param hWnd		[in] HWND of the ListView control.
+		 * Initialize a ListData field.
+		 * @param hDlg		[in] Parent dialog window. (for dialog unit mapping)
+		 * @param hWndTab	[in] Tab window. (for the actual control)
+		 * @param pt_start	[in] Starting position, in pixels.
+		 * @param idx		[in] Field index.
+		 * @param size		[in] Width and height for a default ListView.
 		 * @param field		[in] RomFields::Field
+		 * @return Field height, in pixels.
 		 */
-		void initListView(HWND hWnd, const RomFields::Field *field);
+		int initListData(HWND hDlg, HWND hWndTab,
+			const POINT &pt_start, int idx, const SIZE &size,
+			const RomFields::Field *field);
 
 		/**
 		 * Initialize a Date/Time field.
@@ -297,6 +320,29 @@ class RP_ShellPropSheetExt_Private
 		 * @param hDlg Dialog window.
 		 */
 		void initDialog(HWND hDlg);
+
+	public:
+		// Property sheet callback functions.
+		static INT_PTR CALLBACK DlgProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+		static UINT CALLBACK CallbackProc(HWND hWnd, UINT uMsg, LPPROPSHEETPAGE ppsp);
+
+		/**
+		 * Animated icon timer.
+		 * @param hWnd
+		 * @param uMsg
+		 * @param idEvent
+		 * @param dwTime
+		 */
+		static void CALLBACK AnimTimerProc(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
+
+		/**
+		 * Dialog procedure for subtabs.
+		 * @param hDlg
+		 * @param uMsg
+		 * @param wParam
+		 * @param lParam
+		 */
+		static INT_PTR CALLBACK SubtabDlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
 };
 
 /** RP_ShellPropSheetExt_Private **/
@@ -308,8 +354,8 @@ const wchar_t RP_ShellPropSheetExt_Private::D_PTR_PROP[] = L"RP_ShellPropSheetEx
 RP_ShellPropSheetExt_Private::RP_ShellPropSheetExt_Private(RP_ShellPropSheetExt *q)
 	: q_ptr(q)
 	, romData(nullptr)
-	, hDlgProps(nullptr)
 	, hDlgSheet(nullptr)
+	, hFontDlg(nullptr)
 	, hFontBold(nullptr)
 	, hFontMono(nullptr)
 	, bPrevIsClearType(nullptr)
@@ -317,16 +363,20 @@ RP_ShellPropSheetExt_Private::RP_ShellPropSheetExt_Private(RP_ShellPropSheetExt 
 	, colorWinBg(0)
 	, hUxTheme_dll(nullptr)
 	, pfnIsThemeActive(nullptr)
+	, colorAltRow(0)
+	, isFullyInit(false)
 	, hbmpBanner(nullptr)
+	, nearest_banner(true)
 	, hTabWidget(nullptr)
 	, curTabIndex(0)
-	, iconAnimData(nullptr)
+	, nearest_icon(true)
 	, animTimerID(0)
 	, last_frame_number(0)
 {
 	memset(&lfFontMono, 0, sizeof(lfFontMono));
 	hbmpIconFrames.fill(nullptr);
 	memset(&ptBanner, 0, sizeof(ptBanner));
+	memset(&szBanner, 0, sizeof(szBanner));
 	memset(&rectIcon, 0, sizeof(rectIcon));
 	memset(&szIcon, 0, sizeof(szIcon));
 
@@ -337,6 +387,9 @@ RP_ShellPropSheetExt_Private::RP_ShellPropSheetExt_Private(RP_ShellPropSheetExt 
 	if (hUxTheme_dll) {
 		pfnIsThemeActive = (PFNISTHEMEACTIVE)GetProcAddress(hUxTheme_dll, "IsThemeActive");
 	}
+
+	// Initialize the alternate row color.
+	colorAltRow = LibWin32Common::getAltRowColor();
 }
 
 RP_ShellPropSheetExt_Private::~RP_ShellPropSheetExt_Private()
@@ -376,7 +429,7 @@ RP_ShellPropSheetExt_Private::~RP_ShellPropSheetExt_Private()
  */
 void RP_ShellPropSheetExt_Private::startAnimTimer(void)
 {
-	if (!iconAnimData) {
+	if (!iconAnimHelper.isAnimated()) {
 		// Not an animated icon.
 		return;
 	}
@@ -384,6 +437,7 @@ void RP_ShellPropSheetExt_Private::startAnimTimer(void)
 	// Get the current frame information.
 	last_frame_number = iconAnimHelper.frameNumber();
 	const int delay = iconAnimHelper.frameDelay();
+	assert(delay > 0);
 	if (delay <= 0) {
 		// Invalid delay value.
 		return;
@@ -393,8 +447,7 @@ void RP_ShellPropSheetExt_Private::startAnimTimer(void)
 	// We're using the 'd' pointer as nIDEvent.
 	animTimerID = SetTimer(hDlgSheet,
 		reinterpret_cast<UINT_PTR>(this),
-		delay,
-		RP_ShellPropSheetExt::AnimTimerProc);
+		delay, AnimTimerProc);
 }
 
 /**
@@ -419,10 +472,6 @@ void RP_ShellPropSheetExt_Private::stopAnimTimer(void)
  */
 void RP_ShellPropSheetExt_Private::loadImages(void)
 {
-	assert(romData != nullptr);
-	if (!romData)
-		return;
-
 	// Window background color.
 	// Static controls don't support alpha transparency (?? test),
 	// so we have to fake it.
@@ -459,9 +508,20 @@ void RP_ShellPropSheetExt_Private::loadImages(void)
 		// Get the banner.
 		const rp_image *banner = romData->image(RomData::IMG_INT_BANNER);
 		if (banner && banner->isValid()) {
+			// Save the banner size.
+			if (szBanner.cx == 0) {
+				szBanner.cx = banner->width();
+				szBanner.cy = banner->height();
+				// FIXME: Uncomment once proper aspect ratio scaling has been implemented.
+				// All banners are 96x32 right now.
+				//static const SIZE req_szBanner = {96, 32};
+				//nearest = rescaleImage(req_szBanner, szBanner);
+				nearest_banner = true;
+			}
+
 			// Convert to HBITMAP using the window background color.
 			// TODO: Redo if the window background color changes.
-			hbmpBanner = RpImageWin32::toHBITMAP(banner, gdipBgColor, szBanner, true);
+			hbmpBanner = RpImageWin32::toHBITMAP(banner, gdipBgColor, szBanner, nearest_banner);
 		}
 	}
 
@@ -478,16 +538,22 @@ void RP_ShellPropSheetExt_Private::loadImages(void)
 		// Get the icon.
 		const rp_image *icon = romData->image(RomData::IMG_INT_ICON);
 		if (icon && icon->isValid()) {
+			// Save the icon size.
+			if (szIcon.cx == 0) {
+				szIcon.cx = icon->width();
+				szIcon.cy = icon->height();
+				static const SIZE req_szIcon = {32, 32};
+				nearest_icon = rescaleImage(req_szIcon, szIcon);
+			}
+
 			// Get the animated icon data.
-			iconAnimData = romData->iconAnimData();
+			const IconAnimData *const iconAnimData = romData->iconAnimData();
 			if (iconAnimData) {
 				// Convert the icons to GDI+ bitmaps.
-				// TODO: Refactor this a bit...
-				for (int i = 0; i < iconAnimData->count; i++) {
+				for (int i = iconAnimData->count-1; i >= 0; i--) {
 					if (iconAnimData->frames[i] && iconAnimData->frames[i]->isValid()) {
 						// Convert to HBITMAP using the window background color.
-						// TODO: Redo if the window background color changes.
-						hbmpIconFrames[i] = RpImageWin32::toHBITMAP(iconAnimData->frames[i], gdipBgColor, szIcon, true);
+						hbmpIconFrames[i] = RpImageWin32::toHBITMAP(iconAnimData->frames[i], gdipBgColor, szIcon, nearest_icon);
 					}
 				}
 
@@ -499,32 +565,42 @@ void RP_ShellPropSheetExt_Private::loadImages(void)
 			} else {
 				// Not an animated icon.
 				last_frame_number = 0;
+				iconAnimHelper.setIconAnimData(nullptr);
 
 				// Convert to HBITMAP using the window background color.
-				// TODO: Redo if the window background color changes.
-				hbmpIconFrames[0] = RpImageWin32::toHBITMAP(icon, gdipBgColor, szIcon, true);
+				hbmpIconFrames[0] = RpImageWin32::toHBITMAP(icon, gdipBgColor, szIcon, nearest_icon);
 			}
 		}
 	}
 }
 
 /**
- * Increase an image's size to the minimum size, if necesary.
- * @param sz Image size.
+ * Rescale an image to be as close to the required size as possible.
+ * @param req_sz	[in] Required size.
+ * @param sz		[in/out] Image size.
+ * @return True if nearest-neighbor scaling should be used (size was kept the same or enlarged); false if shrunken (so use interpolation).
  */
-void RP_ShellPropSheetExt_Private::incSizeToMinimum(SIZE &sz)
+bool RP_ShellPropSheetExt_Private::rescaleImage(const SIZE &req_sz, SIZE &sz)
 {
-	// Minimum image size.
-	// If images are smaller, they will be resized.
-	// TODO: Adjust minimum size for DPI.
-	static const SIZE min_img_size = {32, 32};
-
-	if (sz.cx >= min_img_size.cx && sz.cx >= min_img_size.cy) {
+	// TODO: Adjust req_sz for DPI.
+	if (sz.cx == req_sz.cx && sz.cy == req_sz.cy) {
 		// No resize necessary.
-		return;
+		return true;
 	}
 
-	// Resize the image.
+	// Check if the image is too big.
+	if (sz.cx >= req_sz.cx || sz.cy >= sz.cy == req_sz.cy) {
+		// Image is too big. Shrink it.
+		// FIXME: Assuming the icon is always a power of two.
+		// Move TCreateThumbnail::rescale_aspect() into another file
+		// and make use of that.
+		sz.cx = 32;
+		sz.cy = 32;
+		return false;
+	}
+
+	// Image is too small.
+	// TODO: Ensure dimensions don't exceed req_img_size.
 	SIZE orig_sz = sz;
 	do {
 		// Increase by integer multiples until
@@ -532,7 +608,8 @@ void RP_ShellPropSheetExt_Private::incSizeToMinimum(SIZE &sz)
 		// TODO: Constrain to 32x32?
 		sz.cx += orig_sz.cx;
 		sz.cy += orig_sz.cy;
-	} while (sz.cx < min_img_size.cx && sz.cy < min_img_size.cy);
+	} while (sz.cx < req_sz.cx && sz.cy < req_sz.cy);
+	return true;
 }
 
 /**
@@ -544,7 +621,7 @@ void RP_ShellPropSheetExt_Private::incSizeToMinimum(SIZE &sz)
  */
 int RP_ShellPropSheetExt_Private::createHeaderRow(HWND hDlg, const POINT &pt_start, const SIZE &size)
 {
-	if (!hDlg)
+	if (!hDlg || !romData)
 		return 0;
 
 	// Total widget width.
@@ -552,11 +629,11 @@ int RP_ShellPropSheetExt_Private::createHeaderRow(HWND hDlg, const POINT &pt_sta
 
 	// System name.
 	// TODO: Logo, game icon, and game title?
-	const rp_char *systemName = romData->systemName(
+	const char *systemName = romData->systemName(
 		RomData::SYSNAME_TYPE_LONG | RomData::SYSNAME_REGION_ROM_LOCAL);
 
 	// File type.
-	const rp_char *const fileType = romData->fileType_string();
+	const char *const fileType = romData->fileType_string();
 
 	wstring sysInfo;
 	if (systemName) {
@@ -595,53 +672,16 @@ int RP_ShellPropSheetExt_Private::createHeaderRow(HWND hDlg, const POINT &pt_sta
 	// Supported image types.
 	const uint32_t imgbf = romData->supportedImageTypes();
 
-	// Banner.
-	const rp_image *banner = nullptr;
-	if (imgbf & RomData::IMGBF_INT_BANNER) {
-		// Get the banner.
-		banner = romData->image(RomData::IMG_INT_BANNER);
-		if (banner && banner->isValid()) {
-			szBanner.cx = banner->width();
-			szBanner.cy = banner->height();
-			incSizeToMinimum(szBanner);
+	// Add the banner and icon widths.
 
-			// Add the banner width.
-			// The banner will be assigned to a WC_STATIC control.
-			if (total_widget_width > 0) {
-				total_widget_width += pt_start.x;
-			}
-			total_widget_width += szBanner.cx;
-		} else {
-			// No banner.
-			banner = nullptr;
-		}
-	}
+	// Banner.
+	total_widget_width += szBanner.cx;
 
 	// Icon.
-	const rp_image *icon = nullptr;
-	if (imgbf & RomData::IMGBF_INT_ICON) {
-		// Get the icon.
-		icon = romData->image(RomData::IMG_INT_ICON);
-		if (icon && icon->isValid()) {
-			szIcon.cx = icon->width();
-			szIcon.cy = icon->height();
-			incSizeToMinimum(szIcon);
-
-			// Add the icon width.
-			// The icon will be assigned to a WC_STATIC control.
-			if (total_widget_width > 0) {
-				total_widget_width += pt_start.x;
-			}
-			total_widget_width += szIcon.cx;
-
-			// NOTE: Animated icon data is retrieved in loadImages(),
-			// which is called in WM_INITDIALOG. This is needed in order to
-			// ensure that the animated icon timer is initialized properly.
-		} else {
-			// No icon.
-			icon = nullptr;
-		}
+	if (total_widget_width > 0) {
+		total_widget_width += pt_start.x;
 	}
+	total_widget_width += szIcon.cx;
 
 	// Starting point.
 	POINT curPt = {
@@ -661,14 +701,14 @@ int RP_ShellPropSheetExt_Private::createHeaderRow(HWND hDlg, const POINT &pt_sta
 		curPt.x += sz_lblSysInfo.cx + pt_start.x;
 	}
 
-	// lblBanner
-	if (banner) {
+	// Banner.
+	if (szBanner.cx > 0) {
 		ptBanner = curPt;
 		curPt.x += szBanner.cx + pt_start.x;
 	}
 
-	// lblIcon
-	if (icon) {
+	// Icon.
+	if (szIcon.cx > 0) {
 		SetRect(&rectIcon, curPt.x, curPt.y,
 			curPt.x + szIcon.cx, curPt.y + szIcon.cy);
 		curPt.x += szIcon.cx + pt_start.x;
@@ -694,6 +734,9 @@ int RP_ShellPropSheetExt_Private::initString(HWND hDlg, HWND hWndTab,
 	const POINT &pt_start, int idx, const SIZE &size,
 	const RomFields::Field *field, LPCWSTR wcs)
 {
+	assert(hDlg != nullptr);
+	assert(hWndTab != nullptr);
+	assert(field != nullptr);
 	if (!hDlg || !hWndTab || !field)
 		return 0;
 
@@ -839,18 +882,16 @@ int RP_ShellPropSheetExt_Private::initString(HWND hDlg, HWND hWndTab,
 			SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
 
 		// Subclass multi-line EDIT controls to work around Enter/Escape issues.
+		// We're also subclassing single-line EDIT controls to disable the
+		// initial selection. (DLGC_HASSETSEL)
 		// Reference:  http://blogs.msdn.com/b/oldnewthing/archive/2007/08/20/4470527.aspx
-		if (dwStyle & ES_MULTILINE) {
-			// Store the object pointer so we can reference it later.
-			SetProp(hDlgItem, D_PTR_PROP, static_cast<HANDLE>(this));
-
-			// Subclass the control.
-			// TODO: Error handling?
-			SetWindowSubclass(hDlgItem,
-				RP_ShellPropSheetExt::MultilineEditProc,
-				reinterpret_cast<UINT_PTR>(cId),
-				reinterpret_cast<DWORD_PTR>(this));
-		}
+		// TODO: Error handling?
+		SUBCLASSPROC proc = (dwStyle & ES_MULTILINE)
+			? LibWin32Common::MultiLineEditProc
+			: LibWin32Common::SingleLineEditProc;
+		SetWindowSubclass(hDlgItem, proc,
+			reinterpret_cast<UINT_PTR>(cId),
+			reinterpret_cast<DWORD_PTR>(GetParent(hDlgSheet)));
 	}
 
 	// Save the control in the appropriate set, if necessary.
@@ -877,6 +918,10 @@ int RP_ShellPropSheetExt_Private::initBitfield(HWND hDlg, HWND hWndTab,
 	const POINT &pt_start, int idx,
 	const RomFields::Field *field)
 {
+	assert(hDlg != nullptr);
+	assert(hWndTab != nullptr);
+	assert(field != nullptr);
+	assert(field->type == RomFields::RFT_BITFIELD);
 	if (!hDlg || !hWndTab || !field)
 		return 0;
 	if (field->type != RomFields::RFT_BITFIELD)
@@ -904,6 +949,19 @@ int RP_ShellPropSheetExt_Private::initBitfield(HWND hDlg, HWND hWndTab,
 	GetClientRect(hWndTab, &rectDlg);
 	const int max_width = rectDlg.right - pt_start.x;
 
+	// Convert the bitfield description names to UTF-16 once.
+	vector<wstring> wnames;
+	wnames.reserve(count);
+	for (int j = 0; j < count; j++) {
+		const string &name = bitfieldDesc.names->at(j);
+		if (name.empty()) {
+			// Skip RP2W_s() for empty strings.
+			wnames.push_back(wstring());
+		} else {
+			wnames.push_back(RP2W_s(name));
+		}
+	}
+
 	// Column widths for multi-row layouts.
 	// (Includes the checkbox size.)
 	std::vector<int> col_widths;
@@ -921,16 +979,14 @@ int RP_ShellPropSheetExt_Private::initBitfield(HWND hDlg, HWND hWndTab,
 			col_widths.resize(elemsPerRow);
 			row = 0; col = 0;
 			for (int j = 0; j < count; j++) {
-				const rp_string &name = bitfieldDesc.names->at(j);
-				if (name.empty())
+				const wstring &wname = wnames.at(j);
+				if (wname.empty())
 					continue;
-				// Make sure this is a UTF-16 string.
-				wstring s_name = RP2W_s(name);
 
 				// Get the width of this specific entry.
 				// TODO: Use measureTextSize()?
 				SIZE textSize;
-				GetTextExtentPoint32(hDC, s_name.data(), (int)s_name.size(), &textSize);
+				GetTextExtentPoint32(hDC, wname.data(), (int)wname.size(), &textSize);
 				int chk_w = rect_chkbox.right + textSize.cx;
 				if (chk_w > col_widths[col]) {
 					col_widths[col] = chk_w;
@@ -983,11 +1039,9 @@ int RP_ShellPropSheetExt_Private::initBitfield(HWND hDlg, HWND hWndTab,
 
 	row = 0; col = 0;
 	for (int j = 0; j < count; j++) {
-		const rp_string &name = bitfieldDesc.names->at(j);
-		if (name.empty())
+		const wstring &wname = wnames.at(j);
+		if (wname.empty())
 			continue;
-		// Make sure this is a UTF-16 string.
-		wstring s_name = RP2W_s(name);
 
 		// Get the text size.
 		int chk_w;
@@ -995,7 +1049,7 @@ int RP_ShellPropSheetExt_Private::initBitfield(HWND hDlg, HWND hWndTab,
 			// Get the width of this specific entry.
 			// TODO: Use measureTextSize()?
 			SIZE textSize;
-			GetTextExtentPoint32(hDC, s_name.data(), (int)s_name.size(), &textSize);
+			GetTextExtentPoint32(hDC, wname.data(), (int)wname.size(), &textSize);
 			chk_w = rect_chkbox.right + textSize.cx;
 		} else {
 			if (col == elemsPerRow) {
@@ -1012,7 +1066,7 @@ int RP_ShellPropSheetExt_Private::initBitfield(HWND hDlg, HWND hWndTab,
 
 		// FIXME: Tab ordering?
 		HWND hCheckBox = CreateWindowEx(WS_EX_NOPARENTNOTIFY | WS_EX_TRANSPARENT,
-			WC_BUTTON, s_name.c_str(),
+			WC_BUTTON, wname.c_str(),
 			WS_CHILD | WS_TABSTOP | WS_VISIBLE | BS_CHECKBOX,
 			pt.x, pt.y, chk_w, rect_chkbox.bottom,
 			hWndTab, (HMENU)(INT_PTR)(IDC_RFT_BITFIELD(idx, j)),
@@ -1035,83 +1089,199 @@ int RP_ShellPropSheetExt_Private::initBitfield(HWND hDlg, HWND hWndTab,
 }
 
 /**
- * Initialize a ListView control.
- * @param hWnd		[in] HWND of the ListView control.
+ * Initialize a ListData field.
+ * @param hDlg		[in] Parent dialog window. (for dialog unit mapping)
+ * @param hWndTab	[in] Tab window. (for the actual control)
+ * @param pt_start	[in] Starting position, in pixels.
+ * @param idx		[in] Field index.
+ * @param size		[in] Width and height for a default ListView.
  * @param field		[in] RomFields::Field
+ * @return Field height, in pixels.
  */
-void RP_ShellPropSheetExt_Private::initListView(HWND hWnd, const RomFields::Field *field)
+int RP_ShellPropSheetExt_Private::initListData(HWND hDlg, HWND hWndTab,
+	const POINT &pt_start, int idx, const SIZE &size,
+	const RomFields::Field *field)
 {
-	if (!hWnd || !field)
-		return;
+	assert(hDlg != nullptr);
+	assert(hWndTab != nullptr);
+	assert(field != nullptr);
+	assert(field->type == RomFields::RFT_LISTDATA);
+	if (!hDlg || !hWndTab || !field)
+		return 0;
 	if (field->type != RomFields::RFT_LISTDATA)
-		return;
+		return 0;
 
 	const auto &listDataDesc = field->desc.list_data;
-	assert(listDataDesc.names != nullptr);
+	// NOTE: listDataDesc.names can be nullptr,
+	// which means we don't have any column headers.
+
+	auto list_data = field->data.list_data;
+	assert(list_data != nullptr);
+
+	// Create a ListView widget.
+	// NOTE: Separate row option is handled by the caller.
+	// TODO: Enable sorting?
+	// TODO: Optimize by not using OR?
+	DWORD lvsStyle = WS_CHILD | WS_VISIBLE | WS_TABSTOP | LVS_ALIGNLEFT | LVS_REPORT | LVS_SINGLESEL | LVS_NOSORTHEADER;
 	if (!listDataDesc.names) {
-		// No column names...
-		return;
+		lvsStyle |= LVS_NOCOLUMNHEADER;
 	}
+	HWND hDlgItem = CreateWindowEx(WS_EX_NOPARENTNOTIFY | WS_EX_CLIENTEDGE,
+		WC_LISTVIEW, nullptr, lvsStyle,
+		pt_start.x, pt_start.y,
+		size.cx, size.cy,
+		hWndTab, (HMENU)(INT_PTR)(IDC_RFT_LISTDATA(idx)),
+		nullptr, nullptr);
+	SetWindowFont(hDlgItem, hFontDlg, FALSE);
+	hwndListViewControls.push_back(hDlgItem);
 
 	// Set extended ListView styles.
-	ListView_SetExtendedListViewStyle(hWnd, LVS_EX_FULLROWSELECT);
+	DWORD lvsExStyle = LVS_EX_FULLROWSELECT;
+	if (!!GetSystemMetrics(SM_REMOTESESSION)) {
+		// Not RDP (or is RemoteFX): Enable double buffering.
+		lvsExStyle |= LVS_EX_DOUBLEBUFFER;
+	}
+	const bool hasCheckboxes = !!(listDataDesc.flags & RomFields::RFT_LISTDATA_CHECKBOXES);
+	if (hasCheckboxes) {
+		lvsExStyle |= LVS_EX_CHECKBOXES;
+	}
+	ListView_SetExtendedListViewStyle(hDlgItem, lvsExStyle);
 
 	// Insert columns.
-	// TODO: Make sure there aren't any columns to start with?
-	const int count = (int)listDataDesc.names->size();
-	for (int i = 0; i < count; i++) {
-		LVCOLUMN lvColumn;
+	int col_count = 1;
+	if (listDataDesc.names) {
+		col_count = (int)listDataDesc.names->size();
+	} else {
+		// No column headers.
+		// Use the first row.
+		if (list_data && !list_data->empty()) {
+			col_count = (int)list_data->at(0).size();
+		}
+	}
+
+	LVCOLUMN lvColumn;
+	if (listDataDesc.names) {
 		lvColumn.mask = LVCF_FMT | LVCF_TEXT;
 		lvColumn.fmt = LVCFMT_LEFT;
-		const rp_string &name = listDataDesc.names->at(i);
-		if (!name.empty()) {
-			// TODO: Support for RP_UTF8?
-			// NOTE: pszText is LPWSTR, not LPCWSTR...
-			lvColumn.pszText = (LPWSTR)(name.c_str());
-		} else {
-			// Don't show this column.
-			// FIXME: Zero-width column is a bad hack...
-			lvColumn.pszText = L"";
-			lvColumn.mask |= LVCF_WIDTH;
-			lvColumn.cx = 0;
+		for (int i = 0; i < col_count; i++) {
+			const string &str = listDataDesc.names->at(i);
+			if (!str.empty()) {
+				// NOTE: pszText is LPWSTR, not LPCWSTR...
+				const wstring wstr = RP2W_s(str);
+				lvColumn.pszText = const_cast<LPWSTR>(wstr.c_str());
+				ListView_InsertColumn(hDlgItem, i, &lvColumn);
+			} else {
+				// Don't show this column.
+				// FIXME: Zero-width column is a bad hack...
+				lvColumn.pszText = L"";
+				lvColumn.mask |= LVCF_WIDTH;
+				lvColumn.cx = 0;
+				ListView_InsertColumn(hDlgItem, i, &lvColumn);
+			}
 		}
-
-		ListView_InsertColumn(hWnd, i, &lvColumn);
+	} else {
+		lvColumn.mask = LVCF_FMT;
+		lvColumn.fmt = LVCFMT_LEFT;
+		for (int i = 0; i < col_count; i++) {
+			ListView_InsertColumn(hDlgItem, i, &lvColumn);
+		}
 	}
 
 	// Add the row data.
-	auto list_data = field->data.list_data;
-	assert(list_data != nullptr);
 	if (list_data) {
-		const int count = (int)list_data->size();
-		for (int i = 0; i < count; i++) {
-			LVITEM lvItem;
-			lvItem.mask = LVIF_TEXT;
-			lvItem.iItem = i;
+		const int row_count = (int)list_data->size();
+		uint32_t checkboxes = field->data.list_checkboxes;
+		LVITEM lvItem;
+		lvItem.mask = LVIF_TEXT;
+		int row_num = 0;
+		for (int i = 0; i < row_count; i++) {
+			const vector<string> &data_row = list_data->at(i);
+			if (hasCheckboxes && data_row.empty()) {
+				// Skip this row.
+				checkboxes >>= 1;
+				continue;
+			}
 
-			const vector<rp_string> &data_row = list_data->at(i);
+			lvItem.iItem = row_num;
 			int col = 0;
 			for (auto iter = data_row.cbegin(); iter != data_row.cend(); ++iter, ++col) {
 				lvItem.iSubItem = col;
-				// TODO: Support for RP_UTF8?
 				// NOTE: pszText is LPWSTR, not LPCWSTR...
-				lvItem.pszText = (LPWSTR)iter->c_str();
+				const wstring wstr = RP2W_s(*iter);
+				lvItem.pszText = const_cast<LPWSTR>(wstr.c_str());
 				if (col == 0) {
 					// Column 0: Insert the item.
-					ListView_InsertItem(hWnd, &lvItem);
+					ListView_InsertItem(hDlgItem, &lvItem);
+					// Set the checkbox state after inserting the item.
+					// Setting the state when inserting it doesn't seem to work...
+					if (hasCheckboxes) {
+						ListView_SetCheckState(hDlgItem, row_num, (checkboxes & 1));
+						checkboxes >>= 1;
+					}
 				} else {
 					// Columns 1 and higher: Set the subitem.
-					ListView_SetItem(hWnd, &lvItem);
+					ListView_SetItem(hDlgItem, &lvItem);
 				}
 			}
+
+			// Next row.
+			row_num++;
 		}
 	}
 
 	// Resize all of the columns.
 	// TODO: Do this on system theme change?
-	for (int i = 0; i < count; i++) {
-		ListView_SetColumnWidth(hWnd, i, LVSCW_AUTOSIZE_USEHEADER);
+	for (int i = 0; i < col_count; i++) {
+		ListView_SetColumnWidth(hDlgItem, i, LVSCW_AUTOSIZE_USEHEADER);
 	}
+
+	// Get the dialog margin.
+	// 7x7 DLU margin is recommended by the Windows UX guidelines.
+	// Reference: http://stackoverflow.com/questions/2118603/default-dialog-padding
+	RECT dlgMargin = {7, 7, 8, 8};
+	MapDialogRect(hDlg, &dlgMargin);
+
+	// Increase the ListView height.
+	// Default: 5 rows, plus the header.
+	int cy = 0;
+	if (ListView_GetItemCount(hDlgItem) > 0) {
+		if (listDataDesc.names) {
+			// Get the header rect.
+			HWND hHeader = ListView_GetHeader(hDlgItem);
+			assert(hHeader != nullptr);
+			if (hHeader) {
+				RECT rectHeader;
+				GetClientRect(hHeader, &rectHeader);
+				cy = rectHeader.bottom;
+			}
+		}
+
+		// Get an item rect.
+		RECT rectItem;
+		ListView_GetItemRect(hDlgItem, 0, &rectItem, LVIR_BOUNDS);
+		const int item_cy = (rectItem.bottom - rectItem.top);
+		if (item_cy > 0) {
+			// Multiply by the requested number of visible rows.
+			int rows_visible = field->desc.list_data.rows_visible;
+			if (rows_visible == 0) {
+				rows_visible = 5;
+			}
+			cy += (item_cy * rows_visible);
+			// Add half of the dialog margin.
+			// TODO Get the ListView border size?
+			cy += (dlgMargin.top/2);
+		} else {
+			// TODO: Can't handle this case...
+			cy = size.cy;
+		}
+	} else {
+		// TODO: Can't handle this if no items are present.
+		cy = size.cy;
+	}
+
+	SetWindowPos(hDlgItem, nullptr, 0, 0, size.cx, cy,
+		SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER | SWP_NOMOVE);
+	return cy;
 }
 
 /**
@@ -1129,6 +1299,10 @@ int RP_ShellPropSheetExt_Private::initDateTime(HWND hDlg, HWND hWndTab,
 	const POINT &pt_start, int idx, const SIZE &size,
 	const RomFields::Field *field)
 {
+	assert(hDlg != nullptr);
+	assert(hWndTab != nullptr);
+	assert(field != nullptr);
+	assert(field->type == RomFields::RFT_DATETIME);
 	if (!hDlg || !hWndTab || !field)
 		return 0;
 	if (field->type != RomFields::RFT_DATETIME)
@@ -1136,7 +1310,8 @@ int RP_ShellPropSheetExt_Private::initDateTime(HWND hDlg, HWND hWndTab,
 
 	if (field->data.date_time == -1) {
 		// Invalid date/time.
-		return initString(hDlg, hWndTab, pt_start, idx, size, field, L"Unknown");
+		return initString(hDlg, hWndTab, pt_start, idx, size, field,
+			RP2W_c(C_("RomDataView", "Unknown")));
 	}
 
 	// Format the date/time using the system locale.
@@ -1164,10 +1339,19 @@ int RP_ShellPropSheetExt_Private::initDateTime(HWND hDlg, HWND hWndTab,
 
 	if (field->desc.flags & RomFields::RFT_DATETIME_HAS_DATE) {
 		// Format the date.
-		int ret = GetDateFormat(
-			MAKELCID(LOCALE_USER_DEFAULT, SORT_DEFAULT),
-			DATE_SHORTDATE,
-			&st, nullptr, &dateTimeStr[start_pos], cchBuf);
+		int ret;
+		if (field->desc.flags & RomFields::RFT_DATETIME_NO_YEAR) {
+			// TODO: Localize this.
+			// TODO: Windows 10 has DATE_MONTHDAY.
+			ret = GetDateFormat(
+				MAKELCID(LOCALE_USER_DEFAULT, SORT_DEFAULT),
+				0, &st, L"MMM d", &dateTimeStr[start_pos], cchBuf);
+		} else {
+			ret = GetDateFormat(
+				MAKELCID(LOCALE_USER_DEFAULT, SORT_DEFAULT),
+				DATE_SHORTDATE,
+				&st, nullptr, &dateTimeStr[start_pos], cchBuf);
+		}
 		if (ret <= 0) {
 			// Error!
 			return 0;
@@ -1228,6 +1412,10 @@ int RP_ShellPropSheetExt_Private::initAgeRatings(HWND hDlg, HWND hWndTab,
 	const POINT &pt_start, int idx, const SIZE &size,
 	const RomFields::Field *field)
 {
+	assert(hDlg != nullptr);
+	assert(hWndTab != nullptr);
+	assert(field != nullptr);
+	assert(field->type == RomFields::RFT_AGE_RATINGS);
 	if (!hDlg || !hWndTab || !field)
 		return 0;
 	if (field->type != RomFields::RFT_AGE_RATINGS)
@@ -1237,47 +1425,14 @@ int RP_ShellPropSheetExt_Private::initAgeRatings(HWND hDlg, HWND hWndTab,
 	assert(age_ratings != nullptr);
 	if (!age_ratings) {
 		// No age ratings data.
-		return initString(hDlg, hWndTab, pt_start, idx, size, field, L"ERROR");
+		return initString(hDlg, hWndTab, pt_start, idx, size, field,
+			RP2W_c(C_("RomDataView", "ERROR")));
 	}
 
 	// Convert the age ratings field to a string.
-	wostringstream woss;
-	unsigned int ratings_count = 0;
-	for (int i = 0; i < (int)age_ratings->size(); i++) {
-		const uint16_t rating = age_ratings->at(i);
-		if (!(rating & RomFields::AGEBF_ACTIVE))
-			continue;
-
-		if (ratings_count > 0) {
-			// Append a comma.
-			if (ratings_count % 4 == 0) {
-				// 4 ratings per line.
-				woss << L",\n";
-			} else {
-				woss << L", ";
-			}
-		}
-
-		const char *abbrev = RomFields::ageRatingAbbrev(i);
-		if (abbrev) {
-			woss << RP2W_s(latin1_to_rp_string(abbrev, -1));
-		} else {
-			// Invalid age rating.
-			// Use the numeric index.
-			woss << i;
-		}
-		woss << L'=';
-		woss << RP2W_s(utf8_to_rp_string(RomFields::ageRatingDecode(i, rating)));
-		ratings_count++;
-	}
-
-	if (ratings_count == 0) {
-		// No age ratings.
-		woss << L"None";
-	}
-
-	// Initialize the string.
-	return initString(hDlg, hWndTab, pt_start, idx, size, field, woss.str().c_str());
+	string str = RomFields::ageRatingsDecode(age_ratings);
+	// Initialize the string field.
+	return initString(hDlg, hWndTab, pt_start, idx, size, field, RP2W_s(str));
 }
 
 /**
@@ -1286,6 +1441,7 @@ int RP_ShellPropSheetExt_Private::initAgeRatings(HWND hDlg, HWND hWndTab,
  */
 void RP_ShellPropSheetExt_Private::initBoldFont(HFONT hFont)
 {
+	assert(hFont != nullptr);
 	if (!hFont || hFontBold) {
 		// No base font, or the bold font
 		// is already initialized.
@@ -1307,6 +1463,7 @@ void RP_ShellPropSheetExt_Private::initBoldFont(HFONT hFont)
  */
 void RP_ShellPropSheetExt_Private::initMonospacedFont(HFONT hFont)
 {
+	assert(hFont != nullptr);
 	if (!hFont) {
 		// No base font...
 		return;
@@ -1376,13 +1533,16 @@ void RP_ShellPropSheetExt_Private::initMonospacedFont(HFONT hFont)
  */
 void RP_ShellPropSheetExt_Private::initDialog(HWND hDlg)
 {
-	if (!romData) {
-		// No ROM data loaded.
+	assert(hDlg != nullptr);
+	assert(romData != nullptr);
+	if (!hDlg || !romData) {
+		// No dialog, or no ROM data loaded.
 		return;
 	}
 
 	// Get the fields.
 	const RomFields *fields = romData->fields();
+	assert(fields != nullptr);
 	if (!fields) {
 		// No fields.
 		// TODO: Show an error?
@@ -1399,12 +1559,18 @@ void RP_ShellPropSheetExt_Private::initDialog(HWND hDlg)
 	InitCommonControlsEx(&initCommCtrl);
 
 	// Dialog font and device context.
-	hFontDlg = GetWindowFont(hDlg);
+	if (!hFontDlg) {
+		hFontDlg = GetWindowFont(hDlg);
+	}
 	AutoGetDC hDC(hDlg, hFontDlg);
 
 	// Initialize the bold and monospaced fonts.
 	initBoldFont(hFontDlg);
 	initMonospacedFont(hFontDlg);
+
+	// Convert the field description labels to UTF-16 once.
+	vector<wstring> w_desc_text;
+	w_desc_text.reserve(count);
 
 	// Determine the maximum length of all field names.
 	// TODO: Line breaks?
@@ -1413,26 +1579,33 @@ void RP_ShellPropSheetExt_Private::initDialog(HWND hDlg)
 	for (int i = 0; i < count; i++) {
 		const RomFields::Field *field = fields->field(i);
 		assert(field != nullptr);
-		if (!field || !field->isValid)
+		if (!field || !field->isValid) {
+			w_desc_text.push_back(wstring());
 			continue;
-		if (field->name.empty())
+		} else if (field->name.empty()) {
+			w_desc_text.push_back(wstring());
 			continue;
-		// Make sure this is a UTF-16 string.
-		wstring s_name = RP2W_s(field->name);
+		}
+
+		// tr: Field description label.
+		w_desc_text.push_back(RP2W_s(rp_sprintf(
+			C_("RomDataView", "%s:"), field->name.c_str())));
+		const wstring& desc_text = w_desc_text.at(i);
 
 		// TODO: Handle STRF_WARNING?
 
 		// Get the width of this specific entry.
 		// TODO: Use measureTextSize()?
-		GetTextExtentPoint32(hDC, s_name.data(), (int)s_name.size(), &textSize);
+		GetTextExtentPoint32(hDC, desc_text.data(), (int)desc_text.size(), &textSize);
 		if (textSize.cx > max_text_width) {
 			max_text_width = textSize.cx;
 		}
 	}
 
-	// Add additional spacing for the ':'.
+	// Add additional spacing between the ':' and the field.
 	// TODO: Use measureTextSize()?
-	GetTextExtentPoint32(hDC, L":  ", 3, &textSize);
+	// TODO: Reduce to 1 space?
+	GetTextExtentPoint32(hDC, L"  ", 2, &textSize);
 	max_text_width += textSize.cx;
 
 	// Create the ROM field widgets.
@@ -1503,12 +1676,13 @@ void RP_ShellPropSheetExt_Private::initDialog(HWND hDlg)
 		tcItem.mask = TCIF_TEXT;
 		for (int i = 0; i < fields->tabCount(); i++) {
 			// Create a tab.
-			const rp_char *name = fields->tabName(i);
+			const char *name = fields->tabName(i);
 			if (!name) {
 				// Skip this tab.
 				continue;
 			}
-			tcItem.pszText = const_cast<LPWSTR>(RP2W_c(name));
+			const wstring wstr = RP2W_c(name);
+			tcItem.pszText = const_cast<LPWSTR>(wstr.c_str());
 			// FIXME: Does the index work correctly if a tab is skipped?
 			TabCtrl_InsertItem(hTabWidget, i, &tcItem);
 		}
@@ -1533,9 +1707,9 @@ void RP_ShellPropSheetExt_Private::initDialog(HWND hDlg)
 			auto &tab = tabs[i];
 
 			// Create a child dialog for the tab.
-			extern HINSTANCE g_hInstance;
-			tab.hDlg = CreateDialog(g_hInstance, MAKEINTRESOURCE(IDD_SUBTAB_CHILD_DIALOG),
-				hDlg, RP_ShellPropSheetExt::SubtabDlgProc);
+			tab.hDlg = CreateDialog(HINST_THISCOMPONENT,
+				MAKEINTRESOURCE(IDD_SUBTAB_CHILD_DIALOG),
+				hDlg, SubtabDlgProc);
 			SetWindowPos(tab.hDlg, nullptr,
 				dlgRect.left, dlgRect.top,
 				dlgSize.cx, dlgSize.cy,
@@ -1580,14 +1754,9 @@ void RP_ShellPropSheetExt_Private::initDialog(HWND hDlg)
 		// Current tab.
 		auto &tab = tabs[tabIdx];
 
-		// Append a ":" to the description.
-		// TODO: Localization.
-		wstring desc_text = RP2W_s(field->name);
-		desc_text += L':';
-
 		// Create the static text widget. (FIXME: Disable mnemonics?)
 		HWND hStatic = CreateWindowEx(WS_EX_NOPARENTNOTIFY | WS_EX_TRANSPARENT,
-			WC_STATIC, desc_text.c_str(),
+			WC_STATIC, w_desc_text.at(idx).c_str(),
 			WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | SS_LEFT,
 			tab.curPt.x, tab.curPt.y, descSize.cx, descSize.cy,
 			tab.hDlg, (HMENU)(INT_PTR)(IDC_STATIC_DESC(idx)),
@@ -1627,30 +1796,31 @@ void RP_ShellPropSheetExt_Private::initDialog(HWND hDlg)
 				break;
 
 			case RomFields::RFT_LISTDATA: {
-				assert(field->desc.list_data.names != nullptr);
-				if (!field->desc.list_data.names) {
-					// No column names...
-					break;
+				// Create a ListView control.
+				SIZE size = {dlg_value_width, field_cy*6};
+				POINT pt_ListData = pt_start;
+				if (field->desc.list_data.flags & RomFields::RFT_LISTDATA_SEPARATE_ROW) {
+					// Separate row.
+					size.cx = dlgSize.cx - dlgMargin.left - 1;
+					pt_ListData.x = tab.curPt.x;
+					pt_ListData.y += (descSize.cy - (dlgMargin.top/3));
 				}
 
-				// Increase row height to 72 DLU.
-				// descSize is 8+4 DLU (12); 72/12 == 6
-				// FIXME: The last row seems to be cut off with the
-				// Windows XP Luna theme, but not Windows Classic...
-				field_cy *= 6;
-
-				// Create a ListView widget.
-				HWND hDlgItem = CreateWindowEx(WS_EX_NOPARENTNOTIFY | WS_EX_CLIENTEDGE,
-					WC_LISTVIEW, nullptr,
-					WS_CHILD | WS_VISIBLE | WS_TABSTOP | LVS_ALIGNLEFT | LVS_REPORT,
-					pt_start.x, pt_start.y,
-					dlg_value_width, field_cy,
-					tab.hDlg, (HMENU)(INT_PTR)(IDC_RFT_LISTDATA(idx)),
-					nullptr, nullptr);
-				SetWindowFont(hDlgItem, hFontDlg, FALSE);
-
-				// Initialize the ListView data.
-				initListView(hDlgItem, field);
+				field_cy = initListData(hDlg, tab.hDlg, pt_ListData, idx, size, field);
+				if (field_cy == 0) {
+					// initListData() failed.
+					// Remove the description label.
+					DestroyWindow(hStatic);
+				} else {
+					// Add the extra row if necessary.
+					if (field->desc.list_data.flags & RomFields::RFT_LISTDATA_SEPARATE_ROW) {
+						const int szAdj = descSize.cy - (dlgMargin.top/3);
+						field_cy += szAdj;
+						// Reduce the hStatic size slightly.
+						SetWindowPos(hStatic, nullptr, 0, 0, descSize.cx, szAdj,
+							SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER | SWP_NOMOVE);
+					}
+				}
 				break;
 			}
 
@@ -1689,6 +1859,12 @@ void RP_ShellPropSheetExt_Private::initDialog(HWND hDlg)
 		// Next row.
 		tab.curPt.y += field_cy;
 	}
+
+	// Register for WTS session notifications. (Remote Desktop)
+	WTSRegisterSessionNotification(hDlg, NOTIFY_FOR_THIS_SESSION);
+
+	// Window is fully initialized.
+	isFullyInit = true;
 }
 
 /** RP_ShellPropSheetExt **/
@@ -1712,7 +1888,7 @@ IFACEMETHODIMP RP_ShellPropSheetExt::QueryInterface(REFIID riid, LPVOID *ppvObj)
 		QITABENT(RP_ShellPropSheetExt, IShellPropSheetExt),
 		{ 0 }
 	};
-	return pQISearch(this, rgqit, riid, ppvObj);
+	return LibWin32Common::pQISearch(this, rgqit, riid, ppvObj);
 }
 
 /** IShellExtInit **/
@@ -1769,13 +1945,12 @@ IFACEMETHODIMP RP_ShellPropSheetExt::Initialize(
 		goto cleanup;
 	}
 
-	cchFilename++;	// Add one for the NULL terminator.
-	filename = (wchar_t*)malloc(cchFilename * sizeof(wchar_t));
+	filename = (wchar_t*)malloc((cchFilename+1) * sizeof(wchar_t));
 	if (!filename) {
 		// Memory allocation failed.
 		goto cleanup;
 	}
-	cchFilename = DragQueryFile(hDrop, 0, filename, cchFilename);
+	cchFilename = DragQueryFile(hDrop, 0, filename, cchFilename+1);
 	if (cchFilename == 0) {
 		// No filename.
 		goto cleanup;
@@ -1796,7 +1971,7 @@ IFACEMETHODIMP RP_ShellPropSheetExt::Initialize(
 	}
 
 	// Open the file.
-	file.reset(new RpFile(W2RP_cl(filename, cchFilename), RpFile::FM_OPEN_READ));
+	file.reset(new RpFile(W2U8(filename, cchFilename), RpFile::FM_OPEN_READ));
 	if (!file || !file->isOpen()) {
 		// Unable to open the file.
 		goto cleanup;
@@ -1810,12 +1985,12 @@ IFACEMETHODIMP RP_ShellPropSheetExt::Initialize(
 		goto cleanup;
 	}
 
-	// Make sure the existing RomData is unreferenced.
-	// TODO: If the filename matches, don't reopen?
-	if (d->romData) {
-		d->romData->unref();
-	}
-	d->romData = romData;
+	// Unreference the RomData object.
+	// We only want to open the RomData if the "ROM Properties"
+	// tab is clicked, because otherwise the file will be held
+	// open and may block the user from changing attributes.
+	romData->unref();
+	d->filename = W2U8(filename, cchFilename);
 	hr = S_OK;
 
 cleanup:
@@ -1835,18 +2010,20 @@ IFACEMETHODIMP RP_ShellPropSheetExt::AddPages(LPFNADDPROPSHEETPAGE pfnAddPage, L
 	// Based on CppShellExtPropSheetHandler.
 	// https://code.msdn.microsoft.com/windowsapps/CppShellExtPropSheetHandler-d93b49b7
 
+	// tr: Tab title.
+	const wstring wsTabTitle = RP2W_c(C_("RomDataView", "ROM Properties"));
+
 	// Create a property sheet page.
-	extern HINSTANCE g_hInstance;
 	PROPSHEETPAGE psp;
 	psp.dwSize = sizeof(psp);
 	psp.dwFlags = PSP_USECALLBACK | PSP_USETITLE;
-	psp.hInstance = g_hInstance;
+	psp.hInstance = HINST_THISCOMPONENT;
 	psp.pszTemplate = MAKEINTRESOURCE(IDD_PROPERTY_SHEET);
 	psp.pszIcon = nullptr;
-	psp.pszTitle = L"ROM Properties";
-	psp.pfnDlgProc = DlgProc;
+	psp.pszTitle = wsTabTitle.c_str();
+	psp.pfnDlgProc = RP_ShellPropSheetExt_Private::DlgProc;
 	psp.pcRefParent = nullptr;
-	psp.pfnCallback = CallbackProc;
+	psp.pfnCallback = RP_ShellPropSheetExt_Private::CallbackProc;
 	psp.lParam = reinterpret_cast<LPARAM>(this);
 
 	HPROPSHEETPAGE hPage = CreatePropertySheetPage(&psp);
@@ -1892,7 +2069,7 @@ IFACEMETHODIMP RP_ShellPropSheetExt::ReplacePage(UINT uPageID, LPFNADDPROPSHEETP
 //
 //   PURPOSE: Processes messages for the property page.
 //
-INT_PTR CALLBACK RP_ShellPropSheetExt::DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK RP_ShellPropSheetExt_Private::DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	// Based on CppShellExtPropSheetHandler.
 	// https://code.msdn.microsoft.com/windowsapps/CppShellExtPropSheetHandler-d93b49b7
@@ -1913,17 +2090,11 @@ INT_PTR CALLBACK RP_ShellPropSheetExt::DlgProc(HWND hDlg, UINT uMsg, WPARAM wPar
 			// Store the D object pointer with this particular page dialog.
 			SetProp(hDlg, RP_ShellPropSheetExt_Private::D_PTR_PROP, static_cast<HANDLE>(d));
 			// Save handles for later.
-			d->hDlgProps = GetParent(hDlg);
 			d->hDlgSheet = hDlg;
 
 			// Dialog initialization is postponed to WM_SHOWWINDOW,
 			// since some other extension (e.g. HashTab) may be
 			// resizing the dialog.
-
-			// We need to load the images here.
-			// Otherwise, the animation won't be initialized
-			// properly when the tab is first displayed.
-			d->loadImages();
 
 			// NOTE: We're using WM_SHOWWINDOW instead of WM_SIZE
 			// because WM_SIZE isn't sent for block devices,
@@ -1941,18 +2112,37 @@ INT_PTR CALLBACK RP_ShellPropSheetExt::DlgProc(HWND hDlg, UINT uMsg, WPARAM wPar
 				return FALSE;
 			}
 
-			// TODO: Support dynamic resizing? The standard
-			// Explorer file properties dialog doesn't support
-			// it, but others might...
-			if (d->romData->isOpen()) {
-				// Initialize the dialog.
-				d->initDialog(hDlg);
-
-				// Make sure the underlying file handle is closed,
-				// since we don't need it once the RomData has been
-				// loaded by RomDataView.
-				d->romData->close();
+			if (d->isFullyInit) {
+				// Dialog is already initialized.
+				break;
 			}
+
+			// Open the RomData object.
+			unique_ptr<IRpFile> file(new RpFile(d->filename, RpFile::FM_OPEN_READ));
+			if (!file || !file->isOpen()) {
+				// Unable to open the file.
+				break;
+			}
+			d->romData = RomDataFactory::create(file.get());
+			if (!d->romData) {
+				// Unable to get a RomData object.
+				break;
+			} else if (!d->romData->isOpen()) {
+				// RomData is not open.
+				d->romData->unref();
+				d->romData = nullptr;
+				break;
+			}
+
+			// Load the images.
+			d->loadImages();
+			// Initialize the dialog.
+			d->initDialog(hDlg);
+			// We can close the RomData's underlying IRpFile now.
+			d->romData->close();
+
+			// Start the animation timer.
+			d->startAnimTimer();
 
 			// Continue normal processing.
 			break;
@@ -1985,8 +2175,8 @@ INT_PTR CALLBACK RP_ShellPropSheetExt::DlgProc(HWND hDlg, UINT uMsg, WPARAM wPar
 				return FALSE;
 			}
 
-			LPPSHNOTIFY lppsn = reinterpret_cast<LPPSHNOTIFY>(lParam);
-			switch (lppsn->hdr.code) {
+			NMHDR *const pHdr = reinterpret_cast<NMHDR*>(lParam);
+			switch (pHdr->code) {
 				case PSN_SETACTIVE:
 					d->startAnimTimer();
 					break;
@@ -1998,12 +2188,12 @@ INT_PTR CALLBACK RP_ShellPropSheetExt::DlgProc(HWND hDlg, UINT uMsg, WPARAM wPar
 				case NM_CLICK:
 				case NM_RETURN: {
 					// Check if this is a SysLink control.
-					if (d->hwndSysLinkControls.find(lppsn->hdr.hwndFrom) !=
+					if (d->hwndSysLinkControls.find(pHdr->hwndFrom) !=
 					    d->hwndSysLinkControls.end())
 					{
 						// It's a SysLink control.
 						// Open the URL.
-						PNMLINK pNMLink = reinterpret_cast<PNMLINK>(lParam);
+						PNMLINK pNMLink = reinterpret_cast<PNMLINK>(pHdr);
 						ShellExecute(nullptr, L"open", pNMLink->item.szUrl, nullptr, nullptr, SW_SHOW);
 					}
 					break;
@@ -2011,7 +2201,7 @@ INT_PTR CALLBACK RP_ShellPropSheetExt::DlgProc(HWND hDlg, UINT uMsg, WPARAM wPar
 
 				case TCN_SELCHANGE: {
 					// Tab change. Make sure this is the correct WC_TABCONTROL.
-					if (d->hTabWidget != nullptr && d->hTabWidget == lppsn->hdr.hwndFrom) {
+					if (d->hTabWidget != nullptr && d->hTabWidget == pHdr->hwndFrom) {
 						// Tab widget. Show the selected tab.
 						int newTabIndex = TabCtrl_GetCurSel(d->hTabWidget);
 						ShowWindow(d->tabs[d->curTabIndex].hDlg, SW_HIDE);
@@ -2019,6 +2209,58 @@ INT_PTR CALLBACK RP_ShellPropSheetExt::DlgProc(HWND hDlg, UINT uMsg, WPARAM wPar
 						ShowWindow(d->tabs[newTabIndex].hDlg, SW_SHOW);
 					}
 					break;
+				}
+
+				case NM_CUSTOMDRAW: {
+					// Custom drawing notification.
+					if ((pHdr->idFrom & 0xFC00) != IDC_RFT_LISTDATA(0))
+						break;
+
+					// NOTE: Since this is a DlgProc, we can't simply return
+					// the CDRF code. It has to be set as DWLP_MSGRESULT.
+					// References:
+					// - https://stackoverflow.com/questions/40549962/c-winapi-listview-nm-customdraw-not-getting-cdds-itemprepaint
+					// - https://stackoverflow.com/a/40552426
+					NMLVCUSTOMDRAW *const plvcd = reinterpret_cast<NMLVCUSTOMDRAW*>(pHdr);
+					int result = CDRF_DODEFAULT;
+					switch (plvcd->nmcd.dwDrawStage) {
+						case CDDS_PREPAINT:
+							// Request notifications for individual ListView items.
+							result = CDRF_NOTIFYITEMDRAW;
+							break;
+
+						case CDDS_ITEMPREPAINT: {
+							// Set the background color for alternating row colors.
+							if (plvcd->nmcd.dwItemSpec % 2) {
+								// NOTE: plvcd->clrTextBk is set to 0xFF000000 here,
+								// not the actual default background color.
+								// FIXME: On Windows 7:
+								// - Standard row colors are 19px high.
+								// - Alternate row colors are 17px high. (top and bottom lines ignored?)
+								plvcd->clrTextBk = d->colorAltRow;
+								result = CDRF_NEWFONT;
+							}
+							break;
+						}
+					}
+					SetWindowLongPtr(hDlg, DWLP_MSGRESULT, result);
+					return TRUE;
+				}
+
+				case LVN_ITEMCHANGING: {
+					// If the window is fully initialized,
+					// disable modification of checkboxes.
+					// Reference: https://groups.google.com/forum/embed/#!topic/microsoft.public.vc.mfc/e9cbkSsiImA
+					if (!d->isFullyInit)
+						break;
+					if ((pHdr->idFrom & 0xFC00) != IDC_RFT_LISTDATA(0))
+						break;
+
+					NMLISTVIEW *pnmlv = reinterpret_cast<NMLISTVIEW*>(pHdr);
+					const unsigned int state = (pnmlv->uOldState ^ pnmlv->uNewState) & LVIS_STATEIMAGEMASK;
+					// Set result to TRUE if the state difference is non-zero (i.e. it's changed).
+					SetWindowLongPtr(hDlg, DWLP_MSGRESULT, (state != 0));
+					return TRUE;
 				}
 
 				default:
@@ -2077,8 +2319,26 @@ INT_PTR CALLBACK RP_ShellPropSheetExt::DlgProc(HWND hDlg, UINT uMsg, WPARAM wPar
 			// Reload the images.
 			RP_ShellPropSheetExt_Private *const d = static_cast<RP_ShellPropSheetExt_Private*>(
 				GetProp(hDlg, RP_ShellPropSheetExt_Private::D_PTR_PROP));
-			if (d) {
-				d->loadImages();
+			if (!d) {
+				// No RP_ShellPropSheetExt_Private. Can't do anything...
+				return FALSE;
+			}
+
+			// Reload images in case the background color changed.
+			d->loadImages();
+			// Reinitialize the alternate row color.
+			d->colorAltRow = LibWin32Common::getAltRowColor();
+			// Invalidate the banner and icon rectangles.
+			if (d->hbmpBanner) {
+				const RECT rectBitmap = {
+					d->ptBanner.x, d->ptBanner.y,
+					d->ptBanner.x + d->szBanner.cx,
+					d->ptBanner.y + d->szBanner.cy,
+				};
+				InvalidateRect(d->hDlgSheet, &rectBitmap, FALSE);
+			}
+			if (d->szIcon.cx > 0) {
+				InvalidateRect(d->hDlgSheet, &d->rectIcon, FALSE);
 			}
 			break;
 		}
@@ -2088,6 +2348,10 @@ INT_PTR CALLBACK RP_ShellPropSheetExt::DlgProc(HWND hDlg, UINT uMsg, WPARAM wPar
 			RP_ShellPropSheetExt_Private *const d = static_cast<RP_ShellPropSheetExt_Private*>(
 				GetProp(hDlg, RP_ShellPropSheetExt_Private::D_PTR_PROP));
 			if (d) {
+				if (!d->hFontDlg) {
+					// Dialog font hasn't been obtained yet.
+					d->hFontDlg = GetWindowFont(hDlg);
+				}
 				d->initMonospacedFont(d->hFontDlg);
 			}
 			break;
@@ -2111,6 +2375,41 @@ INT_PTR CALLBACK RP_ShellPropSheetExt::DlgProc(HWND hDlg, UINT uMsg, WPARAM wPar
 			break;
 		}
 
+		case WM_WTSSESSION_CHANGE: {
+			RP_ShellPropSheetExt_Private *const d = static_cast<RP_ShellPropSheetExt_Private*>(
+				GetProp(hDlg, D_PTR_PROP));
+			if (!d) {
+				// No RP_ShellPropSheetExt_Private. Can't do anything...
+				return FALSE;
+			}
+
+			// If RDP was connected, disable ListView double-buffering.
+			// If console (or RemoteFX) was connected, enable ListView double-buffering.
+			switch (wParam) {
+				case WTS_CONSOLE_CONNECT:
+					for (auto iter = d->hwndListViewControls.cbegin();
+					     iter != d->hwndListViewControls.cend(); ++iter)
+					{
+						DWORD dwExStyle = ListView_GetExtendedListViewStyle(*iter);
+						dwExStyle |= LVS_EX_DOUBLEBUFFER;
+						ListView_SetExtendedListViewStyle(*iter, dwExStyle);
+					}
+					break;
+				case WTS_REMOTE_CONNECT:
+					for (auto iter = d->hwndListViewControls.cbegin();
+					     iter != d->hwndListViewControls.cend(); ++iter)
+					{
+						DWORD dwExStyle = ListView_GetExtendedListViewStyle(*iter);
+						dwExStyle &= ~LVS_EX_DOUBLEBUFFER;
+						ListView_SetExtendedListViewStyle(*iter, dwExStyle);
+					}
+					break;
+				default:
+					break;
+			}
+			break;
+		}
+
 		default:
 			break;
 	}
@@ -2127,7 +2426,7 @@ INT_PTR CALLBACK RP_ShellPropSheetExt::DlgProc(HWND hDlg, UINT uMsg, WPARAM wPar
 //            destroyed. An application can use this function to perform 
 //            initialization and cleanup operations for the page.
 //
-UINT CALLBACK RP_ShellPropSheetExt::CallbackProc(HWND hWnd, UINT uMsg, LPPROPSHEETPAGE ppsp)
+UINT CALLBACK RP_ShellPropSheetExt_Private::CallbackProc(HWND hWnd, UINT uMsg, LPPROPSHEETPAGE ppsp)
 {
 	switch (uMsg) {
 		case PSPCB_CREATE: {
@@ -2159,66 +2458,13 @@ UINT CALLBACK RP_ShellPropSheetExt::CallbackProc(HWND hWnd, UINT uMsg, LPPROPSHE
 }
 
 /**
- * Subclass procedure for ES_MULTILINE EDIT controls.
- * @param hWnd		Control handle.
- * @param uMsg		Message.
- * @param wParam	WPARAM
- * @param lParam	LPARAM
- * @param uIdSubclass	Subclass ID. (usually the control ID)
- * @param dwRefData	RP_ShellProSheetExt*
- */
-LRESULT CALLBACK RP_ShellPropSheetExt::MultilineEditProc(
-	HWND hWnd, UINT uMsg,
-	WPARAM wParam, LPARAM lParam,
-	UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
-{
-	if (!dwRefData) {
-		// No RP_ShellPropSheetExt. Can't do anything...
-		return DefSubclassProc(hWnd, uMsg, wParam, lParam);
-	}
-	RP_ShellPropSheetExt_Private *const d =
-		reinterpret_cast<RP_ShellPropSheetExt_Private*>(dwRefData);
-
-	switch (uMsg) {
-		case WM_KEYDOWN: {
-			// Work around Enter/Escape issues.
-			// Reference: http://blogs.msdn.com/b/oldnewthing/archive/2007/08/20/4470527.aspx
-			switch (wParam) {
-				case VK_RETURN:
-					SendMessage(d->hDlgProps, WM_COMMAND, IDOK, 0);
-					return TRUE;
-
-				case VK_ESCAPE:
-					SendMessage(d->hDlgProps, WM_COMMAND, IDCANCEL, 0);
-					return TRUE;
-
-				default:
-					break;
-			}
-			break;
-		}
-
-		case WM_NCDESTROY:
-			// Remove the window subclass.
-			// Reference: https://blogs.msdn.microsoft.com/oldnewthing/20031111-00/?p=41883
-			RemoveWindowSubclass(hWnd, MultilineEditProc, uIdSubclass);
-			break;
-
-		default:
-			break;
-	}
-
-	return DefSubclassProc(hWnd, uMsg, wParam, lParam);
-}
-
-/**
  * Animated icon timer.
  * @param hWnd
  * @param uMsg
  * @param idEvent
  * @param dwTime
  */
-void CALLBACK RP_ShellPropSheetExt::AnimTimerProc(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
+void CALLBACK RP_ShellPropSheetExt_Private::AnimTimerProc(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
 {
 	if (hWnd == nullptr || idEvent == 0) {
 		// Not a valid timer procedure call...
@@ -2249,18 +2495,32 @@ void CALLBACK RP_ShellPropSheetExt::AnimTimerProc(HWND hWnd, UINT uMsg, UINT_PTR
 
 	// Update the timer.
 	// TODO: Verify that this affects the next callback.
-	SetTimer(hWnd, idEvent, delay, RP_ShellPropSheetExt::AnimTimerProc);
+	SetTimer(hWnd, idEvent, delay, AnimTimerProc);
 }
 
 /**
  * Dialog procedure for subtabs.
- * @param hWnd
+ * @param hDlg
  * @param uMsg
  * @param wParam
  * @param lParam
  */
-INT_PTR CALLBACK RP_ShellPropSheetExt::SubtabDlgProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK RP_ShellPropSheetExt_Private::SubtabDlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
+	// Propagate NM_CUSTOMDRAW to the parent dialog.
+	if (uMsg == WM_NOTIFY) {
+		const NMHDR *const pHdr = reinterpret_cast<const NMHDR*>(lParam);
+		if (pHdr->code == NM_CUSTOMDRAW || pHdr->code == LVN_ITEMCHANGING) {
+			// NOTE: Since this is a DlgProc, we can't simply return
+			// the CDRF code. It has to be set as DWLP_MSGRESULT.
+			// References:
+			// - https://stackoverflow.com/questions/40549962/c-winapi-listview-nm-customdraw-not-getting-cdds-itemprepaint
+			// - https://stackoverflow.com/a/40552426
+			INT_PTR result = SendMessage(GetParent(hDlg), uMsg, wParam, lParam);
+			SetWindowLongPtr(hDlg, DWLP_MSGRESULT, result);
+			return TRUE;
+		}
+	}
 	// Dummy callback procedure that does nothing.
 	return FALSE; // Let system deal with other messages
 }

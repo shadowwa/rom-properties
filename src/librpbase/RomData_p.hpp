@@ -58,7 +58,7 @@ class RomDataPrivate
 		RomData *const q_ptr;
 
 	public:
-		int ref_count;			// Reference count.
+		volatile int ref_cnt;		// Reference count.
 		bool isValid;			// Subclass must set this to true if the ROM is valid.
 		IRpFile *file;			// Open file.
 		RomFields *const fields;	// ROM fields.
@@ -76,7 +76,7 @@ class RomDataPrivate
 		 * @param fileSize File size.
 		 * @return Formatted file size.
 		 */
-		static rp_string formatFileSize(int64_t fileSize);
+		static std::string formatFileSize(int64_t fileSize);
 
 		/**
 		 * Get the GameTDB URL for a given game.
@@ -88,7 +88,7 @@ class RomDataPrivate
 		 * TODO: PAL multi-region selection?
 		 * @return GameTDB URL.
 		 */
-		static rp_string getURL_GameTDB(
+		static std::string getURL_GameTDB(
 			const char *system, const char *type,
 			const char *region, const char *gameID,
 			const char *ext);
@@ -103,7 +103,7 @@ class RomDataPrivate
 		 * TODO: PAL multi-region selection?
 		 * @return GameTDB cache key.
 		 */
-		static rp_string getCacheKey_GameTDB(
+		static std::string getCacheKey_GameTDB(
 			const char *system, const char *type,
 			const char *region, const char *gameID,
 			const char *ext);
@@ -115,6 +115,14 @@ class RomDataPrivate
 		 * @return Image size definition, or nullptr on error.
 		 */
 		static const RomData::ImageSizeDef *selectBestSize(const std::vector<RomData::ImageSizeDef> &sizeDefs, int size);
+
+		/**
+		 * Convert an ASCII release date in YYYYMMDD format to Unix time_t.
+		 * This format is used by Sega Saturn and Dreamcast.
+		 * @param ascii_date ASCII release date. (Must be 8 characters.)
+		 * @return Unix time_t, or -1 on error.
+		 */
+		static time_t ascii_yyyymmdd_to_unix_time(const char *ascii_date);
 };
 
 }

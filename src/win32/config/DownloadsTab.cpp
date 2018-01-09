@@ -28,8 +28,15 @@
 #include "librpbase/config/Config.hpp"
 using LibRpBase::Config;
 
+// libi18n
+#include "libi18n/i18n.h"
+
 // C includes. (C++ namespace)
 #include <cassert>
+
+// C++ includes.
+#include <string>
+using std::wstring;
 
 class DownloadsTabPrivate
 {
@@ -63,11 +70,27 @@ class DownloadsTabPrivate
 			return (value == BST_CHECKED ? L"true" : L"false");
 		}
 
+		/**
+		 * Convert BST_CHECKED or BST_UNCHECKED to a bool.
+		 * @param value BST_CHECKED or BST_UNCHECKED.
+		 * @return bool.
+		 */
+		static inline bool bstCheckedToBool(unsigned int value) {
+			return (value == BST_CHECKED);
+		}
+
 	public:
 		/**
 		 * Reset the configuration.
 		 */
 		void reset(void);
+
+		/**
+		 * Load the default configuration.
+		 * This does NOT save, and will only emit modified()
+		 * if it's different from the current configuration.
+		 */
+		void loadDefaults(void);
 
 		/**
 		 * Save the configuration.
@@ -125,21 +148,47 @@ void DownloadsTabPrivate::reset(void)
 	// NOTE: This may re-check the configuration timestamp.
 	const Config *const config = Config::instance();
 
-	HWND hWnd = GetDlgItem(hWndPropSheet, IDC_EXTIMGDL);
-	if (hWnd) {
-		Button_SetCheck(hWnd, boolToBstChecked(config->extImgDownloadEnabled()));
-	}
-	hWnd = GetDlgItem(hWndPropSheet, IDC_INTICONSMALL);
-	if (hWnd) {
-		Button_SetCheck(hWnd, boolToBstChecked(config->useIntIconForSmallSizes()));
-	}
-	hWnd = GetDlgItem(hWndPropSheet, IDC_HIGHRESDL);
-	if (hWnd) {
-		Button_SetCheck(hWnd, boolToBstChecked(config->downloadHighResScans()));
-	}
+	CheckDlgButton(hWndPropSheet, IDC_EXTIMGDL, boolToBstChecked(config->extImgDownloadEnabled()));
+	CheckDlgButton(hWndPropSheet, IDC_INTICONSMALL, boolToBstChecked(config->useIntIconForSmallSizes()));
+	CheckDlgButton(hWndPropSheet, IDC_HIGHRESDL, boolToBstChecked(config->downloadHighResScans()));
 
 	// No longer changed.
 	changed = false;
+}
+
+void DownloadsTabPrivate::loadDefaults(void)
+{
+	assert(hWndPropSheet != nullptr);
+	if (!hWndPropSheet)
+		return;
+
+	// TODO: Get the defaults from Config.
+	// For now, hard-coding everything here.
+	static const bool extImgDownloadEnabled_default = true;
+	static const bool useIntIconForSmallSizes_default = true;
+	static const bool downloadHighResScans_default = true;
+	bool isDefChanged = false;
+
+	bool cur = bstCheckedToBool(IsDlgButtonChecked(hWndPropSheet, IDC_EXTIMGDL));
+	if (cur != extImgDownloadEnabled_default) {
+		CheckDlgButton(hWndPropSheet, IDC_EXTIMGDL, boolToBstChecked(extImgDownloadEnabled_default));
+		isDefChanged = true;
+	}
+	cur = bstCheckedToBool(IsDlgButtonChecked(hWndPropSheet, IDC_INTICONSMALL));
+	if (cur != useIntIconForSmallSizes_default) {
+		CheckDlgButton(hWndPropSheet, IDC_INTICONSMALL, boolToBstChecked(useIntIconForSmallSizes_default));
+		isDefChanged = true;
+	}
+	cur = bstCheckedToBool(IsDlgButtonChecked(hWndPropSheet, IDC_HIGHRESDL));
+	if (cur != downloadHighResScans_default) {
+		CheckDlgButton(hWndPropSheet, IDC_HIGHRESDL, boolToBstChecked(downloadHighResScans_default));
+		isDefChanged = true;
+	}
+
+	if (isDefChanged) {
+		this->changed = true;
+		PropSheet_Changed(GetParent(hWndPropSheet), hWndPropSheet);
+	}
 }
 
 /**
@@ -153,27 +202,20 @@ void DownloadsTabPrivate::save(void)
 
 	// NOTE: This may re-check the configuration timestamp.
 	const Config *const config = Config::instance();
-	const rp_char *const filename = config->filename();
+	const char *const filename = config->filename();
 	if (!filename) {
 		// No configuration filename...
 		return;
 	}
 
-	HWND hWnd = GetDlgItem(hWndPropSheet, IDC_EXTIMGDL);
-	if (hWnd) {
-		const wchar_t *const bstr = bstCheckedToBoolString(Button_GetCheck(hWnd));
-		WritePrivateProfileString(L"Downloads", L"ExtImageDownload", bstr, RP2W_c(filename));
-	}
-	hWnd = GetDlgItem(hWndPropSheet, IDC_INTICONSMALL);
-	if (hWnd) {
-		const wchar_t *const bstr = bstCheckedToBoolString(Button_GetCheck(hWnd));
-		WritePrivateProfileString(L"Downloads", L"UseIntIconForSmallSizes", bstr, RP2W_c(filename));
-	}
-	hWnd = GetDlgItem(hWndPropSheet, IDC_HIGHRESDL);
-	if (hWnd) {
-		const wchar_t *const bstr = bstCheckedToBoolString(Button_GetCheck(hWnd));
-		WritePrivateProfileString(L"Downloads", L"DownloadHighResScans", bstr, RP2W_c(filename));
-	}
+	const wchar_t *bstr = bstCheckedToBoolString(IsDlgButtonChecked(hWndPropSheet, IDC_EXTIMGDL));
+	WritePrivateProfileString(L"Downloads", L"ExtImageDownload", bstr, RP2W_c(filename));
+
+	bstr = bstCheckedToBoolString(IsDlgButtonChecked(hWndPropSheet, IDC_INTICONSMALL));
+	WritePrivateProfileString(L"Downloads", L"UseIntIconForSmallSizes", bstr, RP2W_c(filename));
+
+	bstr = bstCheckedToBoolString(IsDlgButtonChecked(hWndPropSheet, IDC_HIGHRESDL));
+	WritePrivateProfileString(L"Downloads", L"DownloadHighResScans", bstr, RP2W_c(filename));
 
 	// No longer changed.
 	changed = false;
@@ -228,8 +270,8 @@ INT_PTR CALLBACK DownloadsTabPrivate::dlgProc(HWND hDlg, UINT uMsg, WPARAM wPara
 				return FALSE;
 			}
 
-			LPPSHNOTIFY lppsn = reinterpret_cast<LPPSHNOTIFY>(lParam);
-			switch (lppsn->hdr.code) {
+			NMHDR *pHdr = reinterpret_cast<NMHDR*>(lParam);
+			switch (pHdr->code) {
 				case PSN_APPLY:
 					// Save settings.
 					if (d->changed) {
@@ -237,14 +279,9 @@ INT_PTR CALLBACK DownloadsTabPrivate::dlgProc(HWND hDlg, UINT uMsg, WPARAM wPara
 					}
 					break;
 
-				case NM_CLICK:
-				case NM_RETURN:
-					// SysLink control notification.
-					if (lppsn->hdr.hwndFrom == GetDlgItem(hDlg, IDC_IMAGETYPES_CREDITS)) {
-						// Open the URL.
-						PNMLINK pNMLink = reinterpret_cast<PNMLINK>(lParam);
-						ShellExecute(nullptr, L"open", pNMLink->item.szUrl, nullptr, nullptr, SW_SHOW);
-					}
+				case PSN_SETACTIVE:
+					// Enable the "Defaults" button.
+					RpPropSheet_EnableDefaults(GetParent(hDlg), true);
 					break;
 
 				default:
@@ -261,10 +298,39 @@ INT_PTR CALLBACK DownloadsTabPrivate::dlgProc(HWND hDlg, UINT uMsg, WPARAM wPara
 				return FALSE;
 			}
 
+			if (HIWORD(wParam) != BN_CLICKED)
+				break;
+
 			// A checkbox has been adjusted.
 			// Page has been modified.
 			PropSheet_Changed(GetParent(hDlg), hDlg);
 			d->changed = true;
+			break;
+		}
+
+		case WM_RP_PROP_SHEET_RESET: {
+			DownloadsTabPrivate *const d = static_cast<DownloadsTabPrivate*>(
+				GetProp(hDlg, D_PTR_PROP));
+			if (!d) {
+				// No DownloadsTabPrivate. Can't do anything...
+				return FALSE;
+			}
+
+			// Reset the tab.
+			d->reset();
+			break;
+		}
+
+		case WM_RP_PROP_SHEET_DEFAULTS: {
+			DownloadsTabPrivate *const d = static_cast<DownloadsTabPrivate*>(
+				GetProp(hDlg, D_PTR_PROP));
+			if (!d) {
+				// No DownloadsTabPrivate. Can't do anything...
+				return FALSE;
+			}
+
+			// Load the defaults.
+			d->loadDefaults();
 			break;
 		}
 
@@ -330,15 +396,16 @@ HPROPSHEETPAGE DownloadsTab::getHPropSheetPage(void)
 		return nullptr;
 	}
 
-	extern HINSTANCE g_hInstance;
+	// tr: Tab title.
+	const wstring wsTabTitle = RP2W_c(C_("DownloadsTab", "Downloads"));
 
 	PROPSHEETPAGE psp;
 	psp.dwSize = sizeof(psp);	
 	psp.dwFlags = PSP_USECALLBACK | PSP_USETITLE;
-	psp.hInstance = g_hInstance;
+	psp.hInstance = HINST_THISCOMPONENT;
 	psp.pszTemplate = MAKEINTRESOURCE(IDD_CONFIG_DOWNLOADS);
 	psp.pszIcon = nullptr;
-	psp.pszTitle = L"Downloads";
+	psp.pszTitle = wsTabTitle.c_str();
 	psp.pfnDlgProc = DownloadsTabPrivate::dlgProc;
 	psp.lParam = reinterpret_cast<LPARAM>(d);
 	psp.pcRefParent = nullptr;
@@ -358,10 +425,23 @@ void DownloadsTab::reset(void)
 }
 
 /**
+ * Load the default configuration.
+ * This does NOT save, and will only emit modified()
+ * if it's different from the current configuration.
+ */
+void DownloadsTab::loadDefaults(void)
+{
+	RP_D(DownloadsTab);
+	d->loadDefaults();
+}
+
+/**
  * Save the contents of this tab.
  */
 void DownloadsTab::save(void)
 {
 	RP_D(DownloadsTab);
-	d->save();
+	if (d->changed) {
+		d->save();
+	}
 }

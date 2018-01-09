@@ -14,6 +14,11 @@
  * PowerPC architecture.
  */
 
+#ifdef __amigaos4__
+/* This must be defined first as it re-defines GLOBAL otherwise */
+#include <proto/exec.h>
+#endif
+
 #define JPEG_INTERNALS
 #include "../jinclude.h"
 #include "../jpeglib.h"
@@ -25,6 +30,12 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+
+#if defined(__OpenBSD__)
+#include <sys/param.h>
+#include <sys/sysctl.h>
+#include <machine/cpu.h>
+#endif
 
 static unsigned int simd_support = ~0;
 
@@ -101,6 +112,12 @@ init_simd (void)
   char *env = NULL;
 #if !defined(__ALTIVEC__) && (defined(__linux__) || defined(ANDROID) || defined(__ANDROID__))
   int bufsize = 1024; /* an initial guess for the line buffer size limit */
+#elif defined(__amigaos4__)
+  uint32 altivec = 0;
+#elif defined(__OpenBSD__)
+  int mib[2] = { CTL_MACHDEP, CPU_ALTIVEC };
+  int altivec;
+  size_t len = sizeof(altivec);
 #endif
 
   if (simd_support != ~0U)
@@ -116,6 +133,13 @@ init_simd (void)
     if (bufsize > SOMEWHAT_SANE_PROC_CPUINFO_SIZE_LIMIT)
       break;
   }
+#elif defined(__amigaos4__)
+  IExec->GetCPUInfoTags(GCIT_VectorUnit, &altivec, TAG_DONE);
+  if(altivec == VECTORTYPE_ALTIVEC)
+    simd_support |= JSIMD_ALTIVEC;
+#elif defined(__OpenBSD__)
+  if (sysctl(mib, 2, &altivec, &len, NULL, 0) == 0 && altivec != 0)
+    simd_support |= JSIMD_ALTIVEC;
 #endif
 
   /* Force different settings through environment variables */
@@ -195,7 +219,7 @@ jsimd_rgb_ycc_convert (j_compress_ptr cinfo,
                        JSAMPARRAY input_buf, JSAMPIMAGE output_buf,
                        JDIMENSION output_row, int num_rows)
 {
-  void (*altivecfct)(JDIMENSION, JSAMPARRAY, JSAMPIMAGE, JDIMENSION, int);
+  void (JPEGCALL *altivecfct)(JDIMENSION, JSAMPARRAY, JSAMPIMAGE, JDIMENSION, int);
 
   switch(cinfo->in_color_space) {
     case JCS_EXT_RGB:
@@ -233,7 +257,7 @@ jsimd_rgb_gray_convert (j_compress_ptr cinfo,
                         JSAMPARRAY input_buf, JSAMPIMAGE output_buf,
                         JDIMENSION output_row, int num_rows)
 {
-  void (*altivecfct)(JDIMENSION, JSAMPARRAY, JSAMPIMAGE, JDIMENSION, int);
+  void (JPEGCALL *altivecfct)(JDIMENSION, JSAMPARRAY, JSAMPIMAGE, JDIMENSION, int);
 
   switch(cinfo->in_color_space) {
     case JCS_EXT_RGB:
@@ -271,7 +295,7 @@ jsimd_ycc_rgb_convert (j_decompress_ptr cinfo,
                        JSAMPIMAGE input_buf, JDIMENSION input_row,
                        JSAMPARRAY output_buf, int num_rows)
 {
-  void (*altivecfct)(JDIMENSION, JSAMPIMAGE, JDIMENSION, JSAMPARRAY, int);
+  void (JPEGCALL *altivecfct)(JDIMENSION, JSAMPIMAGE, JDIMENSION, JSAMPARRAY, int);
 
   switch(cinfo->out_color_space) {
     case JCS_EXT_RGB:
@@ -515,7 +539,7 @@ jsimd_h2v2_merged_upsample (j_decompress_ptr cinfo,
                             JDIMENSION in_row_group_ctr,
                             JSAMPARRAY output_buf)
 {
-  void (*altivecfct)(JDIMENSION, JSAMPIMAGE, JDIMENSION, JSAMPARRAY);
+  void (JPEGCALL *altivecfct)(JDIMENSION, JSAMPIMAGE, JDIMENSION, JSAMPARRAY);
 
   switch(cinfo->out_color_space) {
     case JCS_EXT_RGB:
@@ -554,7 +578,7 @@ jsimd_h2v1_merged_upsample (j_decompress_ptr cinfo,
                             JDIMENSION in_row_group_ctr,
                             JSAMPARRAY output_buf)
 {
-  void (*altivecfct)(JDIMENSION, JSAMPIMAGE, JDIMENSION, JSAMPARRAY);
+  void (JPEGCALL *altivecfct)(JDIMENSION, JSAMPIMAGE, JDIMENSION, JSAMPARRAY);
 
   switch(cinfo->out_color_space) {
     case JCS_EXT_RGB:

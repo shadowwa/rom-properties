@@ -20,7 +20,6 @@
  ***************************************************************************/
 
 #include "PEResourceReader.hpp"
-#include "../exe_structs.h"
 
 // librpbase
 #include "librpbase/common.h"
@@ -32,6 +31,7 @@ using namespace LibRpBase;
 
 // C includes. (C++ namespace)
 #include <cassert>
+#include <cerrno>
 
 // C++ includes.
 #include <memory>
@@ -212,15 +212,9 @@ int PEResourceReaderPrivate::loadResDir(uint32_t addr, rsrc_dir_t &dir)
 	RP_Q(PEResourceReader);
 
 	IMAGE_RESOURCE_DIRECTORY root;
-	int ret = file->seek(rsrc_addr + addr);
-	if (ret != 0) {
-		// Seek error.
-		q->m_lastError = file->lastError();
-		return q->m_lastError;
-	}
-	size_t size = file->read(&root, sizeof(root));
+	size_t size = file->seekAndRead(rsrc_addr + addr, &root, sizeof(root));
 	if (size != sizeof(root)) {
-		// Read error;
+		// Seek and/or read error.
 		q->m_lastError = file->lastError();
 		return q->m_lastError;
 	}
@@ -401,7 +395,7 @@ int PEResourceReaderPrivate::load_VS_VERSION_INFO_header(IRpFile *file, const ch
 	unsigned int key_len = (unsigned int)u16_strlen(key);
 	// DWORD alignment: Make sure we end on a multiple of 4 bytes.
 	unsigned int keyData_len = (key_len+1) * sizeof(char16_t);
-	keyData_len = ((keyData_len + sizeof(fields) + 3) & ~3) - sizeof(fields);
+	keyData_len = ALIGN(4, keyData_len + sizeof(fields)) - sizeof(fields);
 	unique_ptr<char16_t[]> keyData(new char16_t[keyData_len/sizeof(char16_t)]);
 	size = file->read(keyData.get(), keyData_len);
 	if (size != keyData_len) {
@@ -440,7 +434,7 @@ inline int PEResourceReaderPrivate::alignFileDWORD(IRpFile *file)
 	int ret = 0;
 	int64_t pos = file->tell();
 	if (pos % 4 != 0) {
-		pos = (pos + 3) & ~3LL;
+		pos = ALIGN(4, pos);
 		ret = file->seek(pos);
 	}
 	return ret;
@@ -471,7 +465,7 @@ int PEResourceReaderPrivate::load_StringTable(IRpFile *file, IResourceReader::St
 	// wLength contains the total string table length.
 	// wValueLength should be 0.
 	// wType should be 1, indicating a language ID string.
-	if (le16_to_cpu(fields[1]) != 0 || le16_to_cpu(fields[2]) != 1) {
+	if (fields[1] != cpu_to_le16(0) || fields[2] != cpu_to_le16(1)) {
 		// Not a string table.
 		return -EIO;
 	}
@@ -480,7 +474,7 @@ int PEResourceReaderPrivate::load_StringTable(IRpFile *file, IResourceReader::St
 	char16_t s_langID[9];
 	size = file->read(s_langID, sizeof(s_langID));
 	if (size != sizeof(s_langID) ||
-	   (le16_to_cpu(s_langID[8]) != 0))
+	   (s_langID[8] != cpu_to_le16(0)))
 	{
 		// Read error, or not NULL terminated.
 		return -EIO;
@@ -525,7 +519,7 @@ int PEResourceReaderPrivate::load_StringTable(IRpFile *file, IResourceReader::St
 	while (tblPos < strTblData_len) {
 		// wLength, wValueLength, wType
 		memcpy(fields, &strTblData[tblPos], sizeof(fields));
-		if (le16_to_cpu(fields[2]) != 1) {
+		if (fields[2] != cpu_to_le16(1)) {
 			// Not a string...
 			return -EIO;
 		}
@@ -552,14 +546,14 @@ int PEResourceReaderPrivate::load_StringTable(IRpFile *file, IResourceReader::St
 			return -EIO;
 		}
 		const char16_t *key = reinterpret_cast<const char16_t*>(&strTblData[tblPos]);
-		if (le16_to_cpu(key[key_len]) != 0) {
+		if (key[key_len] != cpu_to_le16(0)) {
 			// Not NULL-terminated.
 			return -EIO;
 		}
 
 		// DWORD alignment is required here.
 		tblPos += ((key_len + 1) * 2);
-		tblPos  = (tblPos + 3) & ~3;
+		tblPos  = ALIGN(4, tblPos);
 
 		// Value must be NULL-terminated.
 		const char16_t *value = reinterpret_cast<const char16_t*>(&strTblData[tblPos]);
@@ -568,18 +562,18 @@ int PEResourceReaderPrivate::load_StringTable(IRpFile *file, IResourceReader::St
 			// Empty value.
 			static const char16_t u16_empty[1] = {0};
 			value = u16_empty;
-		} else if (le16_to_cpu(value[value_len]) != 0) {
+		} else if (value[value_len] != cpu_to_le16(0)) {
 			// Not NULL-terminated.
 			return -EIO;
 		}
 
-		st.push_back(std::pair<rp_string, rp_string>(
-			utf16le_to_rp_string(key, key_len),
-			utf16le_to_rp_string(value, value_len)));
+		st.push_back(std::pair<string, string>(
+			utf16le_to_utf8(key, key_len),
+			utf16le_to_utf8(value, value_len)));
 
 		// DWORD alignment is required here.
 		tblPos += wValueLength;
-		tblPos  = (tblPos + 3) & ~3;
+		tblPos  = ALIGN(4, tblPos);
 	}
 
 	// String table loaded successfully.
@@ -649,17 +643,13 @@ size_t PEResourceReader::read(void *ptr, size_t size)
 		size = (size_t)((int64_t)d->rsrc_size - d->pos);
 	}
 
-	// Seek to the position.
-	int ret = d->file->seek((int64_t)d->rsrc_addr + (int64_t)d->pos);
-	if (ret != 0) {
-		// Seek error.
-		m_lastError = d->file->lastError();
-		return 0;
-	}
 	// Read the data.
-	size_t read = d->file->read(ptr, size);
+	size_t read = d->file->seekAndRead((int64_t)d->rsrc_addr + (int64_t)d->pos, ptr, size);
+	if (read != size) {
+		// Seek and/or read error.
+		m_lastError = d->file->lastError();
+	}
 	d->pos += read;
-	m_lastError = d->file->lastError();
 	return read;
 }
 
@@ -812,15 +802,9 @@ IRpFile *PEResourceReader::open(uint16_t type, int id, int lang)
 
 	// Get the IMAGE_RESOURCE_DATA_ENTRY.
 	IMAGE_RESOURCE_DATA_ENTRY irdata;
-	int ret = d->file->seek(d->rsrc_addr + dirEntry->addr);
-	if (ret != 0) {
-		// Seek error.
-		m_lastError = d->file->lastError();
-		return nullptr;
-	}
-	size_t size = d->file->read(&irdata, sizeof(irdata));
+	size_t size = d->file->seekAndRead(d->rsrc_addr + dirEntry->addr, &irdata, sizeof(irdata));
 	if (size != sizeof(irdata)) {
-		// Read error.
+		// Seek and/or read error.
 		m_lastError = d->file->lastError();
 		return nullptr;
 	}

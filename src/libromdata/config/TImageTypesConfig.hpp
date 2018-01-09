@@ -40,31 +40,11 @@ namespace LibRomData {
 // problems if it's embedded inside of a templated class.
 typedef uint32_t (*pFnSupportedImageTypes)(void);
 struct SysData_t {
-	const rp_char *name;			// System name.
-	const char *classNameA;			// Class name in Config. (ASCII)
-#if defined(RP_UTF16)
-	const rp_char *classNameRP;		// Clas name in Config. (rp_char)
-#else /* defined(RP_UTF8) */
-	#define classNameRP classNameA
-#endif /* _WIN32 */
+	const char *className;			// Class name in Config. (ASCII)
 	pFnSupportedImageTypes getTypes;	// Get supported image types.
 };
-#if defined(RP_UTF16)
-#define SysDataEntry(klass, name) \
-	{name, #klass, _RP(#klass), LibRomData::klass::supportedImageTypes_static}
-#else /* defined(RP_UTF8) */
-#define SysDataEntry(klass, name) \
-	{name, #klass, LibRomData::klass::supportedImageTypes_static}
-#endif
-
-// MSVC 2010 doesn't support inline virtual functions.
-// MSVC 2015 does support it.
-// TODO: Check MSVC 2012 and 2013, and also gcc and clang.
-#if !defined(_MSC_VER) || _MSC_VER >= 1700
-#define INLINE_OVERRIDE inline
-#else
-#define INLINE_OVERRIDE
-#endif
+#define SysDataEntry(klass) \
+	{#klass, LibRomData::klass::supportedImageTypes_static}
 
 template<typename ComboBox>
 class TImageTypesConfig
@@ -79,17 +59,33 @@ class TImageTypesConfig
 		// Number of image types. (columns)
 		static const int IMG_TYPE_COUNT = LibRpBase::RomData::IMG_EXT_MAX+1;
 		// Number of systems. (rows)
-		static const int SYS_COUNT = 8;
+		static const int SYS_COUNT = 10;
 
 		/**
 		 * Create the grid of labels and ComboBoxes.
 		 */
 		void createGrid(void);
 
+	protected:
+		/**
+		 * (Re-)Load the configuration into the grid.
+		 * @param loadDefaults If true, use the default configuration instead of the user configuration.
+		 * @return True if anything was modified; false if not.
+		 */
+		bool reset_int(bool loadDefaults);
+
+	public:
 		/**
 		 * (Re-)Load the configuration into the grid.
 		 */
 		void reset(void);
+
+		/**
+		 * Load the default configuration.
+		 * This does NOT save and will not clear 'changed'.
+		 * @return True if anything was modified; false if not.
+		 */
+		bool loadDefaults(void);
 
 		/**
 		 * Save the configuration from the grid.
@@ -98,11 +94,22 @@ class TImageTypesConfig
 		int save(void);
 
 	public:
-		// Image type data.
-		static const rp_char *const imageTypeNames[IMG_TYPE_COUNT];
+		/**
+		 * Get an image type name.
+		 * @param imageType Image type ID.
+		 * @return Image type name, or nullptr if invalid.
+		 */
+		static const char *imageTypeName(unsigned int imageType);
 
-		// System data.
-		static const SysData_t sysData[SYS_COUNT];
+		// System data. (SYS_COUNT)
+		static const SysData_t sysData[];
+
+		/**
+		 * Get a system name.
+		 * @param sys System ID.
+		 * @return System name, or nullptr if invalid.
+		 */
+		static const char *sysName(unsigned int sys);
 
 	public:
 		/**
@@ -115,7 +122,7 @@ class TImageTypesConfig
 		{
 			assert(sys < SYS_COUNT);
 			assert(imageType < IMG_TYPE_COUNT);
-			return (sys << 3) | imageType;
+			return (sys << 4) | imageType;
 		}
 
 		/**
@@ -125,9 +132,9 @@ class TImageTypesConfig
 		 */
 		static inline unsigned int imageTypeFromCbid(unsigned int cbid)
 		{
-			assert(cbid < (SYS_COUNT << 3));
-			assert((cbid & 7) < IMG_TYPE_COUNT);
-			return (cbid & 7);
+			assert(cbid < (SYS_COUNT << 4));
+			assert((cbid & 15) < IMG_TYPE_COUNT);
+			return (cbid & 15);
 		}
 
 		/**
@@ -137,9 +144,9 @@ class TImageTypesConfig
 		 */
 		static inline unsigned int sysFromCbid(unsigned int cbid)
 		{
-			assert(cbid < (SYS_COUNT << 3));
-			assert((cbid & 7) < IMG_TYPE_COUNT);
-			return (cbid >> 3);
+			assert(cbid < (SYS_COUNT << 4));
+			assert((cbid & 15) < IMG_TYPE_COUNT);
+			return (cbid >> 4);
 		}
 
 		/**
@@ -175,8 +182,9 @@ class TImageTypesConfig
 		 * A ComboBox index was changed by the user.
 		 * @param cbid ComboBox ID.
 		 * @param prio New priority value. (0xFF == no)
+		 * @return True if changed; false if not.
 		 */
-		void cboImageType_priorityValueChanged(unsigned int cbid, unsigned int prio);
+		bool cboImageType_priorityValueChanged(unsigned int cbid, unsigned int prio);
 
 	protected:
 		/** Pure virtual functions. (protected) **/
@@ -184,25 +192,25 @@ class TImageTypesConfig
 		/**
 		 * Create the labels in the grid.
 		 */
-		INLINE_OVERRIDE virtual void createGridLabels(void) = 0;
+		virtual void createGridLabels(void) = 0;
 
 		/**
 		 * Create a ComboBox in the grid.
 		 * @param cbid ComboBox ID.
 		 */
-		INLINE_OVERRIDE virtual void createComboBox(unsigned int cbid) = 0;
+		virtual void createComboBox(unsigned int cbid) = 0;
 
 		/**
 		 * Add strings to a ComboBox in the grid.
 		 * @param cbid ComboBox ID.
 		 * @param max_prio Maximum priority value. (minimum is 1)
 		 */
-		INLINE_OVERRIDE virtual void addComboBoxStrings(unsigned int cbid, int max_prio) = 0;
+		virtual void addComboBoxStrings(unsigned int cbid, int max_prio) = 0;
 
 		/**
 		 * Finish adding the ComboBoxes.
 		 */
-		INLINE_OVERRIDE virtual void finishComboBoxes(void) = 0;
+		virtual void finishComboBoxes(void) = 0;
 
 		/**
 		 * Initialize the Save subsystem.
@@ -210,7 +218,7 @@ class TImageTypesConfig
 		 * must be opened with an appropriate writer class.
 		 * @return 0 on success; negative POSIX error code on error.
 		 */
-		INLINE_OVERRIDE virtual int saveStart(void) = 0;
+		virtual int saveStart(void) = 0;
 
 		/**
 		 * Write an ImageType configuration entry.
@@ -218,7 +226,7 @@ class TImageTypesConfig
 		 * @param imageTypeList Image type list, comma-separated.
 		 * @return 0 on success; negative POSIX error code on error.
 		 */
-		INLINE_OVERRIDE virtual int saveWriteEntry(const rp_char *sysName, const rp_char *imageTypeList) = 0;
+		virtual int saveWriteEntry(const char *sysName, const char *imageTypeList) = 0;
 
 		/**
 		 * Close the Save subsystem.
@@ -226,7 +234,7 @@ class TImageTypesConfig
 		 * must be opened with an appropriate writer class.
 		 * @return 0 on success; negative POSIX error code on error.
 		 */
-		INLINE_OVERRIDE virtual int saveFinish(void) = 0;
+		virtual int saveFinish(void) = 0;
 
 	public:
 		/** Pure virtual functions. (public) **/
@@ -237,7 +245,7 @@ class TImageTypesConfig
 		 * @param cbid ComboBox ID.
 		 * @param prio New priority value. (0xFF == no)
 		 */
-		INLINE_OVERRIDE virtual void cboImageType_setPriorityValue(unsigned int cbid, unsigned int prio) = 0;
+		virtual void cboImageType_setPriorityValue(unsigned int cbid, unsigned int prio) = 0;
 
 	public:
 		// Has the user changed anything?

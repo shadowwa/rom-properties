@@ -2,7 +2,7 @@
  * ROM Properties Page shell extension. (KDE4/KDE5)                        *
  * RomDataView.hpp: RomData viewer.                                        *
  *                                                                         *
- * Copyright (c) 2016 by David Korth.                                      *
+ * Copyright (c) 2016-2017 by David Korth.                                 *
  *                                                                         *
  * This program is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU General Public License as published by the   *
@@ -14,9 +14,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
  * GNU General Public License for more details.                            *
  *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * You should have received a copy of the GNU General Public License       *
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.   *
  ***************************************************************************/
 
 #include "RomDataView.hpp"
@@ -32,29 +31,38 @@
 #include "librpbase/img/IconAnimHelper.hpp"
 using namespace LibRpBase;
 
+// libi18n
+#include "libi18n/i18n.h"
+
 // C includes. (C++ namespace)
 #include <cassert>
-#include <cstdio>
 
 // C++ includes.
 #include <array>
+#include <string>
 #include <unordered_map>
 #include <vector>
+using std::string;
 using std::unordered_map;
 using std::vector;
 
 #include <QtCore/QDateTime>
+#include <QtCore/QEvent>
 #include <QtCore/QTimer>
 
 #include <QLabel>
 #include <QCheckBox>
+#include <QHeaderView>
+#include <QSpacerItem>
 
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QHBoxLayout>
-#include <QSpacerItem>
-#include <QTreeWidget>
 
+// Optimized QTreeWidget.
+#include "QTreeWidgetOpt.hpp"
+
+#include "ui_RomDataView.h"
 class RomDataViewPrivate
 {
 	public:
@@ -68,49 +76,29 @@ class RomDataViewPrivate
 		Q_DISABLE_COPY(RomDataViewPrivate)
 
 	public:
-		struct Ui {
-			void setupUi(QWidget *RomDataView);
+		Ui::RomDataView ui;
 
+		// Tab contents.
+		struct tab {
 			QVBoxLayout *vboxLayout;
-
-			// Header row.
-			QHBoxLayout *hboxHeaderRow;
-			QLabel *lblSysInfo;
-			QLabel *lblBanner;
-			QLabel *lblIcon;
-			QTimer *tmrIconAnim;
-
-			// Tab layout.
-			QTabWidget *tabWidget;
-			struct tab {
-				QVBoxLayout *vboxLayout;
-				QFormLayout *formLayout;
-				QLabel *lblCredits;
-			};
-			vector<tab> tabs;
-
-			Ui()	: vboxLayout(nullptr)
-				, hboxHeaderRow(nullptr)
-				, lblSysInfo(nullptr)
-				, lblBanner(nullptr)
-				, lblIcon(nullptr)
-				, tmrIconAnim(nullptr)
-				, tabWidget(nullptr)
-				{ }
-			~Ui() {
-				// hboxHeaderRow may need to be deleted.
-				delete hboxHeaderRow;
-			}
+			QFormLayout *formLayout;
+			QLabel *lblCredits;
 		};
-		Ui ui;
+		vector<tab> tabs;
+
+		// RomData object.
 		RomData *romData;
 
 		// Map of bitfield checkboxes to their values.
 		// Used to prevent the user from changing the values.
 		unordered_map<QAbstractButton*, bool> mapBitfields;
 
+		// QTreeWidgets with minimum row counts.
+		QVector<QPair<QTreeWidget*, int> > listDataRowCounts;
+		bool firstRowHeightInit;
+
 		// Animated icon data.
-		const IconAnimData *iconAnimData;
+		QTimer *tmrIconAnim;
 		std::array<QPixmap, IconAnimData::MAX_FRAMES> iconFrames;
 		IconAnimHelper iconAnimHelper;
 		bool anim_running;		// Animation is running.
@@ -148,6 +136,11 @@ class RomDataViewPrivate
 		 * @param field RomFields::Field
 		 */
 		void initListData(QLabel *lblDesc, const RomFields::Field *field);
+
+		/**
+		 * Recalculate RFT_LISTDATA row heights.
+		 */
+		void recalcListDataRowHeights(void);
 
 		/**
 		 * Initialize a Date/Time field.
@@ -195,7 +188,8 @@ class RomDataViewPrivate
 RomDataViewPrivate::RomDataViewPrivate(RomDataView *q, RomData *romData)
 	: q_ptr(q)
 	, romData(romData->ref())
-	, iconAnimData(nullptr)
+	, firstRowHeightInit(false)
+	, tmrIconAnim(nullptr)
 	, anim_running(false)
 	, last_frame_number(0)
 {
@@ -211,51 +205,6 @@ RomDataViewPrivate::~RomDataViewPrivate()
 	if (romData) {
 		romData->unref();
 	}
-}
-
-void RomDataViewPrivate::Ui::setupUi(QWidget *RomDataView)
-{
-	// Only the layouts and header row widgets are initialized here.
-	// Header row data is initialized in initHeaderRow().
-	// Field widgets are initialized in initDisplayWidgets().
-
-	// Main layout is a QVBoxLayout.
-	// This allows for the credits row to be separate.
-	vboxLayout = new QVBoxLayout(RomDataView);
-	// Zero the margins for the QVBoxLayout, since usually
-	// only the QFormLayout is present.
-	QMargins margins(0, 0, 0, 0);
-	vboxLayout->setContentsMargins(margins);
-
-	// Create the header row widgets.
-	hboxHeaderRow = new QHBoxLayout();
-	vboxLayout->addLayout(hboxHeaderRow);
-
-	// Header row: System information.
-	lblSysInfo = new QLabel(RomDataView);
-	lblSysInfo->hide();
-	lblSysInfo->setAlignment(Qt::AlignCenter);
-	lblSysInfo->setTextFormat(Qt::PlainText);
-	hboxHeaderRow->addWidget(lblSysInfo);
-
-	// Use a bold font.
-	QFont font = lblSysInfo->font();
-	font.setBold(true);
-	lblSysInfo->setFont(font);
-
-	// Header row: Banner and icon.
-	lblBanner = new QLabel(RomDataView);
-	lblBanner->hide();
-	hboxHeaderRow->addWidget(lblBanner);
-	lblIcon = new QLabel(RomDataView);
-	lblIcon->hide();
-	hboxHeaderRow->addWidget(lblIcon);
-
-	// Header row: Add spacers.
-	hboxHeaderRow->insertStretch(0, 1);
-	hboxHeaderRow->insertStretch(-1, 1);
-
-	// formLayout is created in initDisplayWidgets().
 }
 
 /**
@@ -310,21 +259,21 @@ void RomDataViewPrivate::initHeaderRow(void)
 
 	// System name.
 	// TODO: System logo and/or game title?
-	const rp_char *systemName = romData->systemName(
+	const char *systemName = romData->systemName(
 		RomData::SYSNAME_TYPE_LONG | RomData::SYSNAME_REGION_ROM_LOCAL);
 
 	// File type.
-	const rp_char *const fileType = romData->fileType_string();
+	const char *const fileType = romData->fileType_string();
 
 	QString sysInfo;
 	if (systemName) {
-		sysInfo = RP2Q(systemName);
+		sysInfo = U82Q(systemName);
 	}
 	if (fileType) {
 		if (!sysInfo.isEmpty()) {
 			sysInfo += QChar(L'\n');
 		}
-		sysInfo += RP2Q(fileType);
+		sysInfo += U82Q(fileType);
 	}
 
 	if (!sysInfo.isEmpty()) {
@@ -347,9 +296,16 @@ void RomDataViewPrivate::initHeaderRow(void)
 				ui.lblBanner->setPixmap(imgToPixmap(img));
 				ui.lblBanner->show();
 			} else {
+				// Invalid banner.
 				ui.lblBanner->hide();
 			}
+		} else {
+			// No banner.
+			ui.lblBanner->hide();
 		}
+	} else {
+		// No banner.
+		ui.lblBanner->hide();
 	}
 
 	// Icon.
@@ -358,10 +314,10 @@ void RomDataViewPrivate::initHeaderRow(void)
 		const rp_image *icon = romData->image(RomData::IMG_INT_ICON);
 		if (icon && icon->isValid()) {
 			// Is this an animated icon?
-			iconAnimData = romData->iconAnimData();
+			const IconAnimData *const iconAnimData = romData->iconAnimData();
 			if (iconAnimData) {
 				// Convert the icons to QPixmaps.
-				for (int i = 0; i < iconAnimData->count; i++) {
+				for (int i = iconAnimData->count-1; i >= 0; i--) {
 					const rp_image *const frame = iconAnimData->frames[i];
 					if (frame && frame->isValid()) {
 						QImage img = rpToQImage(frame);
@@ -377,10 +333,10 @@ void RomDataViewPrivate::initHeaderRow(void)
 					// Initialize the animation.
 					last_frame_number = iconAnimHelper.frameNumber();
 					// Create the animation timer.
-					if (!ui.tmrIconAnim) {
-						ui.tmrIconAnim = new QTimer(q);
-						ui.tmrIconAnim->setSingleShot(true);
-						QObject::connect(ui.tmrIconAnim, SIGNAL(timeout()),
+					if (!tmrIconAnim) {
+						tmrIconAnim = new QTimer(q);
+						tmrIconAnim->setSingleShot(true);
+						QObject::connect(tmrIconAnim, SIGNAL(timeout()),
 								q, SLOT(tmrIconAnim_timeout()));
 					}
 				}
@@ -402,7 +358,13 @@ void RomDataViewPrivate::initHeaderRow(void)
 					ui.lblIcon->hide();
 				}
 			}
+		} else {
+			// No icon.
+			ui.lblIcon->hide();
 		}
+	} else {
+		// No icon.
+		ui.lblIcon->hide();
 	}
 }
 
@@ -449,20 +411,23 @@ void RomDataViewPrivate::initString(QLabel *lblDesc, const RomFields::Field *fie
 		lblString->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
 		lblString->setTextFormat(Qt::RichText);
 		lblString->setOpenExternalLinks(true);
+		lblString->setTextInteractionFlags(
+			Qt::LinksAccessibleByMouse | Qt::LinksAccessibleByKeyboard);
+		lblString->setFocusPolicy(Qt::StrongFocus);
 		if (field->data.str) {
 			// Replace newlines with "<br/>".
-			QString text = RP2Q(*(field->data.str)).replace(QChar(L'\n'), QLatin1String("<br/>"));
+			QString text = U82Q(*(field->data.str)).replace(QChar(L'\n'), QLatin1String("<br/>"));
 			lblString->setText(text);
 		}
 	} else {
 		// Standard text with no formatting.
 		lblString->setTextInteractionFlags(
-			Qt::LinksAccessibleByMouse | Qt::TextSelectableByMouse |
-			Qt::LinksAccessibleByKeyboard | Qt::TextSelectableByKeyboard);
+			Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+		lblString->setFocusPolicy(Qt::StrongFocus);
 		lblString->setAlignment(Qt::AlignLeft | Qt::AlignTop);
 		lblString->setTextFormat(Qt::PlainText);
 		if (field->data.str) {
-			lblString->setText(RP2Q(*(field->data.str)));
+			lblString->setText(U82Q(*(field->data.str)));
 		}
 	}
 
@@ -486,7 +451,7 @@ void RomDataViewPrivate::initString(QLabel *lblDesc, const RomFields::Field *fie
 	}
 
 	// Credits?
-	auto &tab = ui.tabs[field->tabIdx];
+	auto &tab = tabs[field->tabIdx];
 	if (field->desc.flags & RomFields::STRF_CREDITS) {
 		// Credits row goes at the end.
 		// There should be a maximum of one STRF_CREDITS per tab.
@@ -535,13 +500,13 @@ void RomDataViewPrivate::initBitfield(QLabel *lblDesc, const RomFields::Field *f
 	QGridLayout *gridLayout = new QGridLayout();
 	int row = 0, col = 0;
 	for (int bit = 0; bit < count; bit++) {
-		const rp_string &name = bitfieldDesc.names->at(bit);
+		const string &name = bitfieldDesc.names->at(bit);
 		if (name.empty())
 			continue;
 
 		// TODO: Disable KDE's automatic mnemonic.
 		QCheckBox *checkBox = new QCheckBox(q);
-		checkBox->setText(RP2Q(name));
+		checkBox->setText(U82Q(name));
 		bool value = !!(field->data.bitfield & (1 << bit));
 		checkBox->setChecked(value);
 
@@ -561,7 +526,7 @@ void RomDataViewPrivate::initBitfield(QLabel *lblDesc, const RomFields::Field *f
 			col = 0;
 		}
 	}
-	ui.tabs[field->tabIdx].formLayout->addRow(lblDesc, gridLayout);
+	tabs[field->tabIdx].formLayout->addRow(lblDesc, gridLayout);
 }
 
 /**
@@ -573,56 +538,136 @@ void RomDataViewPrivate::initListData(QLabel *lblDesc, const RomFields::Field *f
 {
 	// ListData type. Create a QTreeWidget.
 	const auto &listDataDesc = field->desc.list_data;
-	assert(listDataDesc.names != nullptr);
-	if (!listDataDesc.names) {
-		// No column names...
-		return;
+	// NOTE: listDataDesc.names can be nullptr,
+	// which means we don't have any column headers.
+
+	auto list_data = field->data.list_data;
+	assert(list_data != nullptr);
+
+	int col_count = 1;
+	if (listDataDesc.names) {
+		col_count = (int)listDataDesc.names->size();
+	} else {
+		// No column headers.
+		// Use the first row.
+		if (list_data && !list_data->empty()) {
+			col_count = (int)list_data->at(0).size();
+		}
 	}
 
 	Q_Q(RomDataView);
-	QTreeWidget *treeWidget = new QTreeWidget(q);
+	QTreeWidget *treeWidget = new QTreeWidgetOpt(q);
 	treeWidget->setRootIsDecorated(false);
 	treeWidget->setUniformRowHeights(true);
+	treeWidget->setAlternatingRowColors(true);
 
 	// Set up the column names.
-	const int count = (int)listDataDesc.names->size();
-	treeWidget->setColumnCount(count);
-	QStringList columnNames;
-	columnNames.reserve(count);
-	for (int i = 0; i < count; i++) {
-		const rp_string &name = listDataDesc.names->at(i);
-		if (!name.empty()) {
-			columnNames.append(RP2Q(name));
-		} else {
-			// Don't show this column.
-			columnNames.append(QString());
-			treeWidget->setColumnHidden(i, true);
+	treeWidget->setColumnCount(col_count);
+	if (listDataDesc.names) {
+		QStringList columnNames;
+		columnNames.reserve(col_count);
+		for (int i = 0; i < col_count; i++) {
+			const string &name = listDataDesc.names->at(i);
+			if (!name.empty()) {
+				columnNames.append(U82Q(name));
+			} else {
+				// Don't show this column.
+				columnNames.append(QString());
+				treeWidget->setColumnHidden(i, true);
+			}
 		}
+		treeWidget->setHeaderLabels(columnNames);
+	} else {
+		// Hide the header.
+		treeWidget->header()->hide();
 	}
-	treeWidget->setHeaderLabels(columnNames);
 
+	const bool hasCheckboxes = !!(listDataDesc.flags & RomFields::RFT_LISTDATA_CHECKBOXES);
 	// Add the row data.
-	auto list_data = field->data.list_data;
-	assert(list_data != nullptr);
 	if (list_data) {
-		const int count = (int)list_data->size();
-		for (int i = 0; i < count; i++) {
-			const vector<rp_string> &data_row = list_data->at(i);
+		const int row_count = (int)list_data->size();
+		uint32_t checkboxes = field->data.list_checkboxes;
+		for (int i = 0; i < row_count; i++) {
+			const vector<string> &data_row = list_data->at(i);
+			if (hasCheckboxes && data_row.empty()) {
+				// Skip this row.
+				checkboxes >>= 1;
+				continue;
+			}
+
 			QTreeWidgetItem *treeWidgetItem = new QTreeWidgetItem(treeWidget);
+			if (hasCheckboxes) {
+				// The checkbox will only show up if setCheckState()
+				// is called at least once, regardless of value.
+				treeWidgetItem->setCheckState(0, (checkboxes & 1) ? Qt::Checked : Qt::Unchecked);
+				checkboxes >>= 1;
+			}
+			// Disable user checkability.
+			treeWidgetItem->setFlags(treeWidgetItem->flags() & ~Qt::ItemIsUserCheckable);
+
 			int col = 0;
 			for (auto iter = data_row.cbegin(); iter != data_row.cend(); ++iter, ++col) {
-				treeWidgetItem->setData(col, Qt::DisplayRole, RP2Q(*iter));
+				treeWidgetItem->setData(col, Qt::DisplayRole, U82Q(*iter));
 			}
 		}
 	}
 
 	// Resize the columns to fit the contents.
-	for (int i = 0; i < count; i++) {
+	for (int i = 0; i < col_count; i++) {
 		treeWidget->resizeColumnToContents(i);
 	}
-	treeWidget->resizeColumnToContents(count);
+	treeWidget->resizeColumnToContents(col_count);
 
-	ui.tabs[field->tabIdx].formLayout->addRow(lblDesc, treeWidget);
+	if (field->desc.list_data.flags & RomFields::RFT_LISTDATA_SEPARATE_ROW) {
+		// Separate rows.
+		tabs[field->tabIdx].formLayout->addRow(lblDesc);
+		tabs[field->tabIdx].formLayout->addRow(treeWidget);
+	} else {
+		// Single row.
+		tabs[field->tabIdx].formLayout->addRow(lblDesc, treeWidget);
+	}
+
+	// Row height is recalculated when the window is first visible
+	// and/or the system theme is changed.
+	// TODO: Set an actual default number of rows, or let Qt handle it?
+	// (Windows uses 5.)
+	if (field->desc.list_data.rows_visible > 0) {
+		listDataRowCounts.append(QPair<QTreeWidget*, int>(treeWidget, field->desc.list_data.rows_visible));
+	}
+}
+
+/**
+ * Recalculate RFT_LISTDATA row heights.
+ */
+void RomDataViewPrivate::recalcListDataRowHeights(void)
+{
+	for (auto iter = listDataRowCounts.constBegin(); iter != listDataRowCounts.constEnd(); ++iter) {
+		QTreeWidget *const treeWidget = iter->first;
+		if (treeWidget->topLevelItemCount() <= 0)
+			continue;
+
+		// Get the height of the first item.
+		QTreeWidgetItem *const item = treeWidget->topLevelItem(0);
+		assert(item != 0);
+		if (!item)
+			continue;
+
+		QRect rect = treeWidget->visualItemRect(item);
+		if (rect.height() <= 0)
+			continue;
+
+		// Multiply the height by the requested number of visible rows.
+		int height = rect.height() * iter->second;
+		// Add the header.
+		if (treeWidget->header()->isVisibleTo(treeWidget)) {
+			height += treeWidget->header()->height();
+		}
+		// Add QTreeWidget borders.
+		height += (treeWidget->frameWidth() * 2);
+		// Set the QTreeWidget height.
+		treeWidget->setMinimumHeight(height);
+		treeWidget->setMaximumHeight(height);
+	}
 }
 
 /**
@@ -640,9 +685,9 @@ void RomDataViewPrivate::initDateTime(QLabel *lblDesc, const RomFields::Field *f
 	lblDateTime->setTextInteractionFlags(Qt::LinksAccessibleByMouse|Qt::TextSelectableByMouse);
 
 	if (field->data.date_time == -1) {
-		// Invalid date/time.
-		lblDateTime->setText(RomDataView::tr("Unknown"));
-		ui.tabs[field->tabIdx].formLayout->addRow(lblDesc, lblDateTime);
+		// tr: Invalid date/time.
+		lblDateTime->setText(U82Q(C_("RomDataView", "Unknown")));
+		tabs[field->tabIdx].formLayout->addRow(lblDesc, lblDateTime);
 		return;
 	}
 
@@ -653,23 +698,39 @@ void RomDataViewPrivate::initDateTime(QLabel *lblDesc, const RomFields::Field *f
 	dateTime.setMSecsSinceEpoch(field->data.date_time * 1000);
 
 	QString str;
-	switch (field->desc.flags &
-		(RomFields::RFT_DATETIME_HAS_DATE | RomFields::RFT_DATETIME_HAS_TIME))
-	{
+	switch (field->desc.flags & RomFields::RFT_DATETIME_HAS_DATETIME_NO_YEAR_MASK) {
 		case RomFields::RFT_DATETIME_HAS_DATE:
 			// Date only.
 			str = dateTime.date().toString(Qt::DefaultLocaleShortDate);
 			break;
 
 		case RomFields::RFT_DATETIME_HAS_TIME:
+		case RomFields::RFT_DATETIME_HAS_TIME |
+		     RomFields::RFT_DATETIME_NO_YEAR:
 			// Time only.
 			str = dateTime.time().toString(Qt::DefaultLocaleShortDate);
 			break;
 
 		case RomFields::RFT_DATETIME_HAS_DATE |
-			RomFields::RFT_DATETIME_HAS_TIME:
+		     RomFields::RFT_DATETIME_HAS_TIME:
 			// Date and time.
 			str = dateTime.toString(Qt::DefaultLocaleShortDate);
+			break;
+
+		case RomFields::RFT_DATETIME_HAS_DATE |
+		     RomFields::RFT_DATETIME_NO_YEAR:
+			// Date only. (No year)
+			// TODO: Localize this.
+			str = dateTime.date().toString(QLatin1String("MMM d"));
+			break;
+
+		case RomFields::RFT_DATETIME_HAS_DATE |
+		     RomFields::RFT_DATETIME_HAS_TIME |
+		     RomFields::RFT_DATETIME_NO_YEAR:
+			// Date and time. (No year)
+			// TODO: Localize this.
+			str = dateTime.date().toString(QLatin1String("MMM d")) + QChar(L' ') +
+			      dateTime.time().toString();
 			break;
 
 		default:
@@ -680,7 +741,7 @@ void RomDataViewPrivate::initDateTime(QLabel *lblDesc, const RomFields::Field *f
 
 	if (!str.isEmpty()) {
 		lblDateTime->setText(str);
-		ui.tabs[field->tabIdx].formLayout->addRow(lblDesc, lblDateTime);
+		tabs[field->tabIdx].formLayout->addRow(lblDesc, lblDateTime);
 	} else {
 		// Invalid date/time.
 		delete lblDateTime;
@@ -705,51 +766,16 @@ void RomDataViewPrivate::initAgeRatings(QLabel *lblDesc, const RomFields::Field 
 	const RomFields::age_ratings_t *age_ratings = field->data.age_ratings;
 	assert(age_ratings != nullptr);
 	if (!age_ratings) {
-		// No age ratings data.
-		lblAgeRatings->setText(RomDataView::tr("ERROR"));
-		ui.tabs[field->tabIdx].formLayout->addRow(lblDesc, lblAgeRatings);
+		// tr: No age ratings data.
+		lblAgeRatings->setText(U82Q(C_("RomDataView", "ERROR")));
+		tabs[field->tabIdx].formLayout->addRow(lblDesc, lblAgeRatings);
 		return;
 	}
 
 	// Convert the age ratings field to a string.
-	QString str;
-	str.reserve(64);
-	unsigned int ratings_count = 0;
-	for (int i = 0; i < (int)age_ratings->size(); i++) {
-		const uint16_t rating = age_ratings->at(i);
-		if (!(rating & RomFields::AGEBF_ACTIVE))
-			continue;
-
-		if (ratings_count > 0) {
-			// Append a comma.
-			if (ratings_count % 4 == 0) {
-				// 4 ratings per line.
-				str += QLatin1String(",\n");
-			} else {
-				str += QLatin1String(", ");
-			}
-		}
-
-		const char *abbrev = RomFields::ageRatingAbbrev(i);
-		if (abbrev) {
-			str += QLatin1String(abbrev);
-		} else {
-			// Invalid age rating.
-			// Use the numeric index.
-			str += QString::number(i);
-		}
-		str += QChar(L'=');
-		str += RP2Q(utf8_to_rp_string(RomFields::ageRatingDecode(i, rating)));
-		ratings_count++;
-	}
-
-	if (ratings_count == 0) {
-		// No age ratings.
-		str = RomDataView::tr("None");
-	}
-
+	QString str = U82Q(RomFields::ageRatingsDecode(age_ratings));
 	lblAgeRatings->setText(str);
-	ui.tabs[field->tabIdx].formLayout->addRow(lblDesc, lblAgeRatings);
+	tabs[field->tabIdx].formLayout->addRow(lblDesc, lblAgeRatings);
 }
 
 /**
@@ -760,8 +786,8 @@ void RomDataViewPrivate::initAgeRatings(QLabel *lblDesc, const RomFields::Field 
 void RomDataViewPrivate::initDisplayWidgets(void)
 {
 	// Clear the tabs.
-	for (int i = ui.tabs.size()-1; i >= 0; i--) {
-		auto &tab = ui.tabs[i];
+	for (int i = tabs.size()-1; i >= 0; i--) {
+		auto &tab = tabs[i];
 		// Delete the credits label if it's present.
 		delete tab.lblCredits;
 		// Delete the QFormLayout if it's present.
@@ -774,9 +800,9 @@ void RomDataViewPrivate::initDisplayWidgets(void)
 			delete tab.vboxLayout;
 		}
 	}
-	ui.tabs.clear();
-	delete ui.tabWidget;
-	ui.tabWidget = nullptr;
+	tabs.clear();
+	ui.tabWidget->clear();
+	ui.tabWidget->hide();
 
 	// Clear the bitfields map.
 	mapBitfields.clear();
@@ -801,17 +827,17 @@ void RomDataViewPrivate::initDisplayWidgets(void)
 	// Create the QTabWidget.
 	Q_Q(RomDataView);
 	if (fields->tabCount() > 1) {
-		ui.tabs.resize(fields->tabCount());
-		ui.tabWidget = new QTabWidget(q);
+		tabs.resize(fields->tabCount());
+		ui.tabWidget->show();
 		for (int i = 0; i < fields->tabCount(); i++) {
 			// Create a tab.
-			const rp_char *name = fields->tabName(i);
+			const char *name = fields->tabName(i);
 			if (!name) {
 				// Skip this tab.
 				continue;
 			}
 
-			auto &tab = ui.tabs[i];
+			auto &tab = tabs[i];
 			QWidget *widget = new QWidget(q);
 
 			// Layouts.
@@ -822,15 +848,14 @@ void RomDataViewPrivate::initDisplayWidgets(void)
 			tab.vboxLayout->addLayout(tab.formLayout, 1);
 
 			// Add the tab.
-			ui.tabWidget->addTab(widget, (name ? RP2Q(name) : QString()));
+			ui.tabWidget->addTab(widget, (name ? U82Q(name) : QString()));
 		}
-		ui.vboxLayout->addWidget(ui.tabWidget, 1);
 	} else {
 		// No tabs.
 		// Don't create a QTabWidget, but simulate a single
-		// tab in ui.tabs[] to make it easier to work with.
-		ui.tabs.resize(1);
-		auto &tab = ui.tabs[0];
+		// tab in tabs[] to make it easier to work with.
+		tabs.resize(1);
+		auto &tab = tabs[0];
 
 		// QVBoxLayout
 		// NOTE: Using ui.vboxLayout. We must ensure that
@@ -854,19 +879,20 @@ void RomDataViewPrivate::initDisplayWidgets(void)
 
 		// Verify the tab index.
 		const int tabIdx = field->tabIdx;
-		assert(tabIdx >= 0 && tabIdx < (int)ui.tabs.size());
-		if (tabIdx < 0 || tabIdx >= (int)ui.tabs.size()) {
+		assert(tabIdx >= 0 && tabIdx < (int)tabs.size());
+		if (tabIdx < 0 || tabIdx >= (int)tabs.size()) {
 			// Tab index is out of bounds.
 			continue;
-		} else if (!ui.tabs[tabIdx].formLayout) {
+		} else if (!tabs[tabIdx].formLayout) {
 			// Tab name is empty. Tab is hidden.
 			continue;
 		}
 
-		QLabel *lblDesc = new QLabel(q);
+		// tr: Field description label.
+		string txt = rp_sprintf(C_("RomDataView", "%s:"), field->name.c_str());
+		QLabel *lblDesc = new QLabel(U82Q(txt.c_str()), q);
 		lblDesc->setAlignment(Qt::AlignLeft | Qt::AlignTop);
 		lblDesc->setTextFormat(Qt::PlainText);
-		lblDesc->setText(RomDataView::tr("%1:").arg(RP2Q(field->name)));
 
 		switch (field->type) {
 			case RomFields::RFT_INVALID:
@@ -901,6 +927,11 @@ void RomDataViewPrivate::initDisplayWidgets(void)
 				break;
 		}
 	}
+
+	// Close the file.
+	// Keeping the file open may prevent the user from
+	// changing the file.
+	romData->close();
 }
 
 /**
@@ -908,14 +939,19 @@ void RomDataViewPrivate::initDisplayWidgets(void)
  */
 void RomDataViewPrivate::startAnimTimer(void)
 {
-	if (!iconAnimData || !ui.tmrIconAnim || !ui.lblIcon) {
+	if (!iconAnimHelper.isAnimated()) {
 		// Not an animated icon.
 		return;
 	}
 
+	// Sanity check: If these aren't set, something's wrong.
+	assert(tmrIconAnim != nullptr);
+	assert(ui.lblIcon != nullptr);
+
 	// Get the current frame information.
 	last_frame_number = iconAnimHelper.frameNumber();
 	const int delay = iconAnimHelper.frameDelay();
+	assert(delay > 0);
 	if (delay <= 0) {
 		// Invalid delay value.
 		return;
@@ -923,7 +959,7 @@ void RomDataViewPrivate::startAnimTimer(void)
 
 	// Set a single-shot timer for the current frame.
 	anim_running = true;
-	ui.tmrIconAnim->start(delay);
+	tmrIconAnim->start(delay);
 }
 
 /**
@@ -931,9 +967,9 @@ void RomDataViewPrivate::startAnimTimer(void)
  */
 void RomDataViewPrivate::stopAnimTimer(void)
 {
-	if (ui.tmrIconAnim) {
+	if (tmrIconAnim) {
 		anim_running = false;
-		ui.tmrIconAnim->stop();
+		tmrIconAnim->stop();
 	}
 }
 
@@ -968,6 +1004,30 @@ RomDataView::~RomDataView()
 /** QWidget overridden functions. **/
 
 /**
+ * State change handler.
+ *
+ * Used to determine if the system font or theme
+ * changes, in which case the ListData row heights
+ * need to be recalculated.
+ *
+ * @param event QEvent.
+ */
+void RomDataView::changeEvent(QEvent *event)
+{
+	Q_D(RomDataView);
+	switch (event->type()) {
+		case QEvent::FontChange:
+		case QEvent::StyleChange:
+			// FIXME: Adjustments in response to QEvent::StyleChange
+			// don't seem to work on Kubuntu 16.10...
+			d->recalcListDataRowHeights();
+			break;
+		default:
+			break;
+	}
+}
+
+/**
  * Window has been hidden.
  * This means that this tab has been selected.
  * @param event QShowEvent.
@@ -977,6 +1037,10 @@ void RomDataView::showEvent(QShowEvent *event)
 	// Start the icon animation.
 	Q_D(RomDataView);
 	d->startAnimTimer();
+	if (!d->firstRowHeightInit) {
+		d->recalcListDataRowHeights();
+		d->firstRowHeightInit = true;
+	}
 
 	// Pass the event to the superclass.
 	super::showEvent(event);
@@ -1044,7 +1108,7 @@ void RomDataView::tmrIconAnim_timeout(void)
 
 	// Set the single-shot timer.
 	if (d->anim_running) {
-		d->ui.tmrIconAnim->start(delay);
+		d->tmrIconAnim->start(delay);
 	}
 }
 
@@ -1065,8 +1129,6 @@ RomData *RomDataView::romData(void) const
  *
  * If a RomData object is already set, it is unref()'d.
  * The new RomData object is ref()'d when set.
- *
- * @return RomData object.
  */
 void RomDataView::setRomData(RomData *romData)
 {

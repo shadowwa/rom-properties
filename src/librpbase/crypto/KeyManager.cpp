@@ -23,13 +23,12 @@
 
 #include "KeyManager.hpp"
 #include "config/ConfReader_p.hpp"
-
-// C includes.
-#include <stdlib.h>
+#include "libi18n/i18n.h"
 
 // C includes. (C++ namespace)
 #include <cassert>
-#include <cctype>
+#include <cerrno>
+#include <cstring>
 
 // C++ includes.
 #include <memory>
@@ -41,9 +40,6 @@ using std::unordered_map;
 
 #include "IAesCipher.hpp"
 #include "AesCipherFactory.hpp"
-
-// Text conversion functions and macros.
-#include "TextFuncs.hpp"
 
 // Uninitialized vector class.
 // Reference: http://andreoffringa.org/?q=uvector
@@ -130,7 +126,7 @@ const char KeyManager::verifyTestString[] = {
 #endif /* ENABLE_DECRYPTION */
 
 KeyManagerPrivate::KeyManagerPrivate()
-	: super(_RP("keys.conf"))
+	: super("keys.conf")
 { }
 
 /**
@@ -205,42 +201,11 @@ int KeyManagerPrivate::processConfigLine(const char *section, const char *name, 
 	// Reserve space for half of the key string.
 	// Key string is ASCII hex, so two characters make up one byte.
 	vKeys.resize(vKeys.size() + len);
-
-	// ASCII to HEX lookup table.
-	// Reference: http://codereview.stackexchange.com/questions/22757/char-hex-string-to-byte-array
-	static const uint8_t ascii_to_hex[0x100] = {
-		//0     1     2     3     4     5     6    7      8     9     A     B     C     D     E     F
-		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//0
-		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//1
-		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//2
-		0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//3
-		0xFF, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//4
-		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//5
-		0xFF, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//6
-		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//7
-
-		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//8
-		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//9
-		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//A
-		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//B
-		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//C
-		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//D
-		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//E
-		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF //F
-	};
-
-	for (; value_len > 0; value_len -= 2, vKeys_pos++, value += 2) {
-		// Process two characters at a time.
-		// Two hexadecimal digits == one byte.
-		char chr0 = ascii_to_hex[(uint8_t)value[0]];
-		char chr1 = ascii_to_hex[(uint8_t)value[1]];
-		if (chr0 > 0x0F || chr1 > 0x0F) {
-			// Invalid character.
-			vKeys.resize(vKeys_start_pos);
-			return 1;
-		}
-
-		vKeys[vKeys_pos] = (chr0 << 4 | chr1);
+	int ret = KeyManager::hexStringToBytes(value, &vKeys[vKeys_pos], len);
+	if (ret != 0) {
+		// Invalid character(s) encountered.
+		vKeys.resize(vKeys_start_pos);
+		return 1;
 	}
 
 	// Value parsed successfully.
@@ -265,35 +230,37 @@ KeyManager::KeyManager()
  * @param res VerifyResult.
  * @return Description, or nullptr if invalid.
  */
-const rp_char *KeyManager::verifyResultToString(VerifyResult res)
+const char *KeyManager::verifyResultToString(VerifyResult res)
 {
-	static const rp_char *const errTbl[] = {
-		// VERIFY_OK
-		_RP("Something happened."),
-		// VERIFY_INVALID_PARAMS
-		_RP("Invalid parameters. (THIS IS A BUG!)"),
-		// VERIFY_NO_SUPPORT
-		_RP("Decryption is not supported in this build."),
-		// VERIFY_KEY_DB_NOT_LOADED
-		_RP("keys.conf was not found."),
-		// VERIFY_KEY_DB_ERROR
-		_RP("keys.conf has an error and could not be loaded."),
-		// VERIFY_KEY_NOT_FOUND
-		_RP("Required key was not found in keys.conf."),
-		// VERIFY_KEY_INVALID
-		_RP("The key in keys.conf is not a valid key."),
-		// VERFIY_IAESCIPHER_INIT_ERR
-		_RP("AES decryption could not be initialized."),
-		// VERIFY_IAESCIPHER_DECRYPT_ERR
-		_RP("AES decryption failed."),
-		// VERIFY_WRONG_KEY
-		_RP("The key in keys.conf is incorrect."),
+	static const char *const errTbl[] = {
+		// tr: VERIFY_OK
+		NOP_C_("KeyManager|VerifyResult", "Something happened."),
+		// tr: VERIFY_INVALID_PARAMS
+		NOP_C_("KeyManager|VerifyResult", "Invalid parameters. (THIS IS A BUG!)"),
+		// tr: VERIFY_NO_SUPPORT
+		NOP_C_("KeyManager|VerifyResult", "Decryption is not supported in this build."),
+		// tr: VERIFY_KEY_DB_NOT_LOADED
+		NOP_C_("KeyManager|VerifyResult", "keys.conf was not found."),
+		// tr: VERIFY_KEY_DB_ERROR
+		NOP_C_("KeyManager|VerifyResult", "keys.conf has an error and could not be loaded."),
+		// tr: VERIFY_KEY_NOT_FOUND
+		NOP_C_("KeyManager|VerifyResult", "Required key was not found in keys.conf."),
+		// tr: VERIFY_KEY_INVALID
+		NOP_C_("KeyManager|VerifyResult", "The key in keys.conf is not a valid key."),
+		// tr: VERFIY_IAESCIPHER_INIT_ERR
+		NOP_C_("KeyManager|VerifyResult", "AES decryption could not be initialized."),
+		// tr: VERIFY_IAESCIPHER_DECRYPT_ERR
+		NOP_C_("KeyManager|VerifyResult", "AES decryption failed."),
+		// tr: VERIFY_WRONG_KEY
+		NOP_C_("KeyManager|VerifyResult", "The key in keys.conf is incorrect."),
 	};
 	static_assert(ARRAY_SIZE(errTbl) == KeyManager::VERIFY_MAX, "Update errTbl[].");
 
 	assert(res >= 0);
 	assert(res < ARRAY_SIZE(errTbl));
-	return ((res >= 0 && res < ARRAY_SIZE(errTbl)) ? errTbl[res] : nullptr);
+	return ((res >= 0 && res < ARRAY_SIZE(errTbl))
+		? dpgettext_expr(RP_I18N_DOMAIN, "KeyManager|VerifyResult", errTbl[res])
+		: nullptr);
 }
 
 #ifdef ENABLE_DECRYPTION
@@ -453,6 +420,56 @@ KeyManager::VerifyResult KeyManager::getAndVerify(const char *keyName, KeyData_t
 	// Test data verified.
 	return VERIFY_OK;
 }
+
+/**
+ * Convert string data from hexadecimal to bytes.
+ * @param str	[in] String data. (Must be len*2 characters.)
+ * @param buf	[out] Output buffer.
+ * @param len	[in] Size of buf, in bytes.
+ * @return 0 on success; non-zero on error.
+ */
+template<typename Char>
+int KeyManager::hexStringToBytes(const Char *str, uint8_t *buf, unsigned int len)
+{
+	// ASCII to HEX lookup table.
+	// Reference: http://codereview.stackexchange.com/questions/22757/char-hex-string-to-byte-array
+	static const uint8_t ascii_to_hex[0x80] = {
+		//0     1     2     3     4     5     6    7      8     9     A     B     C     D     E     F
+		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//0
+		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//1
+		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//2
+		0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//3
+		0xFF, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//4
+		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//5
+		0xFF, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//6
+		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,//7
+	};
+
+	for (; len > 0; len--, str += 2, buf++) {
+		// Process two characters at a time.
+		// Two hexadecimal digits == one byte.
+		if ((unsigned int)str[0] > 0x80 || (unsigned int)str[1] > 0x80) {
+			// Invalid character.
+			return -EINVAL;
+		}
+
+		uint8_t chr0 = ascii_to_hex[(uint8_t)str[0]];
+		uint8_t chr1 = ascii_to_hex[(uint8_t)str[1]];
+		if (chr0 > 0x0F || chr1 > 0x0F) {
+			// Invalid character.
+			return -EINVAL;
+		}
+
+		*buf = (chr0 << 4 | chr1);
+	}
+
+	// String processed.
+	return 0;
+}
+
+// Explicit instantiation of hexStringToBytes().
+template int KeyManager::hexStringToBytes<char>(const char *str, uint8_t *buf, unsigned int len);
+
 #endif /* ENABLE_DECRYPTION */
 
 }

@@ -246,12 +246,18 @@ int CisoGcnReader::readBlock(uint32_t blockIdx, void *ptr, int pos, size_t size)
 	assert(pos >= 0 && pos < (int)d->block_size);
 	assert(size <= d->block_size);
 	// TODO: Make sure overflow doesn't occur.
-	assert((int64_t)(pos + size) < (int64_t)d->block_size);
+	assert((int64_t)(pos + size) <= (int64_t)d->block_size);
 	if (pos < 0 || pos >= (int)d->block_size || size > d->block_size ||
-	    (int64_t)(pos + size) >= (int64_t)d->block_size)
+	    (int64_t)(pos + size) > (int64_t)d->block_size)
 	{
 		// pos+size is out of range.
 		return -1;
+	}
+
+	// TODO: "unlikely" hint.
+	if (size == 0) {
+		// Nothing to read.
+		return 0;
 	}
 
 	// Get the physical block number first.
@@ -271,17 +277,9 @@ int CisoGcnReader::readBlock(uint32_t blockIdx, void *ptr, int pos, size_t size)
 
 	// Go to the block.
 	const int64_t phys_pos = sizeof(d->cisoHeader) + ((int64_t)physBlockIdx * d->block_size) + pos;
-	int ret = d->file->seek(phys_pos);
-	if (ret != 0) {
-		// Seek failed.
-		m_lastError = d->file->lastError();
-		return -1;
-	}
-
-	// Read the first 'size' bytes of the block.
-	ret = (int)d->file->read(ptr, size);
+	size_t sz_read = d->file->seekAndRead(phys_pos, ptr, size);
 	m_lastError = d->file->lastError();
-	return ret;
+	return (sz_read > 0 ? (int)sz_read : -1);
 }
 
 }

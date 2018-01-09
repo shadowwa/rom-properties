@@ -25,12 +25,34 @@ ENDIF(GLib2_FOUND AND GObject2_FOUND AND GdkPixbuf2_FOUND AND GTK3_FOUND)
 STRING(REGEX REPLACE "([^;]+)" "../\\1" rom-properties-gnome_SRCS "${rom-properties-gtk_SRCS}")
 STRING(REGEX REPLACE "([^;]+)" "../\\1" rom-properties-gnome_H "${rom-properties-gtk_H}")
 
+# CPU-specific and optimized sources.
+IF(rom-properties-gtk_SSSE3_SRCS)
+	STRING(REGEX REPLACE "([^;]+)" "../\\1" rom-properties-gnome_IFUNC_SRCS "${rom-properties-gtk_IFUNC_SRCS}")
+	STRING(REGEX REPLACE "([^;]+)" "../\\1" rom-properties-gnome_SSSE3_SRCS "${rom-properties-gtk_SSSE3_SRCS}")
+
+	IF(MSVC AND NOT CMAKE_CL_64)
+		SET(SSSE3_FLAG "/arch:SSE2")
+	ELSEIF(NOT MSVC)
+		# TODO: Other compilers?
+		SET(SSSE3_FLAG "-mssse3")
+	ENDIF()
+	IF(SSSE3_FLAG)
+		FOREACH(ssse3_file ${rom-properties-gnome_SSSE3_SRCS})
+			SET_SOURCE_FILES_PROPERTIES(${ssse3_file}
+				APPEND_STRING PROPERTIES COMPILE_FLAGS " ${SSSE3_FLAG} ")
+		ENDFOREACH(ssse3_file ${rom-properties-gnome_SSSE3_SRCS})
+	ENDIF(SSSE3_FLAG)
+ENDIF()
+UNSET(arch)
+
 # Write the config.h file.
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/config.gnome.h.in" "${CMAKE_CURRENT_BINARY_DIR}/config.gnome.h")
 
 # Sources and headers. (GNOME-specific)
 SET(rom-properties-gnome_SRCS
 	${rom-properties-gnome_SRCS}
+	${rom-properties-gnome_IFUNC_SRCS}
+	${rom-properties-gnome_SSSE3_SRCS}
 	rom-properties-plugin.c
 	rom-properties-provider.cpp
 	)
@@ -57,41 +79,19 @@ IF(BUILD_GNOME)
 			$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/src>
 			$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/src>
 		)
-	TARGET_LINK_LIBRARIES(rom-properties-gnome cachemgr8 romdata8 rpbase8)
+	TARGET_LINK_LIBRARIES(rom-properties-gnome cachemgr romdata rpbase)
 	TARGET_LINK_LIBRARIES(rom-properties-gnome Gnome::libnautilus-extension)
 	TARGET_LINK_LIBRARIES(rom-properties-gnome Gtk3::gtk3 GdkPixbuf2::gdkpixbuf2 GLib2::gobject GLib2::glib)
 	ADD_DEFINITIONS(-DG_LOG_DOMAIN=\"rom-properties-gnome\")
-
-	# Thumbnail wrapper program.
-	ADD_EXECUTABLE(rp-thumbnail rp-thumbnail.c)
-	DO_SPLIT_DEBUG(rp-thumbnail)
-	TARGET_INCLUDE_DIRECTORIES(rp-thumbnail
-		PUBLIC	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-			$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
-		PRIVATE	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
-			$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>
-			$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/src>
-			$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/src>
-		)
-
-	# Link in libdl if it's required for dlopen().
-	IF(CMAKE_DL_LIBS)
-		TARGET_LINK_LIBRARIES(rp-thumbnail ${CMAKE_DL_LIBS})
-	ENDIF(CMAKE_DL_LIBS)
 ENDIF(BUILD_GNOME)
 
 #######################
 # Install the plugin. #
 #######################
 
-# TODO: Update for GNOME.
 IF(BUILD_GNOME)
 	INSTALL(TARGETS rom-properties-gnome
 		LIBRARY DESTINATION "${LibNautilusExtension_EXTENSION_DIR}"
-		COMPONENT "plugin"
-		)
-	INSTALL(TARGETS rp-thumbnail
-		RUNTIME DESTINATION "${DIR_INSTALL_LIBEXEC}"
 		COMPONENT "plugin"
 		)
 	INSTALL(FILES "${CMAKE_CURRENT_BINARY_DIR}/rom-properties.thumbnailer"
@@ -106,14 +106,6 @@ IF(BUILD_GNOME)
 		IF(DEBUG_FILENAME)
 			INSTALL(FILES "${DEBUG_FILENAME}"
 				DESTINATION "lib/debug/${LibNautilusExtension_EXTENSION_DIR}"
-				COMPONENT "debug"
-				)
-		ENDIF(DEBUG_FILENAME)
-
-		GET_TARGET_PROPERTY(DEBUG_FILENAME rp-thumbnail PDB)
-		IF(DEBUG_FILENAME)
-			INSTALL(FILES "${DEBUG_FILENAME}"
-				DESTINATION "lib/debug/${DIR_INSTALL_LIBEXEC}"
 				COMPONENT "debug"
 				)
 		ENDIF(DEBUG_FILENAME)

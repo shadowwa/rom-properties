@@ -26,13 +26,20 @@
 // librpbase
 #include "librpbase/common.h"
 #include "librpbase/RomData.hpp"
+#include "librpbase/TextFuncs.hpp"
 #include "librpbase/file/RpFile.hpp"
 #include "librpbase/file/FileSystem.hpp"
+#include "librpbase/file/RelatedFile.hpp"
 using namespace LibRpBase;
 
+// C includes. (C++ namespace)
+#include <cassert>
+
 // C++ includes.
+#include <string>
 #include <unordered_map>
 #include <vector>
+using std::string;
 using std::unordered_map;
 using std::vector;
 
@@ -42,27 +49,43 @@ using std::vector;
 #include <functional>
 #endif
 
-// RomData subclasses.
-#include "MegaDrive.hpp"
-#include "GameCube.hpp"
-#include "NintendoDS.hpp"
-#include "DMG.hpp"
-#include "VirtualBoy.hpp"
-#include "GameBoyAdvance.hpp"
-#include "GameCubeSave.hpp"
-#include "N64.hpp"
-#include "SNES.hpp"
-#include "DreamcastSave.hpp"
-#include "PlayStationSave.hpp"
-#include "Amiibo.hpp"
-#include "NES.hpp"
-#include "WiiU.hpp"
-#include "EXE.hpp"
-#include "Nintendo3DS.hpp"
-#include "Nintendo3DSFirm.hpp"
+// RomData subclasses: Consoles
+#include "Console/Dreamcast.hpp"
+#include "Console/DreamcastSave.hpp"
+#include "Console/GameCube.hpp"
+#include "Console/GameCubeSave.hpp"
+#include "Console/MegaDrive.hpp"
+#include "Console/N64.hpp"
+#include "Console/NES.hpp"
+#include "Console/PlayStationSave.hpp"
+#include "Console/Sega8Bit.hpp"
+#include "Console/SegaSaturn.hpp"
+#include "Console/SNES.hpp"
+#include "Console/WiiU.hpp"
+
+// RomData subclasses: Handhelds
+#include "Handheld/DMG.hpp"
+#include "Handheld/GameBoyAdvance.hpp"
+#include "Handheld/Lynx.hpp"
+#include "Handheld/Nintendo3DS.hpp"
+#include "Handheld/Nintendo3DSFirm.hpp"
+#include "Handheld/NintendoDS.hpp"
+#include "Handheld/VirtualBoy.hpp"
+
+// RomData subclasses: Textures
+#include "Texture/DirectDrawSurface.hpp"
+#include "Texture/KhronosKTX.hpp"
+#include "Texture/SegaPVR.hpp"
+#include "Texture/ValveVTF.hpp"
+#include "Texture/ValveVTF3.hpp"
+
+// RomData subclasses: Other
+#include "Other/Amiibo.hpp"
+#include "Other/EXE.hpp"
+#include "Other/NintendoBadge.hpp"
 
 // Special case for Dreamcast save files.
-#include "dc_structs.h"
+#include "Console/dc_structs.h"
 
 namespace LibRomData {
 
@@ -77,7 +100,7 @@ class RomDataFactoryPrivate
 
 	public:
 		typedef int (*pFnIsRomSupported)(const RomData::DetectInfo *info);
-		typedef const rp_char *const * (*pFnSupportedFileExtensions)(void);
+		typedef const char *const * (*pFnSupportedFileExtensions)(void);
 
 #ifdef HAVE_LAMBDA_AS_FUNCTION_POINTER
 		typedef RomData* (*pFnNewRomData)(IRpFile *file);
@@ -90,6 +113,11 @@ class RomDataFactoryPrivate
 			pFnNewRomData newRomData;
 			pFnSupportedFileExtensions supportedFileExtensions;
 			bool hasThumbnail;
+
+			// Extra fields for files whose headers
+			// appear at specific addresses.
+			uint32_t address;
+			uint32_t size;
 		};
 
 // MSVC 2010 complains if we don't specify the full namespace
@@ -98,9 +126,16 @@ class RomDataFactoryPrivate
 	{sys::isRomSupported_static, \
 	 [](IRpFile *file) -> RomData* { return new ::LibRomData::sys(file); }, \
 	 sys::supportedFileExtensions_static, \
-	 hasThumbnail}
+	 hasThumbnail, 0, 0}
+#define GetRomDataFns_addr(sys, hasThumbnail, address, size) \
+	{sys::isRomSupported_static, \
+	 [](IRpFile *file) -> RomData* { return new ::LibRomData::sys(file); }, \
+	 sys::supportedFileExtensions_static, \
+	 hasThumbnail, address, size}
 
 		// RomData subclasses that use a header.
+		// Headers with addresses other than 0 should be
+		// placed at the end of this array.
 		static const RomDataFns romDataFns_header[];
 
 		// RomData subclasses that use a footer.
@@ -117,32 +152,51 @@ class RomDataFactoryPrivate
 /** RomDataFactoryPrivate **/
 
 const RomDataFactoryPrivate::RomDataFns RomDataFactoryPrivate::romDataFns_header[] = {
-	GetRomDataFns(MegaDrive, false),
+	// Consoles
+	GetRomDataFns(Dreamcast, true),
+	GetRomDataFns(DreamcastSave, true),
 	GetRomDataFns(GameCube, true),
-	GetRomDataFns(NintendoDS, true),
+	GetRomDataFns(GameCubeSave, true),
+	GetRomDataFns(MegaDrive, false),
+	GetRomDataFns(N64, false),
+	GetRomDataFns(NES, false),
+	GetRomDataFns(SNES, false),
+	GetRomDataFns(SegaSaturn, false),
+	GetRomDataFns(WiiU, true),
+
+	// Handhelds
 	GetRomDataFns(DMG, false),
 	GetRomDataFns(GameBoyAdvance, false),
-	GetRomDataFns(GameCubeSave, true),
-	GetRomDataFns(N64, false),
-	GetRomDataFns(SNES, false),
-	GetRomDataFns(DreamcastSave, true),
-	GetRomDataFns(PlayStationSave, true),
-	GetRomDataFns(Amiibo, true),
-	GetRomDataFns(NES, false),
-	GetRomDataFns(WiiU, true),
+	GetRomDataFns(Lynx, false),
 	GetRomDataFns(Nintendo3DS, true),
 	GetRomDataFns(Nintendo3DSFirm, false),
+	GetRomDataFns(NintendoDS, true),
 
-	// NOTE: EXE has a 16-bit magic number,
-	// so it should go at the end.
-	// TODO: Thumbnailing on non-Windows platforms.
-	GetRomDataFns(EXE, false),
-	{nullptr, nullptr, nullptr, false}
+	// Textures
+	GetRomDataFns(DirectDrawSurface, true),
+	GetRomDataFns(KhronosKTX, true),
+	GetRomDataFns(SegaPVR, true),
+	GetRomDataFns(ValveVTF, true),
+	GetRomDataFns(ValveVTF3, true),
+
+	// Other
+	GetRomDataFns(Amiibo, true),
+	GetRomDataFns(NintendoBadge, true),
+
+	// The following formats have 16-bit magic numbers,
+	// so they should go at the end of the address=0 section.
+	GetRomDataFns(EXE, false),	// TODO: Thumbnailing on non-Windows platforms.
+	GetRomDataFns(PlayStationSave, true),
+
+	// Headers with non-zero addresses.
+	GetRomDataFns_addr(Sega8Bit, false, 0x7FE0, 0x20),
+
+	{nullptr, nullptr, nullptr, false, 0, 0}
 };
 
 const RomDataFactoryPrivate::RomDataFns RomDataFactoryPrivate::romDataFns_footer[] = {
 	GetRomDataFns(VirtualBoy, false),
-	{nullptr, nullptr, nullptr, false}
+	{nullptr, nullptr, nullptr, false, 0, 0}
 };
 
 /**
@@ -169,67 +223,33 @@ RomData *RomDataFactoryPrivate::openDreamcastVMSandVMI(IRpFile *file)
 	IRpFile *vms_file;
 	IRpFile *vmi_file;
 	IRpFile **other_file;	// Points to vms_file or vmi_file.
-	int ext_idx;
 
-	// File extensions.
-	// Lowercase versions are only used on non-Windows platforms
-	// due to case-sensitive file systems.
-#ifdef _WIN32
-	static const rp_char *const exts[4] = {_RP(".VMI"), nullptr, _RP(".VMS"), nullptr};
-#else /* !_WIN32 */
-	static const rp_char *const exts[4] = {_RP(".VMI"), _RP(".vmi"), _RP(".VMS"), _RP(".vms")};
-#endif
-
+	const char *rel_ext;
 	if (has_dc_vms) {
 		// We have the VMS file.
 		// Find the VMI file.
 		vms_file = file;
 		vmi_file = nullptr;
 		other_file = &vmi_file;
-		ext_idx = 0;
+		rel_ext = ".VMI";
 	} else /*if (has_dc_vmi)*/ {
 		// We have the VMI file.
 		// Find the VMS file.
 		vms_file = nullptr;
 		vmi_file = file;
 		other_file = &vms_file;
-		ext_idx = 2;
+		rel_ext = ".VMS";
 	}
 
 	// Attempt to open the other file in the pair.
 	// TODO: Verify length.
 	// TODO: For .vmi, check the VMS resource name?
-	const rp_string filename = file->filename();
-	rp_string other_filename = filename.substr(0, filename.size() - 4);
-	other_filename += exts[ext_idx];
-	IRpFile *test_file = new RpFile(other_filename, RpFile::FM_OPEN_READ);
-	if (!test_file->isOpen()) {
-		// Error opening the other file.
-		delete test_file;
-#ifdef _WIN32
-		// Windows uses case-insensitive filenames,
-		// so we're done here.
-		test_file = nullptr;
-#else /* !_WIN32 */
-		// Try again with a lowercase extension.
-		// (Non-Windows platforms only.)
-		other_filename.resize(other_filename.size() - 4);
-		other_filename += exts[ext_idx + 1];
-		test_file = new RpFile(other_filename, RpFile::FM_OPEN_READ);
-		if (!test_file->isOpen()) {
-			// Still can't open the other file.
-			delete test_file;
-			test_file = nullptr;
-		}
-#endif
-	}
-
-	if (!test_file) {
+	const string filename = file->filename();
+	*other_file = FileSystem::openRelatedFile(filename.c_str(), nullptr, rel_ext);
+	if (!*other_file) {
 		// Can't open the other file.
 		return nullptr;
 	}
-
-	*other_file = test_file;
 
 	// Attempt to create a DreamcastSave using both the
 	// VMS and VMI files.
@@ -283,15 +303,15 @@ RomData *RomDataFactory::create(IRpFile *file, bool thumbnail)
 
 	// Get the file extension.
 	info.ext = nullptr;
-	const rp_string filename = file->filename();
+	const string filename = file->filename();
 	if (!filename.empty()) {
 		info.ext = FileSystem::file_ext(filename);
 	}
 
 	// Special handling for Dreamcast .VMI+.VMS pairs.
 	if (info.ext != nullptr &&
-	    (!rp_strcasecmp(info.ext, _RP(".vms")) ||
-	     !rp_strcasecmp(info.ext, _RP(".vmi"))))
+	    (!strcasecmp(info.ext, ".vms") ||
+	     !strcasecmp(info.ext, ".vmi")))
 	{
 		// Dreamcast .VMI+.VMS pair.
 		// Attempt to open the other file in the pair.
@@ -318,8 +338,52 @@ RomData *RomDataFactory::create(IRpFile *file, bool thumbnail)
 			continue;
 		}
 
+		if (fns->address != info.header.addr ||
+		    fns->size > info.header.size)
+		{
+			// Header address has changed.
+
+			// Check the file extension to reduce overhead
+			// for file types that don't use this.
+			// TODO: Don't hard-code this.
+			// Use a pointer to supportedFileExtensions_static() instead?
+			if (info.ext == nullptr) {
+				// No file extension...
+				break;
+			} else if (strcasecmp(info.ext, ".sms") != 0 &&
+				   strcasecmp(info.ext, ".gg") != 0)
+			{
+				// Not SMS or Game Gear.
+				break;
+			}
+
+			// Read the new header data.
+
+			// NOTE: fns->size == 0 is only correct
+			// for headers located at 0, since we
+			// read the whole 4096+256 bytes for these.
+			assert(fns->size != 0);
+			assert(fns->size <= sizeof(header));
+			if (fns->size == 0 || fns->size > sizeof(header))
+				continue;
+
+			// Make sure the file is big enough to
+			// have this header.
+			if (((int64_t)fns->address + fns->size) > info.szFile)
+				continue;
+
+			// Read the header data.
+			info.header.addr = fns->address;
+			int ret = file->seek(info.header.addr);
+			if (ret != 0)
+				continue;
+			info.header.size = (uint32_t)file->read(header, fns->size);
+			if (info.header.size != fns->size)
+				continue;
+		}
+
 		if (fns->isRomSupported(&info) >= 0) {
-			RomData *romData = fns->newRomData(file);
+			RomData *const romData = fns->newRomData(file);
 			if (romData->isValid()) {
 				// RomData subclass obtained.
 				return romData;
@@ -349,7 +413,7 @@ RomData *RomDataFactory::create(IRpFile *file, bool thumbnail)
 		// Do we have a matching extension?
 		// FIXME: Instead of hard-coded, check supportedFileExtensions.
 		// Currently only supports VirtualBoy.
-		if (!info.ext || rp_strcasecmp(info.ext, _RP(".vb")) != 0) {
+		if (!info.ext || strcasecmp(info.ext, ".vb") != 0) {
 			// Extension doesn't match.
 			continue;
 		}
@@ -359,14 +423,9 @@ RomData *RomDataFactory::create(IRpFile *file, bool thumbnail)
 			static const int footer_size = 1024;
 			if (info.szFile > footer_size) {
 				info.header.addr = (uint32_t)(info.szFile - footer_size);
-				int ret = file->seek(info.header.addr);
-				if (ret != 0) {
-					// Seek error.
-					return nullptr;
-				}
-				info.header.size = (uint32_t)file->read(header, footer_size);
+				info.header.size = (uint32_t)file->seekAndRead(info.header.addr, header, footer_size);
 				if (info.header.size == 0) {
-					// Read error.
+					// Seek and/or read error.
 					return nullptr;
 				}
 			}
@@ -374,7 +433,7 @@ RomData *RomDataFactory::create(IRpFile *file, bool thumbnail)
 		}
 
 		if (fns->isRomSupported(&info) >= 0) {
-			RomData *romData = fns->newRomData(file);
+			RomData *const romData = fns->newRomData(file);
 			if (romData->isValid()) {
 				// RomData subclass obtained.
 				return romData;
@@ -401,14 +460,14 @@ vector<RomDataFactory::ExtInfo> RomDataFactory::supportedFileExtensions(void)
 	// an unordered_map. If any of the handlers for a
 	// given extension support thumbnails, then the
 	// thumbnail handlers will be registered.
-	// FIXME: May need to use rp_string instead of rp_char*
+	// FIXME: May need to use string instead of char*
 	// for proper hashing.
-	unordered_map<const rp_char*, bool> exts;
+	unordered_map<const char*, bool> exts;
 
 	const RomDataFactoryPrivate::RomDataFns *fns =
 		&RomDataFactoryPrivate::romDataFns_header[0];
 	for (; fns->supportedFileExtensions != nullptr; fns++) {
-		const rp_char *const *sys_exts = fns->supportedFileExtensions();
+		const char *const *sys_exts = fns->supportedFileExtensions();
 		if (!sys_exts)
 			continue;
 
@@ -422,7 +481,7 @@ vector<RomDataFactory::ExtInfo> RomDataFactory::supportedFileExtensions(void)
 
 	fns = &RomDataFactoryPrivate::romDataFns_footer[0];
 	for (; fns->supportedFileExtensions != nullptr; fns++) {
-		const rp_char *const *sys_exts = fns->supportedFileExtensions();
+		const char *const *sys_exts = fns->supportedFileExtensions();
 		if (!sys_exts)
 			continue;
 

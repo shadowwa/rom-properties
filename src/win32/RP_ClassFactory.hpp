@@ -26,7 +26,7 @@
 // - http://www.codeproject.com/Articles/665/A-very-simple-COM-server-without-ATL-or-MFC
 // - http://www.codeproject.com/Articles/338268/COM-in-C
 
-#include "RP_ComBase.hpp"
+#include "libwin32common/ComBase.hpp"
 
 template<class comObj>
 class RP_MultiCreator
@@ -39,23 +39,17 @@ class RP_MultiCreator
 };
 
 template <class comObj, class creatorClass = RP_MultiCreator<comObj> >
-class RP_ClassFactory : public RP_ComBase<IClassFactory>, public creatorClass
+class RP_ClassFactory : public LibWin32Common::ComBase<IClassFactory>, public creatorClass
 {
 	public:
 		RP_ClassFactory() { }
 
+	private:
+		typedef LibWin32Common::ComBase<IClassFactory> super;
+		RP_DISABLE_COPY(RP_ClassFactory)
+
 	public:
 		/** IUnknown **/
-
-		#if 0
-		// FIXME: This caused crashes. Try implementing it again later?
-		// Call the RP_ComBase functions.
-		// References:
-		// - http://stackoverflow.com/questions/5478669/good-techniques-for-keeping-com-classes-that-implement-multiple-interfaces-manag
-		// - http://stackoverflow.com/a/5480348
-		IFACEMETHODIMP_(ULONG) AddRef(void) { return RP_ComBase::AddRef(); }
-		IFACEMETHODIMP_(ULONG) Release(void) { return RP_ComBase::Release(); }
-		#endif
 
 		IFACEMETHODIMP QueryInterface(REFIID riid, LPVOID *ppvObject) override final
 		{
@@ -63,7 +57,7 @@ class RP_ClassFactory : public RP_ComBase<IClassFactory>, public creatorClass
 				return E_POINTER;
 			}
 
-			if (!pQISearch) {
+			if (!LibWin32Common::pQISearch) {
 				// QISearch() could not be loaded.
 				*ppvObject = nullptr;
 				return E_UNEXPECTED;
@@ -73,7 +67,7 @@ class RP_ClassFactory : public RP_ComBase<IClassFactory>, public creatorClass
 				QITABENT(RP_ClassFactory, IClassFactory),
 				{ 0, 0 }
 			};
-			return pQISearch(this, rgqit, riid, ppvObject);
+			return LibWin32Common::pQISearch(this, rgqit, riid, ppvObject);
 		}
 
 		/** IClassFactory **/
@@ -105,8 +99,7 @@ class RP_ClassFactory : public RP_ComBase<IClassFactory>, public creatorClass
 
 		IFACEMETHODIMP LockServer(BOOL fLock) override final
 		{
-			// Not implemented.
-			RP_UNUSED(fLock);
+			CoLockObjectExternal(this, fLock, TRUE);
 			return S_OK;
 		}
 };

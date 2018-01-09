@@ -14,9 +14,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
  * GNU General Public License for more details.                            *
  *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * You should have received a copy of the GNU General Public License       *
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.   *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBRPBASE_ROMDATA_HPP__
@@ -28,9 +27,6 @@
 
 // C includes.
 #include <stdint.h>
-
-// C includes. (C++ namespace)
-#include <cstring>
 
 // C++ includes.
 #include <string>
@@ -98,7 +94,7 @@ class RomData
 
 		/**
 		 * Unreference this RomData* object.
-		 * If ref_count reaches 0, the RomData* object is deleted.
+		 * If ref_cnt reaches 0, the RomData* object is deleted.
 		 */
 		void unref(void);
 
@@ -138,7 +134,7 @@ class RomData
 		 */
 		struct DetectInfo {
 			HeaderInfo header;	// ROM header.
-			const rp_char *ext;	// File extension, including leading '.'
+			const char *ext;	// File extension, including leading '.'
 			int64_t szFile;		// File size. (Required for certain types.)
 		};
 
@@ -181,7 +177,7 @@ class RomData
 		 * @param type Bitfield containing SystemNameType values.
 		 * @return True if valid; false if not.
 		 */
-		static inline bool isSystemNameTypeValid(uint32_t type)
+		static inline bool isSystemNameTypeValid(unsigned int type)
 		{
 			// Check for an invalid SYSNAME_TYPE.
 			if ((type & SYSNAME_TYPE_MASK) > SYSNAME_TYPE_ABBREVIATION)
@@ -199,7 +195,7 @@ class RomData
 		 * @param type System name type. (See the SystemNameType enum.)
 		 * @return System name, or nullptr if type is invalid.
 		 */
-		virtual const rp_char *systemName(uint32_t type) const = 0;
+		virtual const char *systemName(unsigned int type) const = 0;
 
 		/**
 		 * Get the class name for the user configuration.
@@ -227,6 +223,7 @@ class RomData
 			FTYPE_EMMC_DUMP,		// eMMC dump
 			FTYPE_TITLE_CONTENTS,		// Title contents, e.g. NCCH.
 			FTYPE_FIRMWARE_BINARY,		// Firmware binary, e.g. 3DS FIRM.
+			FTYPE_TEXTURE_FILE,		// Texture file, e.g. Sega PVR.
 
 			FTYPE_LAST			// End of FileType.
 		};
@@ -241,7 +238,7 @@ class RomData
 		 * Get the general file type as a string.
 		 * @return General file type as a string, or nullptr if unknown.
 		 */
-		const rp_char *fileType_string(void) const;
+		const char *fileType_string(void) const;
 
 		// TODO:
 		// - List of supported systems.
@@ -263,7 +260,7 @@ class RomData
 		 *
 		 * @return NULL-terminated array of all supported file extensions, or nullptr on error.
 		 */
-		virtual const rp_char *const *supportedFileExtensions(void) const = 0;
+		virtual const char *const *supportedFileExtensions(void) const = 0;
 
 		/**
 		 * Image types supported by a RomData subclass.
@@ -273,6 +270,7 @@ class RomData
 			IMG_INT_ICON = 0,	// Internal icon, e.g. DS launcher icon
 			IMG_INT_BANNER,		// Internal banner, e.g. GameCube discs
 			IMG_INT_MEDIA,		// Internal media scan, e.g. Dreamcast discs
+			IMG_INT_IMAGE,		// Internal image, e.g. PVR images.
 
 			// External images are downloaded from websites,
 			// such as GameTDB.
@@ -284,7 +282,7 @@ class RomData
 
 			// Ranges.
 			IMG_INT_MIN = IMG_INT_ICON,
-			IMG_INT_MAX = IMG_INT_MEDIA,
+			IMG_INT_MAX = IMG_INT_IMAGE,
 			IMG_EXT_MIN = IMG_EXT_MEDIA,
 			IMG_EXT_MAX = IMG_EXT_BOX,
 
@@ -303,6 +301,7 @@ class RomData
 			IMGBF_INT_ICON   = (1 << IMG_INT_ICON),		// Internal icon, e.g. DS launcher icon
 			IMGBF_INT_BANNER = (1 << IMG_INT_BANNER),	// Internal banner, e.g. GameCube discs
 			IMGBF_INT_MEDIA  = (1 << IMG_INT_MEDIA),	// Internal media scan, e.g. Dreamcast discs
+			IMGBF_INT_IMAGE  = (1 << IMG_INT_IMAGE),	// Internal image, e.g. PVR images.
 
 			// External images are downloaded from websites,
 			// such as GameTDB.
@@ -419,8 +418,8 @@ class RomData
 		 * plus the expected image size (if available).
 		 */
 		struct ExtURL {
-			rp_string url;		// URL
-			rp_string cache_key;	// Cache key
+			std::string url;	// URL
+			std::string cache_key;	// Cache key
 			uint16_t width;		// Expected image width. (0 for unknown)
 			uint16_t height;	// Expected image height. (0 for unknown)
 
@@ -473,14 +472,14 @@ class RomData
 		 * @param size Size of HTML data.
 		 * @return Image URL, or empty string if not found or not supported.
 		 */
-		virtual rp_string scrapeImageURL(const char *html, size_t size) const;
+		virtual std::string scrapeImageURL(const char *html, size_t size) const;
 
 		/**
 		 * Get name of an image type
 		 * @param imageType Image type.
 		 * @return String containing user-friendly name of an image type.
 		 */
-		static const rp_char *getImageTypeName(ImageType imageType);
+		static const char *getImageTypeName(ImageType imageType);
 
 		/**
 		 * Get the animated icon data.

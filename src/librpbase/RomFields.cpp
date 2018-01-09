@@ -14,26 +14,21 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
  * GNU General Public License for more details.                            *
  *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * You should have received a copy of the GNU General Public License       *
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.   *
  ***************************************************************************/
 
 #include "RomFields.hpp"
 
 #include "common.h"
 #include "TextFuncs.hpp"
-
-// C includes.
-#include <stdlib.h>
+#include "threads/Atomics.h"
+#include "libi18n/i18n.h"
 
 // C includes. (C++ namespace)
 #include <cassert>
-#include <cstdio>
-#include <cstring>
 
 // C++ includes.
-#include <array>
 #include <limits>
 #include <memory>
 #include <string>
@@ -70,13 +65,13 @@ class RomFieldsPrivate
 
 		/**
 		 * Is this object currently shared?
-		 * @return True if refCount > 1; false if not.
+		 * @return True if ref_cnt > 1; false if not.
 		 */
 		inline bool isShared(void) const;
 
 	private:
 		// Current reference count.
-		int refCount;
+		volatile int ref_cnt;
 
 	public:
 		// ROM field structs.
@@ -85,18 +80,25 @@ class RomFieldsPrivate
 		// Current tab index.
 		uint8_t tabIdx;
 		// Tab names.
-		vector<rp_string> tabNames;
+		vector<string> tabNames;
 
 		/**
 		 * Deletes allocated strings in this->data.
 		 */
 		void delete_data(void);
+
+		/**
+		 * Remove trailing spaces from a string.
+		 * Used for STRF_TRIM_END.
+		 * @param str String.
+		 */
+		void trimEnd(string &str);
 };
 
 /** RomFieldsPrivate **/
 
 RomFieldsPrivate::RomFieldsPrivate()
-	: refCount(1)
+	: ref_cnt(1)
 	, tabIdx(0)
 { }
 
@@ -111,7 +113,7 @@ RomFieldsPrivate::~RomFieldsPrivate()
  */
 RomFieldsPrivate *RomFieldsPrivate::ref(void)
 {
-	refCount++;
+	ATOMIC_INC_FETCH(&ref_cnt);
 	return this;
 }
 
@@ -120,21 +122,21 @@ RomFieldsPrivate *RomFieldsPrivate::ref(void)
  */
 void RomFieldsPrivate::unref(void)
 {
-	assert(refCount > 0);
-	if (--refCount == 0) {
-		// All references deleted.
+	assert(ref_cnt > 0);
+	if (ATOMIC_DEC_FETCH(&ref_cnt) <= 0) {
+		// All references removed.
 		delete this;
 	}
 }
 
 /**
  * Is this object currently shared?
- * @return True if refCount > 1; false if not.
+ * @return True if ref_cnt > 1; false if not.
  */
 inline bool RomFieldsPrivate::isShared(void) const
 {
-	assert(refCount > 0);
-	return (refCount > 1);
+	assert(ref_cnt > 0);
+	return (ref_cnt > 1);
 }
 
 /**
@@ -157,14 +159,14 @@ void RomFieldsPrivate::delete_data(void)
 				break;
 
 			case RomFields::RFT_STRING:
-				delete const_cast<rp_string*>(field.data.str);
+				delete const_cast<string*>(field.data.str);
 				break;
 			case RomFields::RFT_BITFIELD:
-				delete const_cast<vector<rp_string>*>(field.desc.bitfield.names);
+				delete const_cast<vector<string>*>(field.desc.bitfield.names);
 				break;
 			case RomFields::RFT_LISTDATA:
-				delete const_cast<vector<rp_string>*>(field.desc.list_data.names);
-				delete const_cast<vector<vector<rp_string> >*>(field.data.list_data);
+				delete const_cast<vector<string>*>(field.desc.list_data.names);
+				delete const_cast<vector<vector<string> >*>(field.data.list_data);
 				break;
 			case RomFields::RFT_AGE_RATINGS:
 				delete const_cast<RomFields::age_ratings_t*>(field.data.age_ratings);
@@ -178,6 +180,23 @@ void RomFieldsPrivate::delete_data(void)
 
 	// Clear the fields vector.
 	this->fields.clear();
+}
+
+/**
+ * Remove trailing spaces from a string.
+ * Used for STRF_TRIM_END.
+ * @param str String.
+ */
+void RomFieldsPrivate::trimEnd(string &str)
+{
+	// FIXME: Use isspace() or iswspace()?
+	size_t sz = str.size();
+	while (sz > 0) {
+		if (str.at(sz-1) != ' ')
+			break;
+		sz--;
+		str.resize(sz);
+	}
 }
 
 /** RomFields **/
@@ -211,7 +230,7 @@ RomFields::RomFields(const RomFields &other)
  */
 RomFields &RomFields::operator=(const RomFields &other)
 {
-	RomFieldsPrivate *d_old = this->d_ptr;
+	RomFieldsPrivate *const d_old = this->d_ptr;
 	this->d_ptr = other.d_ptr->ref();
 	d_old->unref();
 	return *this;
@@ -230,8 +249,8 @@ void RomFields::detach(void)
 	}
 
 	// Need to detach.
-	RomFieldsPrivate *d_new = new RomFieldsPrivate();
-	RomFieldsPrivate *d_old = d_ptr;
+	RomFieldsPrivate *const d_new = new RomFieldsPrivate();
+	RomFieldsPrivate *const d_old = d_ptr;
 	d_new->fields.resize(d_old->fields.size());
 	for (int i = (int)(d_old->fields.size() - 1); i >= 0; i--) {
 		const Field &field_old = d_old->fields.at(i);
@@ -256,7 +275,7 @@ void RomFields::detach(void)
 			case RFT_STRING:
 				field_new.desc.flags = field_old.desc.flags;
 				if (field_old.data.str) {
-					field_new.data.str = new rp_string(*field_old.data.str);
+					field_new.data.str = new string(*field_old.data.str);
 				} else {
 					field_new.data.str = nullptr;
 				}
@@ -265,7 +284,7 @@ void RomFields::detach(void)
 				field_new.desc.bitfield.elements = field_old.desc.bitfield.elements;
 				field_new.desc.bitfield.elemsPerRow = field_old.desc.bitfield.elemsPerRow;
 				if (field_old.desc.bitfield.names) {
-					field_new.desc.bitfield.names = new vector<rp_string>(*field_old.desc.bitfield.names);
+					field_new.desc.bitfield.names = new vector<string>(*field_old.desc.bitfield.names);
 				} else {
 					field_new.desc.bitfield.names = nullptr;
 				}
@@ -273,16 +292,22 @@ void RomFields::detach(void)
 				break;
 			case RFT_LISTDATA:
 				// Copy the ListData.
+				field_new.desc.list_data.flags =
+					field_old.desc.list_data.flags;
+				field_new.desc.list_data.rows_visible =
+					field_old.desc.list_data.rows_visible;
 				if (field_old.desc.list_data.names) {
-					field_new.desc.list_data.names = new vector<rp_string>(*field_old.desc.list_data.names);
+					field_new.desc.list_data.names = new vector<string>(*field_old.desc.list_data.names);
 				} else {
 					field_new.desc.list_data.names = nullptr;
 				}
 				if (field_old.data.list_data) {
-					field_new.data.list_data = new vector<vector<rp_string> >(*field_old.data.list_data);
+					field_new.data.list_data = new vector<vector<string> >(*field_old.data.list_data);
 				} else {
 					field_new.data.list_data = nullptr;
 				}
+				field_new.data.list_checkboxes =
+					field_old.data.list_checkboxes;
 				break;
 			case RFT_DATETIME:
 				field_new.desc.flags = field_old.desc.flags;
@@ -307,7 +332,7 @@ void RomFields::detach(void)
  * Get the abbreviation of an age rating organization.
  * (TODO: Full name function?)
  * @param country Rating country. (See AgeRatingCountry.)
- * @return Abbreviation (in ASCII), or nullptr if invalid.
+ * @return Abbreviation, or nullptr if invalid.
  */
 const char *RomFields::ageRatingAbbrev(int country)
 {
@@ -315,7 +340,7 @@ const char *RomFields::ageRatingAbbrev(int country)
 		"CERO", "ESRB", "",        "USK",
 		"PEGI", "MEKU", "PEGI-PT", "BBFC",
 		"AGCB", "GRB",  "CGSRR",   "",
-		"", "", "", ""
+		"",     "",     "",        "",
 	};
 
 	assert(country >= 0 && country < ARRAY_SIZE(abbrevs));
@@ -324,12 +349,11 @@ const char *RomFields::ageRatingAbbrev(int country)
 		return nullptr;
 	}
 
-	const char *ret = abbrevs[country];
-	if (ret[0] == 0) {
-		// Empty string. Return nullptr instead.
-		ret = nullptr;
+	if (abbrevs[country][0] != 0) {
+		return abbrevs[country];
 	}
-	return ret;
+	// Invalid country code.
+	return nullptr;
 }
 
 /**
@@ -451,16 +475,67 @@ string RomFields::ageRatingDecode(int country, uint16_t rating)
 	} else {
 		// No string rating.
 		// Print the numeric value.
-		char buf[4];
-		snprintf(buf, sizeof(buf), "%u", rating & RomFields::AGEBF_MIN_AGE_MASK);
-		str = buf;
+		str = rp_sprintf("%u", rating & RomFields::AGEBF_MIN_AGE_MASK);
 	}
 
 	if (rating & RomFields::AGEBF_ONLINE_PLAY) {
 		// Rating may change during online play.
 		// TODO: Add a description of this somewhere.
-		// NOTE: Unicode U+00B0, encoded as UTF-8.
+		// Unicode U+00B0, encoded as UTF-8.
 		str += "\xC2\xB0";
+	}
+
+	return str;
+}
+
+/**
+ * Decode all age ratings into a human-readable string.
+ * This includes the names of the rating organizations.
+ * @param age_ratings Age ratings.
+ * @param newlines If true, print newlines after every four ratings.
+ * @return Human-readable string, or empty string if no ratings.
+ */
+string RomFields::ageRatingsDecode(const age_ratings_t *age_ratings, bool newlines)
+{
+	assert(age_ratings != nullptr);
+	if (!age_ratings)
+		return string();
+
+	// Convert the age ratings field to a string.
+	string str;
+	str.reserve(64);
+	unsigned int ratings_count = 0;
+	for (int i = 0; i < (int)age_ratings->size(); i++) {
+		const uint16_t rating = age_ratings->at(i);
+		if (!(rating & RomFields::AGEBF_ACTIVE))
+			continue;
+
+		if (ratings_count > 0) {
+			// Append a comma.
+			if (newlines && ratings_count % 4 == 0) {
+				// 4 ratings per line.
+				str += ",\n";
+			} else {
+				str += ", ";
+			}
+		}
+
+		const char *const abbrev = RomFields::ageRatingAbbrev(i);
+		if (abbrev) {
+			str += abbrev;
+		} else {
+			// Invalid age rating organization.
+			// Use the numeric index.
+			str += rp_sprintf("%d", i);
+		}
+		str += '=';
+		str += ageRatingDecode(i, rating);
+		ratings_count++;
+	}
+
+	if (ratings_count == 0) {
+		// No age ratings.
+		str = "None";
 	}
 
 	return str;
@@ -539,7 +614,7 @@ void RomFields::setTabIndex(int tabIdx)
  * @param tabIdx Tab index.
  * @param name Tab name.
  */
-void RomFields::setTabName(int tabIdx, const rp_char *name)
+void RomFields::setTabName(int tabIdx, const char *name)
 {
 	assert(tabIdx >= 0);
 	if (tabIdx < 0)
@@ -550,7 +625,7 @@ void RomFields::setTabName(int tabIdx, const rp_char *name)
 		// Need to resize tabNames.
 		d->tabNames.resize(tabIdx+1);
 	}
-	d->tabNames[tabIdx] = (name ? name : _RP(""));
+	d->tabNames[tabIdx] = (name ? name : "");
 }
 
 /**
@@ -558,7 +633,7 @@ void RomFields::setTabName(int tabIdx, const rp_char *name)
  * @param name Tab name.
  * @return Tab index.
  */
-int RomFields::addTab(const rp_char *name)
+int RomFields::addTab(const char *name)
 {
 	RP_D(RomFields);
 	d->tabNames.push_back(name);
@@ -585,7 +660,7 @@ int RomFields::tabCount(void) const
  * @param tabIdx Tab index.
  * @return Tab name, or nullptr if no name is set.
  */
-const rp_char *RomFields::tabName(int tabIdx) const
+const char *RomFields::tabName(int tabIdx) const
 {
 	assert(tabIdx >= 0);
 	if (tabIdx < 0)
@@ -619,17 +694,17 @@ void RomFields::reserve(int n)
 }
 
 /**
- * Convert an array of rp_char strings to a vector of rp_string.
+ * Convert an array of char strings to a vector of std::string.
  * This can be used for addField_bitfield() and addField_listData().
  * @param strArray Array of strings.
  * @param count Number of strings, or -1 for a NULL-terminated array.
  * NOTE: The array will be terminated at NULL regardless of count,
  * so a -1 count is only useful if the size isn't known.
- * @return Allocated std::vector<rp_string>.
+ * @return Allocated std::vector<std::string>.
  */
-std::vector<rp_string> *RomFields::strArrayToVector(const rp_char *const *strArray, int count)
+vector<string> *RomFields::strArrayToVector(const char *const *strArray, int count)
 {
-	std::vector<rp_string> *pVec = new std::vector<rp_string>();
+	vector<string> *pVec = new vector<string>();
 	if (count < 0) {
 		count = std::numeric_limits<int>::max();
 	} else {
@@ -638,7 +713,43 @@ std::vector<rp_string> *RomFields::strArrayToVector(const rp_char *const *strArr
 
 	for (; strArray != nullptr && count > 0; strArray++, count--) {
 		// nullptr will be handled as empty strings.
-		pVec->push_back(*strArray ? *strArray : _RP(""));
+		pVec->push_back(*strArray ? *strArray : "");
+	}
+
+	return pVec;
+}
+
+/**
+ * Convert an array of char strings to a vector of std::string.
+ * This can be used for addField_bitfield() and addField_listData().
+ * @param msgctxt i18n context.
+ * @param strArray Array of strings.
+ * @param count Number of strings, or -1 for a NULL-terminated array.
+ * NOTE: The array will be terminated at NULL regardless of count,
+ * so a -1 count is only useful if the size isn't known.
+ * @return Allocated std::vector<std::string>.
+ */
+vector<string> *RomFields::strArrayToVector_i18n(const char *msgctxt, const char *const *strArray, int count)
+{
+#ifndef ENABLE_NLS
+	// Mark msgctxt as unused here.
+	RP_UNUSED(msgctxt);
+#endif /* ENABLE_NLS */
+
+	vector<string> *pVec = new vector<string>();
+	if (count < 0) {
+		count = std::numeric_limits<int>::max();
+	} else {
+		pVec->reserve(count);
+	}
+
+	for (; strArray != nullptr && count > 0; strArray++, count--) {
+		// nullptr will be handled as empty strings.
+		if (*strArray) {
+			pVec->push_back(dpgettext_expr(RP_I18N_DOMAIN, msgctxt, *strArray));
+		} else {
+			pVec->push_back(string());
+		}
 	}
 
 	return pVec;
@@ -684,23 +795,29 @@ int RomFields::addFields_romFields(const RomFields *other, int tabOffset)
 				break;
 
 			case RFT_STRING:
-				field.data.str = (src->data.str ? new rp_string(*src->data.str) : nullptr);
+				field.data.str = (src->data.str ? new string(*src->data.str) : nullptr);
 				break;
 			case RFT_BITFIELD:
 				field.desc.bitfield.elements = src->desc.bitfield.elements;
 				field.desc.bitfield.elemsPerRow = src->desc.bitfield.elemsPerRow;
 				field.desc.bitfield.names = (src->desc.bitfield.names
-						? new vector<rp_string>(*(src->desc.bitfield.names))
+						? new vector<string>(*(src->desc.bitfield.names))
 						: nullptr);
 				field.data.bitfield = src->data.bitfield;
 				break;
 			case RFT_LISTDATA:
+				field.desc.list_data.flags =
+					src->desc.list_data.flags;
+				field.desc.list_data.rows_visible =
+					src->desc.list_data.rows_visible;
 				field.desc.list_data.names = (src->desc.list_data.names
-						? new vector<rp_string>(*(src->desc.list_data.names))
+						? new vector<string>(*(src->desc.list_data.names))
 						: nullptr);
 				field.data.list_data = (src->data.list_data
-						? new vector<vector<rp_string> >(*(src->data.list_data))
+						? new vector<vector<string> >(*(src->data.list_data))
 						: nullptr);
+				field.data.list_checkboxes =
+					src->data.list_checkboxes;
 				break;
 			case RFT_DATETIME:
 				field.data.date_time = src->data.date_time;
@@ -728,22 +845,29 @@ int RomFields::addFields_romFields(const RomFields *other, int tabOffset)
  * @param flags Formatting flags.
  * @return Field index.
  */
-int RomFields::addField_string(const rp_char *name, const rp_char *str, int flags)
+int RomFields::addField_string(const char *name, const char *str, unsigned int flags)
 {
-	RP_D(RomFields);
+	assert(name != nullptr);
+	if (!name)
+		return -1;
 
 	// RFT_STRING
+	RP_D(RomFields);
 	int idx = (int)d->fields.size();
 	d->fields.resize(idx+1);
 	Field &field = d->fields.at(idx);
 
-	assert(name != nullptr);
-	field.name = (name ? name : _RP(""));
+	field.name = (name ? name : "");
 	field.type = RFT_STRING;
 	field.desc.flags = flags;
-	field.data.str = (str ? new rp_string(str) : nullptr);
+	field.data.str = (str ? new string(str) : nullptr);
 	field.tabIdx = d->tabIdx;
 	field.isValid = (name != nullptr);
+
+	// Handle string trimming flags.
+	if (field.data.str && (flags & STRF_TRIM_END)) {
+		d->trimEnd(*const_cast<string*>(field.data.str));
+	}
 	return idx;
 }
 
@@ -754,24 +878,29 @@ int RomFields::addField_string(const rp_char *name, const rp_char *str, int flag
  * @param flags Formatting flags.
  * @return Field index.
  */
-int RomFields::addField_string(const rp_char *name, const rp_string &str, int flags)
+int RomFields::addField_string(const char *name, const string &str, unsigned int flags)
 {
-	RP_D(RomFields);
+	assert(name != nullptr);
+	if (!name)
+		return -1;
 
 	// RFT_STRING
+	RP_D(RomFields);
 	int idx = (int)d->fields.size();
 	d->fields.resize(idx+1);
 	Field &field = d->fields.at(idx);
 
-	assert(name != nullptr);
-	if (!name)
-		return -1;
-	field.name = (name ? name : _RP(""));
+	field.name = (name ? name : "");
 	field.type = RFT_STRING;
 	field.desc.flags = flags;
-	field.data.str = (!str.empty() ? new rp_string(str) : nullptr);
+	field.data.str = (!str.empty() ? new string(str) : nullptr);
 	field.tabIdx = d->tabIdx;
 	field.isValid = true;
+
+	// Handle string trimming flags.
+	if (field.data.str && (flags & STRF_TRIM_END)) {
+		d->trimEnd(*const_cast<string*>(field.data.str));
+	}
 	return idx;
 }
 
@@ -784,8 +913,12 @@ int RomFields::addField_string(const rp_char *name, const rp_string &str, int fl
  * @param flags Formatting flags.
  * @return Field index, or -1 on error.
  */
-int RomFields::addField_string_numeric(const rp_char *name, uint32_t val, Base base, int digits, int flags)
+int RomFields::addField_string_numeric(const char *name, uint32_t val, Base base, int digits, unsigned int flags)
 {
+	assert(name != nullptr);
+	if (!name)
+		return -1;
+
 	const char *fmtstr;
 	switch (base) {
 		case FB_DEC:
@@ -800,12 +933,7 @@ int RomFields::addField_string_numeric(const rp_char *name, uint32_t val, Base b
 			break;
 	}
 
-	char buf[32];
-	int len = snprintf(buf, sizeof(buf), fmtstr, digits, val);
-	if (len > (int)sizeof(buf))
-		len = sizeof(buf);
-
-	rp_string str = (len > 0 ? latin1_to_rp_string(buf, len) : _RP(""));
+	const string str = rp_sprintf(fmtstr, digits, val);
 	return addField_string(name, str, flags);
 }
 
@@ -817,35 +945,37 @@ int RomFields::addField_string_numeric(const rp_char *name, uint32_t val, Base b
  * @param flags Formatting flags.
  * @return Field index, or -1 on error.
  */
-int RomFields::addField_string_hexdump(const rp_char *name, const uint8_t *buf, size_t size, int flags)
+int RomFields::addField_string_hexdump(const char *name, const uint8_t *buf, size_t size, unsigned int flags)
 {
+	assert(name != nullptr);
+	if (!name)
+		return -1;
+
 	if (size == 0) {
 		return addField_string(name, nullptr);
 	}
 
 	// Reserve 3 characters per byte.
 	// (Two hex digits, plus one space.)
-	unique_ptr<rp_char[]> rps(new rp_char[size*3]);
-	rp_char *pRps = rps.get();
+	unique_ptr<char[]> str(new char[size*3]);
+	char *pStr = str.get();
 
 	// Hexadecimal lookup table.
-	static const rp_char hex_lookup[16] = {
-		_RP_CHR('0'),_RP_CHR('1'),_RP_CHR('2'),_RP_CHR('3'),
-		_RP_CHR('4'),_RP_CHR('5'),_RP_CHR('6'),_RP_CHR('7'),
-		_RP_CHR('8'),_RP_CHR('9'),_RP_CHR('A'),_RP_CHR('B'),
-		_RP_CHR('C'),_RP_CHR('D'),_RP_CHR('E'),_RP_CHR('F')
+	static const char hex_lookup[16] = {
+		'0','1','2','3','4','5','6','7',
+		'8','9','A','B','C','D','E','F'
 	};
 
 	// Print the hexdump.
-	for (; size > 0; size--, buf++, pRps += 3) {
-		pRps[0] = hex_lookup[*buf >> 4];
-		pRps[1] = hex_lookup[*buf & 0x0F];
-		pRps[2] = _RP_CHR(' ');
+	for (; size > 0; size--, buf++, pStr += 3) {
+		pStr[0] = hex_lookup[*buf >> 4];
+		pStr[1] = hex_lookup[*buf & 0x0F];
+		pStr[2] = ' ';
 	}
 
 	// Remove the trailing space.
-	*(pRps-1) = 0;
-	return addField_string(name, rps.get(), flags);
+	*(pStr-1) = 0;
+	return addField_string(name, str.get(), flags);
 }
 
 /**
@@ -858,10 +988,14 @@ int RomFields::addField_string_hexdump(const rp_char *name, const uint8_t *buf, 
  * @param flags Formatting flags.
  * @return Field index, or -1 on error.
  */
-int RomFields::addField_string_address_range(const rp_char *name,
+int RomFields::addField_string_address_range(const char *name,
 	uint32_t start, uint32_t end,
-	const rp_char *suffix, int digits, int flags)
+	const char *suffix, int digits, unsigned int flags)
 {
+	assert(name != nullptr);
+	if (!name)
+		return -1;
+
 	// Maximum number of digits is 16. (64-bit)
 	assert(digits <= 16);
 	if (digits > 16) {
@@ -869,20 +1003,10 @@ int RomFields::addField_string_address_range(const rp_char *name,
 	}
 
 	// Address range.
-	char buf[64];
-	int len = snprintf(buf, sizeof(buf), "0x%0*X - 0x%0*X",
-			digits, start, digits, end);
-	if (len > (int)sizeof(buf))
-		len = sizeof(buf);
-
-	rp_string str;
-	if (len > 0) {
-		str = latin1_to_rp_string(buf, len);
-	}
-
+	string str = rp_sprintf("0x%0*X - 0x%0*X", digits, start, digits, end);
 	if (suffix && suffix[0] != 0) {
 		// Append a space and the specified suffix.
-		str += _RP_CHR(' ');
+		str += ' ';
 		str += suffix;
 	}
 
@@ -898,22 +1022,22 @@ int RomFields::addField_string_address_range(const rp_char *name,
  * @param bitfield Bitfield.
  * @return Field index, or -1 on error.
  */
-int RomFields::addField_bitfield(const rp_char *name,
-	const std::vector<rp_string> *bit_names,
+int RomFields::addField_bitfield(const char *name,
+	const std::vector<string> *bit_names,
 	int elemsPerRow, uint32_t bitfield)
 {
-	RP_D(RomFields);
-
-	// RFT_BITFIELD
-	int idx = (int)d->fields.size();
-	d->fields.resize(idx+1);
-	Field &field = d->fields.at(idx);
-
 	assert(name != nullptr);
 	assert(bit_names != nullptr);
 	if (!name || !bit_names)
 		return -1;
-	field.name = (name ? name : _RP(""));
+
+	// RFT_BITFIELD
+	RP_D(RomFields);
+	int idx = (int)d->fields.size();
+	d->fields.resize(idx+1);
+	Field &field = d->fields.at(idx);
+
+	field.name = (name ? name : "");
 	field.type = RFT_BITFIELD;
 	field.desc.bitfield.elements = (int)bit_names->size();	// TODO: Remove this.
 	field.desc.bitfield.elemsPerRow = elemsPerRow;
@@ -930,27 +1054,34 @@ int RomFields::addField_bitfield(const rp_char *name,
  * @param name Field name.
  * @param headers Vector of column names.
  * @param list_data ListData.
+ * @param rows_visible Number of visible rows, (0 for "default")
+ * @param flags Flags.
+ * @param checkboxes Checkbox bitfield. (requires RFT_LISTVIEW_CHECKBOXES)
  * @return Field index, or -1 on error.
  */
-int RomFields::addField_listData(const rp_char *name,
-	const std::vector<rp_string> *headers,
-	const std::vector<std::vector<rp_string> > *list_data)
+int RomFields::addField_listData(const char *name,
+	const std::vector<string> *headers,
+	const std::vector<std::vector<string> > *list_data,
+	int rows_visible, unsigned int flags, uint32_t checkboxes)
 {
-	RP_D(RomFields);
+	assert(name != nullptr);
+	assert(rows_visible >= 0);
+	if (!name || rows_visible < 0)
+		return -1;
 
 	// RFT_LISTDATA
+	RP_D(RomFields);
 	int idx = (int)d->fields.size();
 	d->fields.resize(idx+1);
 	Field &field = d->fields.at(idx);
 
-	assert(name != nullptr);
-	assert(headers != nullptr);
-	if (!name || !headers)
-		return -1;
-	field.name = (name ? name : _RP(""));
+	field.name = (name ? name : "");
 	field.type = RFT_LISTDATA;
+	field.desc.list_data.flags = flags;
+	field.desc.list_data.rows_visible = rows_visible;
 	field.desc.list_data.names = headers;
 	field.data.list_data = list_data;
+	field.data.list_checkboxes = checkboxes;
 	field.tabIdx = d->tabIdx;
 	field.isValid = true;
 	return idx;
@@ -963,19 +1094,19 @@ int RomFields::addField_listData(const rp_char *name,
  * @param flags Date/Time flags.
  * @return Field index, or -1 on error.
  */
-int RomFields::addField_dateTime(const rp_char *name, int64_t date_time, int flags)
+int RomFields::addField_dateTime(const char *name, time_t date_time, unsigned int flags)
 {
-	RP_D(RomFields);
+	assert(name != nullptr);
+	if (!name)
+		return -1;
 
 	// RFT_DATETIME
+	RP_D(RomFields);
 	int idx = (int)d->fields.size();
 	d->fields.resize(idx+1);
 	Field &field = d->fields.at(idx);
 
-	assert(name != nullptr);
-	if (!name)
-		return -1;
-	field.name = (name ? name : _RP(""));
+	field.name = (name ? name : "");
 	field.type = RFT_DATETIME;
 	field.desc.flags = flags;
 	field.data.date_time = date_time;
@@ -991,19 +1122,19 @@ int RomFields::addField_dateTime(const rp_char *name, int64_t date_time, int fla
  * @param age_ratings Pointer to age ratings array.
  * @return Field index, or -1 on error.
  */
-int RomFields::addField_ageRatings(const rp_char *name, const age_ratings_t &age_ratings)
+int RomFields::addField_ageRatings(const char *name, const age_ratings_t &age_ratings)
 {
-	RP_D(RomFields);
+	assert(name != nullptr);
+	if (!name)
+		return -1;
 
 	// RFT_AGE_RATINGS
+	RP_D(RomFields);
 	int idx = (int)d->fields.size();
 	d->fields.resize(idx+1);
 	Field &field = d->fields.at(idx);
 
-	assert(name != nullptr);
-	if (!name)
-		return -1;
-	field.name = (name ? name : _RP(""));
+	field.name = (name ? name : "");
 	field.type = RFT_AGE_RATINGS;
 	field.data.age_ratings = new age_ratings_t(age_ratings);
 	field.tabIdx = d->tabIdx;

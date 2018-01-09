@@ -1,0 +1,43 @@
+/***************************************************************************
+ * ROM Properties Page shell extension. (rp-stub)                          *
+ * config.libunixcommon.h.in: libunixcommon configuration. (source file)   *
+ *                                                                         *
+ * Copyright (c) 2017 by David Korth.                                      *
+ *                                                                         *
+ * This program is free software; you can redistribute it and/or modify it *
+ * under the terms of the GNU General Public License as published by the   *
+ * Free Software Foundation; either version 2 of the License, or (at your  *
+ * option) any later version.                                              *
+ *                                                                         *
+ * This program is distributed in the hope that it will be useful, but     *
+ * WITHOUT ANY WARRANTY; without even the implied warranty of              *
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
+ * GNU General Public License for more details.                            *
+ *                                                                         *
+ * You should have received a copy of the GNU General Public License along *
+ * with this program; if not, write to the Free Software Foundation, Inc., *
+ * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ ***************************************************************************/
+
+#ifndef __ROMPROPERTIES_LIBUNIXCOMMON_CONFIG_H__
+#define __ROMPROPERTIES_LIBUNIXCOMMON_CONFIG_H__
+
+/* KDE4 plugin path. */
+#cmakedefine KDE4_PLUGIN_INSTALL_DIR "@KDE4_PLUGIN_INSTALL_DIR@"
+
+/* KDE5 plugin path. */
+#cmakedefine KDE5_PLUGIN_INSTALL_DIR "@KDE5_PLUGIN_INSTALL_DIR@"
+
+/* ThunarX2 extensions path. */
+#cmakedefine ThunarX2_EXTENSIONS_DIR "@ThunarX2_EXTENSIONS_DIR@"
+
+/* libnautilus-extension extensions path. */
+#cmakedefine LibNautilusExtension_EXTENSION_DIR "@LibNautilusExtension_EXTENSION_DIR@"
+
+/* Define to 1 if you have the `getpwuid_r' function. */
+#cmakedefine HAVE_GETPWUID_R 1
+
+/* Define to 1 if you have the `getpwuid' function. */
+#cmakedefine HAVE_GETPWUID 1
+
+#endif /* __ROMPROPERTIES_LIBUNIXCOMMON_CONFIG_H__ */

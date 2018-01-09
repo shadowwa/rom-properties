@@ -33,8 +33,11 @@
 // librpbase
 #include "librpbase/file/RpFile.hpp"
 #include "librpbase/RomData.hpp"
-using LibRpBase::RpFile;
-using LibRpBase::RomData;
+#include "librpbase/TextFuncs.hpp"
+using namespace LibRpBase;
+
+// libi18n
+#include "libi18n/i18n.h"
 
 // libromdata
 #include "libromdata/RomDataFactory.hpp"
@@ -119,7 +122,6 @@ rom_properties_provider_get_pages(NautilusPropertyPageProvider *provider, GList 
 		// need to subclass NautilusPropertyPage. Instead,
 		// we create a NautilusPropertyPage and add a
 		// RomDataView widget to it.
-		// TODO: GNOME uses left-aligned, non-bold description labels.
 		// TODO: Add some extra padding to the top...
 		GtkWidget *romDataView = static_cast<GtkWidget*>(
 			g_object_new(rom_data_view_get_type(), nullptr));
@@ -128,11 +130,13 @@ rom_properties_provider_get_pages(NautilusPropertyPageProvider *provider, GList 
 		gtk_widget_show(romDataView);
 		g_free(filename);
 
+		// tr: Tab title.
+		const char *const tabTitle = C_("RomDataView", "ROM Properties");
+
 		// Create the NautilusPropertyPage.
 		NautilusPropertyPage *page = nautilus_property_page_new(
 			"RomPropertiesPage::property_page",
-			gtk_label_new("ROM Properties"),
-			romDataView);
+			gtk_label_new(tabTitle), romDataView);
 
 		/* Add the page to the pages provided by this plugin */
 		pages = g_list_prepend(pages, page);

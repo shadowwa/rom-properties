@@ -23,20 +23,19 @@
 #include "TextFuncs.hpp"
 #include "byteswap.h"
 
-// C includes.
-#include <stdint.h>
-
 // C includes. (C++ namespace)
+#include <cassert>
+#include <cstdarg>
+#include <cstdio>
 #include <cstring>
 #include <cwctype>
 
 // C++ includes.
+#include <memory>
 #include <string>
 using std::string;
 using std::u16string;
-
-// Shared internal functions.
-#include "TextFuncs_int.hpp"
+using std::unique_ptr;
 
 namespace LibRpBase {
 
@@ -70,62 +69,6 @@ u16string utf16_bswap(const char16_t *str, int len)
 	return ret;
 }
 
-/** Latin-1 (ISO-8859-1) **/
-
-/**
- * Convert Latin-1 (ISO-8859-1) text to UTF-8.
- * NOTE: 0x80-0x9F (cp1252) is converted to U+FFFD.
- * @param str Latin-1 text.
- * @param len Length of str, in bytes. (-1 for NULL-terminated string)
- * @return UTF-8 string.
- */
-string latin1_to_utf8(const char *str, int len)
-{
-	REMOVE_TRAILING_NULLS_STRLEN(string, strlen, str, len);
-
-	string mbs;
-	mbs.reserve(len*2);
-	for (; *str != 0 && len > 0; len--, str++) {
-		// TODO: Optimize the branches?
-		if ((*str & 0x80) == 0) {
-			// ASCII.
-			mbs.push_back(*str);
-		} else if ((*str & 0xE0) == 0x80) {
-			// Characters 0x80-0x9F. Replace with U+FFFD.
-			mbs.append("\xEF\xBF\xBD");
-		} else {
-			// Other character. 2 bytes are needed.
-			mbs.push_back(0xC0 | ((*str >> 6) & 0x03));
-			mbs.push_back(0x80 | (*str & 0x3F));
-		}
-	}
-	return mbs;
-}
-
-/**
- * Convert Latin-1 (ISO-8859-1) text to UTF-16.
- * NOTE: 0x80-0x9F (cp1252) is converted to U+FFFD.
- * @param str Latin-1 text.
- * @param len Length of str, in bytes. (-1 for NULL-terminated string)
- * @return UTF-16 string.
- */
-u16string latin1_to_utf16(const char *str, int len)
-{
-	REMOVE_TRAILING_NULLS_STRLEN(u16string, strlen, str, len);
-
-	u16string wcs;
-	wcs.reserve(len);
-	for (; *str != 0 && len > 0; len--, str++) {
-		if ((*str & 0xE0) == 0x80) {
-			// Characters 0x80-0x9F. Replace with U+FFFD.
-			wcs.push_back((char16_t)0xFFFD);
-		} else {
-			// Other character.
-			wcs.push_back((char16_t)(uint8_t)*str);
-		}
-	}
-	return wcs;
-}
 
 /** Miscellaneous functions. **/
 
@@ -139,6 +82,20 @@ size_t u16_strlen(const char16_t *wcs)
 {
 	size_t len = 0;
 	while (*wcs++)
+		len++;
+	return len;
+}
+
+/**
+ * char16_t strlen().
+ * @param wcs 16-bit string.
+ * @param maxlen Maximum length.
+ * @return Length of str, in characters.
+ */
+size_t u16_strnlen(const char16_t *wcs, size_t maxlen)
+{
+	size_t len = 0;
+	while (*wcs++ && len < maxlen)
 		len++;
 	return len;
 }
@@ -195,6 +152,100 @@ int u16_strcasecmp(const char16_t *wcs1, const char16_t *wcs2)
 }
 #endif /* RP_UTF16 && !RP_WIS16 */
 
+/**
+ * sprintf()-style function for std::string.
+ *
+ * @param fmt Format string.
+ * @param ... Arguments.
+ * @return rp_string.
+ */
+string rp_sprintf(const char *fmt, ...)
+{
+	// Local buffer optimization to reduce memory allocation.
+	char locbuf[128];
+	va_list ap;
+#if defined(_MSC_VER) && _MSC_VER < 1900
+	// MSVC 2013 and older isn't C99 compliant.
+	// Use the non-standard _vscprintf() to count characters.
+	va_start(ap, fmt);
+	int len = _vscprintf(fmt, ap);
+	va_end(ap);
+	if (len <= 0) {
+		// Nothing to format...
+		return string();
+	} else if (len < (int)sizeof(locbuf)) {
+		// The string fits in the local buffer.
+		va_start(ap, fmt);
+		vsnprintf(locbuf, sizeof(locbuf), fmt, ap);
+		va_end(ap);
+		return string(locbuf, len);
+	}
+#else
+	// C99-compliant vsnprintf().
+	va_start(ap, fmt);
+	int len = vsnprintf(locbuf, sizeof(locbuf), fmt, ap);
+	va_end(ap);
+	if (len <= 0) {
+		// Nothing to format...
+		return string();
+	} else if (len < (int)sizeof(locbuf)) {
+		// The string fits in the local buffer.
+		return string(locbuf, len);
+	}
+#endif
+
+	// Temporarily allocate a buffer large enough for the string,
+	// then call vsnprintf() again.
+	unique_ptr<char[]> buf(new char[len+1]);
+	va_start(ap, fmt);
+	int len2 = vsnprintf(buf.get(), len+1, fmt, ap);
+	va_end(ap);
+	assert(len == len2);
+	return (len == len2 ? string(buf.get(), len) : string());
+}
+
+#ifdef _MSC_VER
+/**
+ * sprintf()-style function for std::string.
+ * This version supports positional format string arguments.
+ *
+ * @param fmt Format string.
+ * @param ... Arguments.
+ * @return rp_string.
+ */
+std::string rp_sprintf_p(const char *fmt, ...) ATTR_PRINTF(1, 2)
+{
+	// Local buffer optimization to reduce memory allocation.
+	char locbuf[128];
+	va_list ap;
+
+	// _vsprintf_p() isn't C99 compliant.
+	// Use the non-standard _vscprintf_p() to count characters.
+	va_start(ap, fmt);
+	int len = _vscprintf_p(fmt, ap);
+	va_end(ap);
+	if (len <= 0) {
+		// Nothing to format...
+		return string();
+	} else if (len < (int)sizeof(locbuf)) {
+		// The string fits in the local buffer.
+		va_start(ap, fmt);
+		_vsprintf_p(locbuf, sizeof(locbuf), fmt, ap);
+		va_end(ap);
+		return string(locbuf, len);
+	}
+
+	// Temporarily allocate a buffer large enough for the string,
+	// then call vsnprintf() again.
+	unique_ptr<char[]> buf(new char[len+1]);
+	va_start(ap, fmt);
+	int len2 = _vsprintf_p(buf.get(), len+1, fmt, ap);
+	va_end(ap);
+	assert(len == len2);
+	return (len == len2 ? string(buf.get(), len) : string());
+}
+#endif /* _MSC_VER */
+
 }
 
 /** Reimplementations of libc functions that aren't present on this system. **/
@@ -203,17 +254,15 @@ int u16_strcasecmp(const char16_t *wcs1, const char16_t *wcs2)
 /**
  * String length with limit. (8-bit strings)
  * @param str The string itself
- * @param len Maximum length of the string
- * @returns equivivalent to min(strlen(str), len) without buffer overruns
+ * @param maxlen Maximum length of the string
+ * @returns equivivalent to min(strlen(str), maxlen) without buffer overruns
  */
-size_t strnlen(const char *str, size_t len)
+size_t strnlen(const char *str, size_t maxlen)
 {
-	size_t rv = 0;
-	for (rv = 0; rv < len; rv++) {
-		if (!*(str++))
-			break;
-	}
-	return rv;
+	const char *ptr = memchr(str, 0, maxlen);
+	if (!ptr)
+		return maxlen;
+	return ptr - str;
 }
 #endif /* HAVE_STRNLEN */
 

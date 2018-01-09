@@ -30,16 +30,32 @@ IF(NOT WIN32)
 	ENDIF(NOT HAVE_ICONV)
 
 	IF(ENABLE_DECRYPTION)
-		# TODO: Show warning if not found, and recommend
-		# setting -DENABLE_DECRYPTION=Off?
 		FIND_PACKAGE(Nettle REQUIRED)
 		SET(HAVE_NETTLE ${NETTLE_FOUND})
-
-		# Check if this is Nettle 3.x.
-		# Nettle 3.1 added version.h, which isn't available
-		# in older verisons, so we can't simply check that.
-		INCLUDE(CheckSymbolExists)
-		CHECK_SYMBOL_EXISTS(aes128_set_decrypt_key "nettle/aes.h" HAVE_NETTLE_3)
+		IF(HAVE_NETTLE)
+			# Check if this is Nettle 3.x.
+			# Nettle 3.1 added version.h, which isn't available
+			# in older verisons, so we can't simply check that.
+			INCLUDE(CheckSymbolExists)
+			CHECK_SYMBOL_EXISTS(aes128_set_decrypt_key "nettle/aes.h" HAVE_NETTLE_3)
+			IF(HAVE_NETTLE_3)
+				# Check for Nettle versioning symbols.
+				# Nettle 3.1 added version.h.
+				SET(OLD_CMAKE_REQUIRED_INCLUDES "${CMAKE_REQUIRED_INCLUDES}")
+				SET(OLD_CMAKE_REQUIRED_LIBRARIES "${CMAKE_REQUIRED_LIBRARIES}")
+				SET(CMAKE_REQUIRED_INCLUDES "${CMAKE_REQUIRED_INCLUDES} ${NETTLE_INCLUDE_DIRS}")
+				SET(CMAKE_REQUIRED_LIBRARIES "${CMAKE_REQUIRED_LIBRARIES} ${NETTLE_LIBRARY}")
+				CHECK_SYMBOL_EXISTS(NETTLE_VERSION_MAJOR "nettle/version.h" HAVE_NETTLE_VERSION_H)
+				CHECK_SYMBOL_EXISTS(nettle_version_major "nettle/version.h" HAVE_NETTLE_VERSION_FUNCTIONS)
+				SET(CMAKE_REQUIRED_INCLUDES "${OLD_CMAKE_REQUIRED_INCLUDES}")
+				SET(CMAKE_REQUIRED_LIBRARIES "${OLD_CMAKE_REQUIRED_LIBRARIES}")
+				UNSET(OLD_CMAKE_REQUIRED_INCLUDES)
+				UNSET(OLD_CMAKE_REQUIRED_LIBRARIES)
+			ENDIF(HAVE_NETTLE_3)
+		ELSE(HAVE_NETTLE)
+			# Disable decryption.
+			SET(ENABLE_DECRYPTION OFF CACHE "" INTERNAL FORCE)
+		ENDIF(HAVE_NETTLE)
 	ENDIF(ENABLE_DECRYPTION)
 ENDIF(NOT WIN32)
 
@@ -50,15 +66,15 @@ INCLUDE(CheckSymbolExists)
 CHECK_SYMBOL_EXISTS(strnlen "string.h" HAVE_STRNLEN)
 CHECK_SYMBOL_EXISTS(memmem "string.h" HAVE_MEMMEM)
 
+# Check for C headers.
+CHECK_INCLUDE_FILES("features.h" HAVE_FEATURES_H)
+
 # Check if non-capturing lambda functions can be cast to function pointers.
 # NOTE: Used by libromdata, not librpbase, but we're
 # keeping the check here because libromdata doesn't
 # have any other unique checks.
 INCLUDE(CheckCXX11LambdaAsFunctionPointer)
 CHECK_CXX11_LAMBDA_AS_FUNCTION_POINTER(HAVE_LAMBDA_AS_FUNCTION_POINTER)
-
-# Write the config.h file.
-CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/config.librpbase.h.in" "${CMAKE_CURRENT_BINARY_DIR}/config.librpbase.h")
 
 # Sources.
 SET(librpbase_SRCS
@@ -70,12 +86,21 @@ SET(librpbase_SRCS
 	file/IRpFile.cpp
 	file/RpMemFile.cpp
 	file/FileSystem_common.cpp
+	file/RelatedFile.cpp
 	img/rp_image.cpp
 	img/rp_image_backend.cpp
 	img/rp_image_ops.cpp
 	img/RpImageLoader.cpp
-	img/ImageDecoder.cpp
+	img/ImageDecoder_Linear.cpp
+	img/ImageDecoder_GCN.cpp
+	img/ImageDecoder_NDS.cpp
+	img/ImageDecoder_N3DS.cpp
+	img/ImageDecoder_S3TC.cpp
+	img/ImageDecoder_DC.cpp
+	img/ImageDecoder_ETC1.cpp
+	img/un-premultiply.cpp
 	img/RpPng.cpp
+	img/RpPngWriter.cpp
 	img/IconAnimHelper.cpp
 	img/pngcheck/pngcheck.cpp
 	disc/IDiscReader.cpp
@@ -85,6 +110,7 @@ SET(librpbase_SRCS
 	crypto/KeyManager.cpp
 	config/ConfReader.cpp
 	config/Config.cpp
+	config/AboutTabText.cpp
 	)
 # Headers.
 SET(librpbase_H
@@ -92,22 +118,28 @@ SET(librpbase_H
 	byteswap.h
 	common.h
 	uvector.h
+	aligned_malloc.h
 	TextFuncs.hpp
-	TextFuncs_int.hpp
+	TextFuncs_utf8.hpp
+	TextFuncs_wchar.hpp
 	RomData.hpp
 	RomData_p.hpp
 	RomFields.hpp
 	SystemRegion.hpp
+	bitstuff.h
 	file/IRpFile.hpp
 	file/RpFile.hpp
 	file/RpMemFile.hpp
 	file/FileSystem.hpp
+	file/RelatedFile.hpp
 	img/rp_image.hpp
 	img/rp_image_p.hpp
 	img/rp_image_backend.hpp
 	img/RpImageLoader.hpp
 	img/ImageDecoder.hpp
+	img/ImageDecoder_p.hpp
 	img/RpPng.hpp
+	img/RpPngWriter.hpp
 	img/IconAnimData.hpp
 	img/IconAnimHelper.hpp
 	img/APNG_dlopen.h
@@ -121,6 +153,7 @@ SET(librpbase_H
 	crypto/KeyManager.hpp
 	config/ConfReader.hpp
 	config/Config.hpp
+	config/AboutTabText.hpp
 	)
 
 IF(NOT USE_INTERNAL_PNG OR (USE_INTERNAL_PNG AND USE_INTERNAL_PNG_DLL))
@@ -141,14 +174,12 @@ IF(WIN32)
 		file/win32/IStreamWrapper.cpp
 		img/GdiplusHelper.cpp
 		img/RpGdiplusBackend.cpp
-		threads/InitOnceExecuteOnceXP.c
 		)
 	SET(librpbase_OS_H
 		TextFuncs_wchar.hpp
 		file/win32/IStreamWrapper.hpp
 		img/GdiplusHelper.hpp
 		img/RpGdiplusBackend.hpp
-		threads/InitOnceExecuteOnceXP.h
 		)
 ELSE(WIN32)
 	SET(librpbase_OS_SRCS
@@ -202,13 +233,17 @@ SET(librpbase_THREAD_H
 	threads/Atomics.h
 	threads/Semaphore.hpp
 	threads/Mutex.hpp
+	threads/pthread_once.h
 	)
 IF(CMAKE_USE_WIN32_THREADS_INIT)
+	SET(HAVE_WIN32_THREADS 1)
 	SET(librpbase_THREAD_SRCS
 		threads/SemaphoreWin32.cpp
 		threads/MutexWin32.cpp
+		threads/pthread_once.c
 		)
 ELSEIF(CMAKE_USE_PTHREADS_INIT)
+	SET(HAVE_PTHREADS 1)
 	SET(librpbase_THREAD_SRCS
 		threads/SemaphorePosix.cpp
 		threads/MutexPosix.cpp
@@ -217,91 +252,179 @@ ELSE()
 	MESSAGE(FATAL_ERROR "No threading model is supported on this system.")
 ENDIF()
 
+# CPU-specific and optimized sources.
+# TODO: Move arch detection to platform.cmake.
+STRING(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" arch)
+IF(arch MATCHES "^(i.|x)86$|^x86_64$|^amd64$")
+	SET(librpbase_CPU_SRCS cpuflags_x86.c)
+	SET(librpbase_CPU_H cpuflags_x86.h)
+
+	# MSVC does not support MMX intrinsics in 64-bit builds.
+	# Reference: https://msdn.microsoft.com/en-us/library/08x3t697(v=vs.110).aspx
+	# TODO: Disable MMX on all 64-bit builds?
+	IF(NOT MSVC OR NOT CMAKE_CL_64)
+		SET(librpbase_MMX_SRCS byteswap_mmx.c)
+	ENDIF(NOT MSVC OR NOT CMAKE_CL_64)
+
+	SET(librpbase_SSE2_SRCS
+		byteswap_sse2.c
+		img/ImageDecoder_Linear_sse2.cpp
+		img/rp_image_ops_sse2.cpp
+		)
+	SET(librpbase_SSSE3_SRCS
+		byteswap_ssse3.c
+		img/RpJpeg_ssse3.cpp
+		img/ImageDecoder_Linear_ssse3.cpp
+		)
+
+	# IFUNC requires glibc.
+	# We're not checking for glibc here, but we do have preprocessor
+	# checks, so even if this does get compiled on a non-glibc system,
+	# it won't do anything.
+	# TODO: Might be supported on other Unix-like operating systems...
+	IF(UNIX AND NOT APPLE)
+		SET(librpbase_IFUNC_SRCS
+			byteswap_ifunc.c
+			img/ImageDecoder_ifunc.cpp
+			)
+	ENDIF(UNIX AND NOT APPLE)
+
+	IF(MSVC AND NOT CMAKE_CL_64)
+		SET(SSE2_FLAG "/arch:SSE2")
+		SET(SSSE3_FLAG "/arch:SSE2")
+	ELSEIF(NOT MSVC)
+		# TODO: Other compilers?
+		SET(MMX_FLAG "-mmmx")
+		SET(SSE2_FLAG "-msse2")
+		SET(SSSE3_FLAG "-mssse3")
+	ENDIF()
+
+	IF(MMX_FLAG)
+		FOREACH(mmx_file ${librpbase_MMX_SRCS})
+			SET_SOURCE_FILES_PROPERTIES(${mmx_file}
+				APPEND_STRING PROPERTIES COMPILE_FLAGS " ${MMX_FLAG} ")
+		ENDFOREACH()
+	ENDIF(MMX_FLAG)
+
+	IF(SSE2_FLAG)
+		FOREACH(sse2_file ${librpbase_SSE2_SRCS})
+			SET_SOURCE_FILES_PROPERTIES(${sse2_file}
+				APPEND_STRING PROPERTIES COMPILE_FLAGS " ${SSE2_FLAG} ")
+		ENDFOREACH()
+	ENDIF(SSE2_FLAG)
+
+	IF(SSSE3_FLAG)
+		FOREACH(ssse3_file ${librpbase_SSSE3_SRCS})
+			SET_SOURCE_FILES_PROPERTIES(${ssse3_file}
+				APPEND_STRING PROPERTIES COMPILE_FLAGS " ${SSSE3_FLAG} ")
+		ENDFOREACH()
+	ENDIF(SSSE3_FLAG)
+ENDIF()
+UNSET(arch)
+
+# Aligned malloc() functions.
+# NOTE: MinGW-w64 only has _aligned_malloc().
+# It doesn't even have inline function wrappers
+# for the other functions.
+CHECK_SYMBOL_EXISTS(_aligned_malloc	"malloc.h"		HAVE_MSVC_ALIGNED_MALLOC)
+CHECK_SYMBOL_EXISTS(aligned_alloc	"stdlib.h"		HAVE_ALIGNED_ALLOC)
+CHECK_SYMBOL_EXISTS(posix_memalign	"stdlib.h"		HAVE_POSIX_MEMALIGN)
+CHECK_SYMBOL_EXISTS(memalign		"stdlib.h;malloc.h"	HAVE_MEMALIGN)
+IF(NOT HAVE_MSVC_ALIGNED_MALLOC AND NOT HAVE_ALIGNED_ALLOC AND NOT HAVE_POSIX_MEMALIGN AND NOT HAVE_MEMALIGN)
+	MESSAGE(FATAL_ERROR "System does not have an aligned malloc() function.")
+ENDIF()
+
+# Write the config.h file.
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/config.librpbase.h.in" "${CMAKE_CURRENT_BINARY_DIR}/config.librpbase.h")
+
 ######################
 # Build the library. #
 ######################
 
-# UTF-8 version.
-ADD_LIBRARY(rpbase8 STATIC
+ADD_LIBRARY(rpbase STATIC
 	${librpbase_SRCS} ${librpbase_H}
 	${librpbase_OS_SRCS} ${librpbase_OS_H}
 	${librpbase_CRYPTO_SRCS} ${librpbase_CRYPTO_H}
 	${librpbase_CRYPTO_OS_SRCS} ${librpbase_CRYPTO_OS_H}
 	${librpbase_THREAD_SRCS} ${librpbase_THREAD_H}
+	${librpbase_CPU_SRCS} ${librpbase_CPU_H}
+	${librpbase_IFUNC_SRCS}
+	${librpbase_MMX_SRCS}
+	${librpbase_SSE2_SRCS}
+	${librpbase_SSSE3_SRCS}
 	)
-TARGET_COMPILE_DEFINITIONS(rpbase8 PUBLIC -DRP_UTF8)
+# TODO: Get rid of this.
+TARGET_COMPILE_DEFINITIONS(rpbase PUBLIC -DRP_UTF8)
 
-# UTF-16 version.
-ADD_LIBRARY(rpbase16 STATIC
-	${librpbase_SRCS} ${librpbase_H}
-	${librpbase_OS_SRCS} ${librpbase_OS_H}
-	${librpbase_CRYPTO_SRCS} ${librpbase_CRYPTO_H}
-	${librpbase_CRYPTO_OS_SRCS} ${librpbase_CRYPTO_OS_H}
-	${librpbase_THREAD_SRCS} ${librpbase_THREAD_H}
+# Include paths:
+# - Public: Current source and binary directories.
+# - Private: Parent source and binary directories,
+#            and top-level binary directory for git_version.h.
+TARGET_INCLUDE_DIRECTORIES(rpbase
+	PUBLIC  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>		# librpbase
+		$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>		# librpbase
+	PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>	# src
+		$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>	# src
+		$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>			# build
 	)
-TARGET_COMPILE_DEFINITIONS(rpbase16 PUBLIC -DRP_UTF16)
+IF(MSVC)
+	TARGET_LINK_LIBRARIES(rpbase delayimp)
+ENDIF(MSVC)
+# Exclude from ALL builds.
+SET_TARGET_PROPERTIES(rpbase PROPERTIES EXCLUDE_FROM_ALL TRUE)
+# Make sure git_version.h is created before compiling this target.
+IF(TARGET git_version)
+	ADD_DEPENDENCIES(rpbase git_version)
+ENDIF(TARGET git_version)
 
-# Common properties for rpbase8 and rpbase16.
-FOREACH(_target rpbase8 rpbase16)
-	# Include paths:
-	# - Public: Current source and binary directories.
-	# - Private: Parent source and binary directories,
-	#            and top-level binary directory for git_version.h.
-	TARGET_INCLUDE_DIRECTORIES(${_target}
-		PUBLIC  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>		# librpbase
-			$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>		# librpbase
-		PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>	# src
-			$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>	# src
-			$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>			# top-level
-		)
-	IF(MSVC)
-		TARGET_LINK_LIBRARIES(${_target} delayimp)
-	ENDIF(MSVC)
-	# Exclude from ALL builds.
-	SET_TARGET_PROPERTIES(${_target} PROPERTIES EXCLUDE_FROM_ALL TRUE)
+# Link in libdl if it's required for dlopen()
+# and we have a component that uses it.
+IF(librpbase_NEEDS_DL AND CMAKE_DL_LIBS)
+	TARGET_LINK_LIBRARIES(rpbase ${CMAKE_DL_LIBS})
+ENDIF(librpbase_NEEDS_DL AND CMAKE_DL_LIBS)
 
-	# Link in libdl if it's required for dlopen()
-	# and we have a component that uses it.
-	IF(librpbase_NEEDS_DL AND CMAKE_DL_LIBS)
-		TARGET_LINK_LIBRARIES(${_target} ${CMAKE_DL_LIBS})
-	ENDIF(librpbase_NEEDS_DL AND CMAKE_DL_LIBS)
+# Other libraries.
+TARGET_LINK_LIBRARIES(rpbase inih)
+IF(ICONV_LIBRARY)
+	TARGET_LINK_LIBRARIES(rpbase ${ICONV_LIBRARY})
+ENDIF(ICONV_LIBRARY)
+IF(ZLIB_FOUND)
+	TARGET_LINK_LIBRARIES(rpbase ${ZLIB_LIBRARIES})
+	TARGET_INCLUDE_DIRECTORIES(rpbase PRIVATE ${ZLIB_INCLUDE_DIRS})
+	TARGET_COMPILE_DEFINITIONS(rpbase PRIVATE ${ZLIB_DEFINITIONS})
+ENDIF(ZLIB_FOUND)
+IF(PNG_FOUND)
+	TARGET_LINK_LIBRARIES(rpbase ${PNG_LIBRARY})
+	TARGET_INCLUDE_DIRECTORIES(rpbase PRIVATE ${PNG_INCLUDE_DIRS})
+	TARGET_COMPILE_DEFINITIONS(rpbase PRIVATE ${PNG_DEFINITIONS})
+ENDIF(PNG_FOUND)
+IF(JPEG_FOUND)
+	TARGET_LINK_LIBRARIES(rpbase ${JPEG_LIBRARY})
+	TARGET_INCLUDE_DIRECTORIES(rpbase PRIVATE ${JPEG_INCLUDE_DIRS})
+ENDIF(JPEG_FOUND)
+IF(NETTLE_FOUND)
+	TARGET_LINK_LIBRARIES(rpbase ${NETTLE_LIBRARY})
+	TARGET_INCLUDE_DIRECTORIES(rpbase PRIVATE ${NETTLE_INCLUDE_DIRS})
+ENDIF(NETTLE_FOUND)
+IF(WIN32)
+	# libwin32common
+	TARGET_LINK_LIBRARIES(rpbase win32common)
+	# Windows system libraries
+	TARGET_LINK_LIBRARIES(rpbase gdiplus)
+	IF(ENABLE_DECRYPTION)
+		TARGET_LINK_LIBRARIES(rpbase advapi32)
+	ENDIF(ENABLE_DECRYPTION)
+ELSE(WIN32)
+	# libunixcommon
+	TARGET_LINK_LIBRARIES(rpbase unixcommon)
+ENDIF(WIN32)
+IF(CMAKE_THREAD_LIBS_INIT)
+	TARGET_LINK_LIBRARIES(rpbase ${CMAKE_THREAD_LIBS_INIT})
+ENDIF(CMAKE_THREAD_LIBS_INIT)
 
-	# Other libraries.
-	TARGET_LINK_LIBRARIES(${_target} inih)
-	IF(ICONV_LIBRARY)
-		TARGET_LINK_LIBRARIES(${_target} ${ICONV_LIBRARY})
-	ENDIF(ICONV_LIBRARY)
-	IF(ZLIB_FOUND)
-		TARGET_LINK_LIBRARIES(${_target} ${ZLIB_LIBRARIES})
-		TARGET_INCLUDE_DIRECTORIES(${_target} PRIVATE ${ZLIB_INCLUDE_DIRS})
-		TARGET_COMPILE_DEFINITIONS(${_target} PRIVATE ${ZLIB_DEFINITIONS})
-	ENDIF(ZLIB_FOUND)
-	IF(PNG_FOUND)
-		TARGET_LINK_LIBRARIES(${_target} ${PNG_LIBRARY})
-		TARGET_INCLUDE_DIRECTORIES(${_target} PRIVATE ${PNG_INCLUDE_DIRS})
-		TARGET_COMPILE_DEFINITIONS(${_target} PRIVATE ${PNG_DEFINITIONS})
-	ENDIF(PNG_FOUND)
-	IF(JPEG_FOUND)
-		TARGET_LINK_LIBRARIES(${_target} ${JPEG_LIBRARY})
-		TARGET_INCLUDE_DIRECTORIES(${_target} PRIVATE ${JPEG_INCLUDE_DIRS})
-	ENDIF(JPEG_FOUND)
-	IF(NETTLE_FOUND)
-		TARGET_LINK_LIBRARIES(${_target} ${NETTLE_LIBRARY})
-		TARGET_INCLUDE_DIRECTORIES(${_target} PRIVATE ${NETTLE_INCLUDE_DIRS})
-	ENDIF(NETTLE_FOUND)
-	IF(WIN32)
-		# libwin32common
-		TARGET_LINK_LIBRARIES(${_target} win32common)
-		# Windows system libraries
-		TARGET_LINK_LIBRARIES(${_target} gdiplus)
-		IF(ENABLE_DECRYPTION)
-			TARGET_LINK_LIBRARIES(${_target} advapi32)
-		ENDIF(ENABLE_DECRYPTION)
-	ENDIF(WIN32)
-	IF(CMAKE_THREAD_LIBS_INIT)
-		TARGET_LINK_LIBRARIES(${_target} ${CMAKE_THREAD_LIBS_INIT})
-	ENDIF(CMAKE_THREAD_LIBS_INIT)
-ENDFOREACH()
+IF(ENABLE_NLS)
+	TARGET_LINK_LIBRARIES(rpbase i18n)
+ENDIF(ENABLE_NLS)
 
 # Unix: Add -fpic/-fPIC in order to use this static library in plugins.
 IF(UNIX AND NOT APPLE)

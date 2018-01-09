@@ -26,10 +26,12 @@
 #include <cstring>
 
 // C++ includes.
-#include <string>
+#include <memory>
 #include <list>
-using std::wstring;
+#include <string>
 using std::list;
+using std::unique_ptr;
+using std::wstring;
 
 // Windows SDK.
 #include <objbase.h>
@@ -171,7 +173,7 @@ wstring RegKey::read(LPCWSTR lpValueName, LPDWORD lpType) const
 		&dwType,	// lpType
 		nullptr,	// lpData
 		&cbData);	// lpcbData
-	if (lResult != ERROR_SUCCESS || cbData == 0 || (cbData % 2 != 0) ||
+	if (lResult != ERROR_SUCCESS || cbData == 0 || (cbData % sizeof(wchar_t) != 0) ||
 	    (dwType != REG_SZ && dwType != REG_EXPAND_SZ))
 	{
 		// Either an error occurred, or this isn't REG_SZ or REG_EXPAND_SZ.
@@ -182,21 +184,16 @@ wstring RegKey::read(LPCWSTR lpValueName, LPDWORD lpType) const
 	}
 
 	// Allocate a buffer and get the data.
-	wchar_t *wbuf = static_cast<wchar_t*>(malloc(cbData));
-	if (!wbuf) {
-		// Memory allocation failed.
-		return wstring();
-	}
+	unique_ptr<wchar_t[]> wbuf(new wchar_t[cbData/sizeof(wchar_t)]);
 	lResult = RegQueryValueEx(m_hKey,
-		lpValueName,	// lpValueName
-		nullptr,	// lpReserved
-		&dwType,	// lpType
-		(LPBYTE)wbuf,	// lpData
-		&cbData);	// lpcbData
+		lpValueName,		// lpValueName
+		nullptr,		// lpReserved
+		&dwType,		// lpType
+		(LPBYTE)wbuf.get(),	// lpData
+		&cbData);		// lpcbData
 	if (lResult != ERROR_SUCCESS ||
 	    (dwType != REG_SZ && dwType != REG_EXPAND_SZ)) {
 		// Either an error occurred, or this isn't REG_SZ or REG_EXPAND_SZ.
-		free(wbuf);
 		if (lpType) {
 			*lpType = REG_NONE;
 		}
@@ -219,14 +216,59 @@ wstring RegKey::read(LPCWSTR lpValueName, LPDWORD lpType) const
 
 	if (cchData == 0) {
 		// No actual string data.
-		free(wbuf);
 		return wstring();
 	}
 
 	// Return the string.
-	wstring wstr(wbuf, cchData);
-	free(wbuf);
-	return wstr;
+	return wstring(wbuf.get(), cchData);
+}
+
+/**
+ * Read a string value from a key. (REG_SZ, REG_EXPAND_SZ)
+ * REG_EXPAND_SZ values are expanded if necessary.
+ * @param lpValueName	[in] Value name. (Use nullptr or an empty string for the default value.)
+ * @param lpType	[out,opt] Variable to store the key type in. (REG_NONE, REG_SZ, or REG_EXPAND_SZ)
+ * @return String value, or empty string on error. (check lpType)
+ */
+wstring RegKey::read_expand(LPCWSTR lpValueName, LPDWORD lpType) const
+{
+	DWORD dwType = 0;
+	wstring wstr = read(lpValueName, &dwType);
+	if (wstr.empty() || dwType != REG_EXPAND_SZ) {
+		// Empty string, or not REG_EXPAND_SZ.
+		// Return immediately.
+		if (lpType) {
+			*lpType = dwType;
+		}
+		return wstr;
+	}
+
+	// Attempt to expand the string using the current environment.
+	// cchExpand includes the NULL terminator.
+	DWORD cchExpand = ExpandEnvironmentStrings(wstr.c_str(), nullptr, 0);
+	if (cchExpand == 0) {
+		// Error expanding the strings.
+		if (lpType) {
+			*lpType = 0;
+		}
+		return wstring();
+	}
+
+	unique_ptr<wchar_t[]> wbuf(new wchar_t[cchExpand]);
+	cchExpand = ExpandEnvironmentStrings(wstr.c_str(), wbuf.get(), cchExpand);
+	if (cchExpand == 0) {
+		// Error expanding the strings.
+		if (lpType) {
+			*lpType = 0;
+		}
+		return wstring();
+	}
+
+	// String has been expanded.
+	if (lpType) {
+		*lpType = REG_EXPAND_SZ;
+	}
+	return wstring(wbuf.get(), cchExpand-1);
 }
 
 /**
@@ -350,10 +392,7 @@ LONG RegKey::write_dword(LPCWSTR lpValueName, DWORD value)
 		return ERROR_INVALID_HANDLE;
 	}
 
-	// Get the string length, add 1 for NULL,
-	// and multiply by sizeof(wchar_t).
 	DWORD cbData = (DWORD)sizeof(value);
-
 	return RegSetValueEx(m_hKey,
 		lpValueName,		// lpValueName
 		0,			// Reserved
@@ -423,14 +462,14 @@ LONG RegKey::deleteSubKey(HKEY hKeyRoot, LPCWSTR lpSubKey)
 
 	// cMaxSubKeyLen doesn't include the NULL terminator, so add one.
 	++cMaxSubKeyLen;
-	wchar_t *szName = static_cast<wchar_t*>(malloc(cMaxSubKeyLen * sizeof(wchar_t)));
+	unique_ptr<wchar_t[]> szName(new wchar_t[cMaxSubKeyLen]);
 
 	// Enumerate the keys.
-	DWORD dwSize = cMaxSubKeyLen;
+	DWORD cchName = cMaxSubKeyLen;
 	lResult = RegEnumKeyEx(hSubKey,
 		0,		// dwIndex
-		szName,		// lpName
-		&dwSize,	// lpcName
+		szName.get(),	// lpName
+		&cchName,	// lpcName
 		nullptr,	// lpReserved
 		nullptr,	// lpClass
 		nullptr,	// lpcClass
@@ -438,26 +477,26 @@ LONG RegKey::deleteSubKey(HKEY hKeyRoot, LPCWSTR lpSubKey)
 	if (lResult == ERROR_SUCCESS) {
 		do {
 			// Recurse through this subkey.
-			lResult = deleteSubKey(hSubKey, szName);
+			lResult = deleteSubKey(hSubKey, szName.get());
 			if (lResult != ERROR_SUCCESS && lResult != ERROR_FILE_NOT_FOUND)
 				break;
 
 			// Next subkey.
-			dwSize = cMaxSubKeyLen;
+			cchName = cMaxSubKeyLen;
 			lResult = RegEnumKeyEx(hSubKey,
 				0,		// dwIndex
-				szName,		// lpName
-				&dwSize,	// lpcName
+				szName.get(),	// lpName
+				&cchName,	// lpcName
 				nullptr,	// lpReserved
 				nullptr,	// lpClass
 				nullptr,	// lpcClass
 				nullptr);	// lpftLastWriteTime
 		} while (lResult == ERROR_SUCCESS);
 	}
-	free(szName);
 	RegCloseKey(hSubKey);
 
 	// Try to delete the key again.
+	szName.reset();
 	return RegDeleteKey(hKeyRoot, lpSubKey);
 }
 
@@ -489,50 +528,49 @@ LONG RegKey::enumSubKeys(list<wstring> &lstSubKeys)
 	}
 
 	LONG lResult;
-	DWORD cSubKeys, cchMaxSubKeyLen;
+	DWORD cSubKeys, cMaxSubKeyLen;
 
 	// Get the number of subkeys.
 	lResult = RegQueryInfoKey(m_hKey,
-		nullptr, nullptr,	// lpClass, lpcClass
-		nullptr,		// lpReserved
-		&cSubKeys, &cchMaxSubKeyLen,
-		nullptr, nullptr,	// lpcMaxClassLen, lpcValues
-		nullptr, nullptr,	// lpcMaxValueNameLen, lpcMaxValueLen
-		nullptr, nullptr);	// lpcbSecurityDescriptor, lpftLastWriteTime
+		nullptr, nullptr,		// lpClass, lpcClass
+		nullptr,			// lpReserved
+		&cSubKeys, &cMaxSubKeyLen,	// lpcSubKeys, lpcMaxSubKeyLen
+		nullptr, nullptr,		// lpcMaxClassLen, lpcValues
+		nullptr, nullptr,		// lpcMaxValueNameLen, lpcMaxValueLen
+		nullptr, nullptr);		// lpcbSecurityDescriptor, lpftLastWriteTime
 	if (lResult != ERROR_SUCCESS) {
 		return lResult;
 	}
 
-	// cchMaxSubKeyLen doesn't include the NULL terminator.
-	cchMaxSubKeyLen++;
+	// cMaxSubKeyLen doesn't include the NULL terminator.
+	cMaxSubKeyLen++;
 
 	// https://msdn.microsoft.com/en-us/library/windows/desktop/ms724872(v=vs.85).aspx says
 	// key names are limited to 255 characters, but who knows...
-	wchar_t *wbuf = static_cast<wchar_t*>(malloc(cchMaxSubKeyLen * sizeof(wchar_t)));
+	unique_ptr<wchar_t[]> szName(new wchar_t[cMaxSubKeyLen]);
 
 	// Initialize the vector.
 	lstSubKeys.clear();
 
 	for (int i = 0; i < (int)cSubKeys; i++) {
-		DWORD cchName = cchMaxSubKeyLen;
+		DWORD cchName = cMaxSubKeyLen;
 		lResult = RegEnumKeyEx(m_hKey, i,
-			wbuf, &cchName,
+			szName.get(),	// lpName
+			&cchName,	// lpcName
 			nullptr,	// lpReserved
 			nullptr,	// lpClass
 			nullptr,	// lpcClass
 			nullptr);	// lpftLastWriteTime
 		if (lResult != ERROR_SUCCESS) {
-			free(wbuf);
 			return lResult;
 		}
 
 		// Add the subkey name to the return vector.
 		// cchName contains the number of characters in the
 		// subkey name, NOT including the NULL terminator.
-		lstSubKeys.push_back(wstring(wbuf, cchName));
+		lstSubKeys.push_back(wstring(szName.get(), cchName));
 	}
 
-	free(wbuf);
 	return ERROR_SUCCESS;
 }
 

@@ -36,7 +36,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-using std::endl;
 using std::ostringstream;
 using std::string;
 using std::vector;
@@ -213,8 +212,8 @@ void AesCipherTest::CompareByteArrays(
 	// Compare the byte arrays, and
 	// print the strings on failure.
 	EXPECT_EQ(0, memcmp(expected, actual, size)) <<
-		"Expected " << data_type << ":" << endl << s_expected << endl <<
-		"Actual " << data_type << ":" << endl << s_actual << endl;
+		"Expected " << data_type << ":" << '\n' << s_expected << '\n' <<
+		"Actual " << data_type << ":" << '\n' << s_actual << '\n';
 }
 
 /**
@@ -230,9 +229,9 @@ void AesCipherTest::SetUp(void)
 	static bool printed_impl = false;
 	if (!printed_impl) {
 		// Print the AesCipher implementation name.
-		const rp_char *name = m_cipher->name();
+		const char *name = m_cipher->name();
 		ASSERT_TRUE(name != nullptr);
-		printf("AesCipher implementation: %s\n", rp_string_to_utf8(name, -1).c_str());
+		printf("AesCipher implementation: %s\n", name);
 		printed_impl = true;
 	}
 }

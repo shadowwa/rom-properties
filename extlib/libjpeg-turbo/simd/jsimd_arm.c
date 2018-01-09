@@ -2,6 +2,7 @@
  * jsimd_arm.c
  *
  * Copyright 2009 Pierre Ossman <ossman@cendio.se> for Cendio AB
+ * Copyright (C) 2011, Nokia Corporation and/or its subsidiary(-ies).
  * Copyright (C) 2009-2011, 2013-2014, 2016, D. R. Commander.
  * Copyright (C) 2015-2016, Matthieu Darbois.
  *
@@ -202,7 +203,7 @@ jsimd_rgb_ycc_convert (j_compress_ptr cinfo,
                        JSAMPARRAY input_buf, JSAMPIMAGE output_buf,
                        JDIMENSION output_row, int num_rows)
 {
-  void (*neonfct)(JDIMENSION, JSAMPARRAY, JSAMPIMAGE, JDIMENSION, int);
+  void (JPEGCALL *neonfct)(JDIMENSION, JSAMPARRAY, JSAMPIMAGE, JDIMENSION, int);
 
   switch(cinfo->in_color_space) {
     case JCS_EXT_RGB:
@@ -247,7 +248,7 @@ jsimd_ycc_rgb_convert (j_decompress_ptr cinfo,
                        JSAMPIMAGE input_buf, JDIMENSION input_row,
                        JSAMPARRAY output_buf, int num_rows)
 {
-  void (*neonfct)(JDIMENSION, JSAMPIMAGE, JDIMENSION, JSAMPARRAY, int);
+  void (JPEGCALL *neonfct)(JDIMENSION, JSAMPIMAGE, JDIMENSION, JSAMPARRAY, int);
 
   switch(cinfo->out_color_space) {
     case JCS_EXT_RGB:

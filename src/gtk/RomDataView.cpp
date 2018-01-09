@@ -33,6 +33,9 @@
 #include "librpbase/img/IconAnimHelper.hpp"
 using namespace LibRpBase;
 
+// libi18n
+#include "libi18n/i18n.h"
+
 // libromdata
 #include "libromdata/RomDataFactory.hpp"
 using LibRomData::RomDataFactory;
@@ -51,6 +54,28 @@ using std::string;
 using std::unordered_map;
 using std::unordered_set;
 using std::vector;
+
+// GTK+ 2.x compatibility macros.
+// Reference: https://github.com/kynesim/wireshark/blob/master/ui/gtk/old-gtk-compat.h
+#if !GTK_CHECK_VERSION(3,0,0)
+static inline GtkWidget *gtk_tree_view_column_get_button(GtkTreeViewColumn *tree_column)
+{
+	/* This is too late, see https://bugzilla.gnome.org/show_bug.cgi?id=641089
+	 * According to
+	 * http://ftp.acc.umu.se/pub/GNOME/sources/gtk+/2.13/gtk+-2.13.4.changes
+	 * access to the button element was sealed during 2.13. They also admit that
+	 * they missed a use case and thus failed to provide an accessor function:
+	 * http://mail.gnome.org/archives/commits-list/2010-December/msg00578.html
+	 * An accessor function was finally added in 3.0.
+	 */
+# if (GTK_CHECK_VERSION(2,14,0) && defined(GSEAL_ENABLE))
+	return tree_column->_g_sealed__button;
+# else
+	return tree_column->button;
+# endif
+}
+#endif /* !GTK_CHECK_VERSION(3,0,0) */
+
 
 // References:
 // - audio-tags plugin
@@ -85,8 +110,14 @@ static void	rom_data_view_update_display	(RomDataView	*page);
 static gboolean	rom_data_view_load_rom_data	(gpointer	 data);
 
 /** Signal handlers. **/
-static void	checkbox_no_toggle_signal_handler(GtkToggleButton	*togglebutton,
-						  gpointer		 user_data);
+static void	checkbox_no_toggle_signal_handler   (GtkToggleButton	*togglebutton,
+						     gpointer		 user_data);
+static void	rom_data_view_map_signal_handler    (RomDataView	*page,
+						     gpointer		 user_data);
+static void	rom_data_view_unmap_signal_handler  (RomDataView	*page,
+						     gpointer		 user_data);
+static void	tree_view_realize_signal_handler    (GtkTreeView	*treeView,
+						     RomDataView	*page);
 
 /** Icon animation timer. **/
 static void	start_anim_timer(RomDataView *page);
@@ -118,7 +149,6 @@ struct _RomDataView {
 	GtkWidget	*lblSysInfo;
 	GtkWidget	*imgIcon;
 	GtkWidget	*imgBanner;
-	// TODO: Icon and banner.
 
 	// Filename.
 	gchar		*filename;
@@ -127,7 +157,6 @@ struct _RomDataView {
 	RomData		*romData;
 
 	// Animated icon data.
-	const IconAnimData *iconAnimData;
 	// TODO: GdkPixmap or cairo_surface_t?
 	// TODO: Use std::array<>?
 	GdkPixbuf	*iconFrames[IconAnimData::MAX_FRAMES];
@@ -154,6 +183,9 @@ struct _RomDataView {
 
 	// Bitfield checkboxes.
 	unordered_map<GtkWidget*, gboolean> *mapBitfields;
+
+	// GtkTreeViews with minimum row counts.
+	unordered_map<GtkTreeView*, int> *map_listDataRowCounts;
 };
 
 // FIXME: G_DEFINE_TYPE() doesn't work in C++ mode with gcc-6.2
@@ -298,6 +330,7 @@ rom_data_view_init(RomDataView *page)
 	page->vecDescLabels = new vector<GtkWidget*>();
 	page->setDescLabelIsWarning = new unordered_set<GtkWidget*>();
 	page->mapBitfields = new unordered_map<GtkWidget*, gboolean>();
+	page->map_listDataRowCounts = new unordered_map<GtkTreeView*, int>();
 
 	// Animation timer.
 	page->tmrIconAnim = 0;
@@ -351,6 +384,13 @@ rom_data_view_init(RomDataView *page)
 	gtk_label_set_attributes(GTK_LABEL(page->lblSysInfo), attr_lst);
 	pango_attr_list_unref(attr_lst);
 
+	// Connect the "map" and "unmap" signals.
+	// These are needed in order to start and stop the animation.
+	g_signal_connect(page, "map",
+		reinterpret_cast<GCallback>(rom_data_view_map_signal_handler), nullptr);
+	g_signal_connect(page, "unmap",
+		reinterpret_cast<GCallback>(rom_data_view_unmap_signal_handler), nullptr);
+
 	// Table layout is created in rom_data_view_update_display().
 }
 
@@ -360,14 +400,13 @@ rom_data_view_dispose(GObject *object)
 	RomDataView *page = ROM_DATA_VIEW(object);
 
 	/* Unregister the changed_idle */
-	if (G_UNLIKELY(page->changed_idle != 0)) {
+	if (G_UNLIKELY(page->changed_idle > 0)) {
 		g_source_remove(page->changed_idle);
 		page->changed_idle = 0;
 	}
 
-	// Delete the timer.
+	// Delete the animation timer.
 	if (page->tmrIconAnim > 0) {
-		// TODO: Make sure there's no race conditions...
 		g_source_remove(page->tmrIconAnim);
 		page->tmrIconAnim = 0;
 	}
@@ -382,12 +421,14 @@ rom_data_view_dispose(GObject *object)
 
 	// Clear the widget reference containers.
 	page->tabs->clear();
+	page->tabWidget = nullptr;
 	page->vecDescLabels->clear();
 	page->setDescLabelIsWarning->clear();
 	page->mapBitfields->clear();
+	page->map_listDataRowCounts->clear();
 
 	// Call the superclass dispose() function.
-	(*G_OBJECT_CLASS(rom_data_view_parent_class)->dispose)(object);
+	G_OBJECT_CLASS(rom_data_view_parent_class)->dispose(object);
 }
 
 static void
@@ -404,6 +445,7 @@ rom_data_view_finalize(GObject *object)
 	delete page->vecDescLabels;
 	delete page->setDescLabelIsWarning;
 	delete page->mapBitfields;
+	delete page->map_listDataRowCounts;
 
 	// Unreference romData.
 	if (page->romData) {
@@ -411,7 +453,7 @@ rom_data_view_finalize(GObject *object)
 	}
 
 	// Call the superclass finalize() function.
-	(*G_OBJECT_CLASS(rom_data_view_parent_class)->finalize)(object);
+	G_OBJECT_CLASS(rom_data_view_parent_class)->finalize(object);
 }
 
 GtkWidget*
@@ -504,10 +546,6 @@ rom_data_view_set_filename(RomDataView	*page,
 		g_free(page->filename);
 		page->filename = nullptr;
 
-		// NULL out iconAnimData.
-		// (This is owned by the RomData object.)
-		page->iconAnimData = nullptr;
-
 		// Unreference the existing RomData object.
 		if (page->romData) {
 			page->romData->unref();
@@ -550,10 +588,17 @@ rom_data_view_set_filename(RomDataView	*page,
 		}
 		page->tabs->clear();
 
+		if (page->tabWidget) {
+			// Delete the tab widget.
+			gtk_widget_destroy(page->tabWidget);
+			page->tabWidget = nullptr;
+		}
+
 		// Clear the various widget references.
 		page->vecDescLabels->clear();
 		page->setDescLabelIsWarning->clear();
 		page->mapBitfields->clear();
+		page->map_listDataRowCounts->clear();
 	}
 
 	// Filename has been changed.
@@ -615,7 +660,6 @@ static void
 rom_data_view_init_header_row(RomDataView *page)
 {
 	// Initialize the header row.
-	// TODO: Icon, banner.
 	assert(page != nullptr);
 
 	// NOTE: romData might be nullptr in some cases.
@@ -628,9 +672,9 @@ rom_data_view_init_header_row(RomDataView *page)
 	}
 
 	// System name and file type.
-	const rp_char *const systemName = page->romData->systemName(
+	const char *const systemName = page->romData->systemName(
 		RomData::SYSNAME_TYPE_LONG | RomData::SYSNAME_REGION_ROM_LOCAL);
-	const rp_char *const fileType = page->romData->fileType_string();
+	const char *const fileType = page->romData->fileType_string();
 
 	string sysInfo;
 	sysInfo.reserve(128);
@@ -671,11 +715,11 @@ rom_data_view_init_header_row(RomDataView *page)
 		const rp_image *icon = page->romData->image(RomData::IMG_INT_ICON);
 		if (icon && icon->isValid()) {
 			// Is this an animated icon?
-			page->iconAnimData = page->romData->iconAnimData();
-			if (page->iconAnimData) {
+			const IconAnimData *const iconAnimData = page->romData->iconAnimData();
+			if (iconAnimData) {
 				// Convert the icons to GdkPixbuf.
-				for (int i = 0; i < page->iconAnimData->count; i++) {
-					const rp_image *const frame = page->iconAnimData->frames[i];
+				for (int i = iconAnimData->count-1; i >= 0; i--) {
+					const rp_image *const frame = iconAnimData->frames[i];
 					if (frame && frame->isValid()) {
 						GdkPixbuf *pixbuf = GdkImageConv::rp_image_to_GdkPixbuf(frame);
 						if (pixbuf) {
@@ -685,7 +729,7 @@ rom_data_view_init_header_row(RomDataView *page)
 				}
 
 				// Set up the IconAnimHelper.
-				page->iconAnimHelper->setIconAnimData(page->iconAnimData);
+				page->iconAnimHelper->setIconAnimData(iconAnimData);
 				// Initialize the animation.
 				page->last_frame_number = page->iconAnimHelper->frameNumber();
 
@@ -694,7 +738,7 @@ rom_data_view_init_header_row(RomDataView *page)
 					page->iconFrames[page->last_frame_number]);
 				gtk_widget_show(page->imgIcon);
 
-				// Icon animation timer is set in startAnimTimer().
+				// Icon animation timer is set in start_anim_timer().
 			} else {
 				// Not an animated icon.
 				page->last_frame_number = 0;
@@ -743,7 +787,7 @@ rom_data_view_init_string(RomDataView *page, const RomFields::Field *field)
 		if (field->data.str) {
 			// NOTE: Pango markup does not support <br/>.
 			// It uses standard newlines for line breaks.
-			gtk_label_set_markup(GTK_LABEL(widget), rp_string_to_utf8(*(field->data.str)).c_str());
+			gtk_label_set_markup(GTK_LABEL(widget), field->data.str->c_str());
 		}
 	} else {
 		// Standard text with no formatting.
@@ -751,7 +795,7 @@ rom_data_view_init_string(RomDataView *page, const RomFields::Field *field)
 		gtk_label_set_justify(GTK_LABEL(widget), GTK_JUSTIFY_LEFT);
 		GTK_WIDGET_HALIGN_LEFT(widget);
 		if (field->data.str) {
-			gtk_label_set_text(GTK_LABEL(widget), rp_string_to_utf8(*(field->data.str)).c_str());
+			gtk_label_set_text(GTK_LABEL(widget), field->data.str->c_str());
 		}
 	}
 
@@ -845,11 +889,11 @@ rom_data_view_init_bitfield(RomDataView *page, const RomFields::Field *field)
 
 	int row = 0, col = 0;
 	for (int bit = 0; bit < count; bit++) {
-		const rp_string &name = bitfieldDesc.names->at(bit);
+		const string &name = bitfieldDesc.names->at(bit);
 		if (name.empty())
 			continue;
 
-		GtkWidget *checkBox = gtk_check_button_new_with_label(rp_string_to_utf8(name).c_str());
+		GtkWidget *checkBox = gtk_check_button_new_with_label(name.c_str());
 		gtk_widget_show(checkBox);
 		gboolean value = !!(field->data.bitfield & (1 << bit));
 		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(checkBox), value);
@@ -893,34 +937,71 @@ rom_data_view_init_listdata(G_GNUC_UNUSED RomDataView *page, const RomFields::Fi
 {
 	// ListData type. Create a GtkListStore for the data.
 	const auto &listDataDesc = field->desc.list_data;
-	assert(listDataDesc.names != nullptr);
-	if (!listDataDesc.names) {
-		// No column names...
-		return nullptr;
-	}
+	// NOTE: listDataDesc.names can be nullptr,
+	// which means we don't have any column headers.
 
-	// Set up the column names.
-	const int count = (int)listDataDesc.names->size();
-	GType *types = new GType[count];
-	for (int i = 0; i < count; i++) {
-		types[i] = G_TYPE_STRING;
-	}
-	GtkListStore *listStore = gtk_list_store_newv(count, types);
-	delete[] types;
-
-	// Add the row data.
 	auto list_data = field->data.list_data;
 	assert(list_data != nullptr);
+
+	int col_count = 1;
+	if (listDataDesc.names) {
+		col_count = (int)listDataDesc.names->size();
+	} else {
+		// No column headers.
+		// Use the first row.
+		if (list_data && !list_data->empty()) {
+			col_count = (int)list_data->at(0).size();
+		}
+	}
+
+	GtkListStore *listStore;
+	const bool hasCheckboxes = !!(listDataDesc.flags & RomFields::RFT_LISTDATA_CHECKBOXES);
+	if (hasCheckboxes) {
+		// We need to set up a virtual column 0 with checkboxes.
+		GType *types = new GType[col_count+1];
+		types[0] = G_TYPE_BOOLEAN;
+		for (int i = col_count; i > 0; i--) {
+			types[i] = G_TYPE_STRING;
+		}
+		listStore = gtk_list_store_newv(col_count+1, types);
+		delete[] types;
+	} else {
+		// All strings.
+		GType *types = new GType[col_count];
+		for (int i = col_count-1; i >= 0; i--) {
+			types[i] = G_TYPE_STRING;
+		}
+		listStore = gtk_list_store_newv(col_count, types);
+		delete[] types;
+	}
+
+	// If we have checkboxes, column 0 is a virtual column.
+	const int col_start = (hasCheckboxes ? 1 : 0);
+
+	// Add the row data.
 	if (list_data) {
-		const int count = (int)list_data->size();
-		for (int i = 0; i < count; i++) {
-			const vector<rp_string> &data_row = list_data->at(i);
+		const int row_count = (int)list_data->size();
+		uint32_t checkboxes = field->data.list_checkboxes;
+		for (int i = 0; i < row_count; i++) {
+			const vector<string> &data_row = list_data->at(i);
+			if (hasCheckboxes && data_row.empty()) {
+				// Skip this row.
+				checkboxes >>= 1;
+				continue;
+			}
+
 			GtkTreeIter treeIter;
 			gtk_list_store_insert_before(listStore, &treeIter, nullptr);
-			int col = 0;
+			int col = col_start;
+			if (hasCheckboxes) {
+				// Insert a virtual checkbox column.
+				gtk_list_store_set(listStore, &treeIter,
+					0, (checkboxes & 1), -1);
+				checkboxes >>= 1;
+			}
 			for (auto iter = data_row.cbegin(); iter != data_row.cend(); ++iter, ++col) {
 				gtk_list_store_set(listStore, &treeIter,
-					col, rp_string_to_utf8(*iter).c_str(), -1);
+					col, iter->c_str(), -1);
 			}
 		}
 	}
@@ -929,24 +1010,54 @@ rom_data_view_init_listdata(G_GNUC_UNUSED RomDataView *page, const RomFields::Fi
 	GtkWidget *widget = gtk_scrolled_window_new(nullptr, nullptr);
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(widget),
 			GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+	gtk_scrolled_window_set_shadow_type(GTK_SCROLLED_WINDOW(widget), GTK_SHADOW_IN);
 	gtk_widget_show(widget);
 
 	// Create the GtkTreeView.
 	GtkWidget *treeView = gtk_tree_view_new_with_model(GTK_TREE_MODEL(listStore));
-	gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(treeView), TRUE);
+	gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(treeView),
+		(listDataDesc.names != nullptr));
 	gtk_widget_show(treeView);
-	//treeWidget->setRootIsDecorated(false);
-	//treeWidget->setUniformRowHeights(true);
 	gtk_container_add(GTK_CONTAINER(widget), treeView);
 
+	// TODO: Set fixed height mode?
+	// May require fixed columns...
+	// Reference: https://developer.gnome.org/gtk3/stable/GtkTreeView.html#gtk-tree-view-set-fixed-height-mode
+
+#if GTK_CHECK_VERSION(3,0,0)
+	// FIXME: Alternating row colors isn't working in GTK+ 3.x...
+#else
+	// GTK+ 2.x: Use the "rules hint" for alternating row colors.
+	gtk_tree_view_set_rules_hint(GTK_TREE_VIEW(treeView), TRUE);
+#endif
+
+	if (hasCheckboxes) {
+		// Add a virtual column.
+		GtkCellRenderer *renderer = gtk_cell_renderer_toggle_new();
+		GtkTreeViewColumn *column = gtk_tree_view_column_new_with_attributes(
+			"", renderer, "active", 0, nullptr);
+		gtk_tree_view_append_column(GTK_TREE_VIEW(treeView), column);
+	}
+
 	// Set up the column names.
-	for (int i = 0; i < count; i++) {
-		const rp_string &name = listDataDesc.names->at(i);
-		if (!name.empty()) {
+	if (listDataDesc.names) {
+		for (int i = 0; i < col_count; i++) {
+			const string &name = listDataDesc.names->at(i);
+			if (name.empty())
+				break;
+
 			GtkCellRenderer *renderer = gtk_cell_renderer_text_new();
 			GtkTreeViewColumn *column = gtk_tree_view_column_new_with_attributes(
-				rp_string_to_utf8(name).c_str(), renderer,
-				"text", i, nullptr);
+				name.c_str(), renderer,
+				"text", i+col_start, nullptr);
+			gtk_tree_view_append_column(GTK_TREE_VIEW(treeView), column);
+		}
+	} else {
+		for (int i = 0; i < col_count; i++) {
+			GtkCellRenderer *renderer = gtk_cell_renderer_text_new();
+			GtkTreeViewColumn *column = gtk_tree_view_column_new_with_attributes(
+				"", renderer,
+				"text", i+col_start, nullptr);
 			gtk_tree_view_append_column(GTK_TREE_VIEW(treeView), column);
 		}
 	}
@@ -958,6 +1069,16 @@ rom_data_view_init_listdata(G_GNUC_UNUSED RomDataView *page, const RomFields::Fi
 
 	// Resize the columns to fit the contents.
 	gtk_tree_view_columns_autosize(GTK_TREE_VIEW(treeView));
+
+	// Row height is recalculated when the window is first visible
+	// and/or the system theme is changed.
+	// TODO: Set an actual default number of rows, or let Qt handle it?
+	// (Windows uses 5.)
+	if (field->desc.list_data.rows_visible > 0) {
+		page->map_listDataRowCounts->insert(std::make_pair(GTK_TREE_VIEW(treeView), field->desc.list_data.rows_visible));
+		g_signal_connect(treeView, "realize",
+			reinterpret_cast<GCallback>(tree_view_realize_signal_handler), page);
+	}
 
 	return widget;
 }
@@ -980,8 +1101,8 @@ rom_data_view_init_datetime(G_GNUC_UNUSED RomDataView *page, const RomFields::Fi
 	GTK_WIDGET_HALIGN_LEFT(widget);
 
 	if (field->data.date_time == -1) {
-		// Invalid date/time.
-		gtk_label_set_text(GTK_LABEL(widget), "Unknown");
+		// tr: Invalid date/time.
+		gtk_label_set_text(GTK_LABEL(widget), C_("RomDataView", "Unknown"));
 		return widget;
 	}
 
@@ -992,41 +1113,39 @@ rom_data_view_init_datetime(G_GNUC_UNUSED RomDataView *page, const RomFields::Fi
 		dateTime = g_date_time_new_from_unix_local(field->data.date_time);
 	}
 
-	gchar *str = nullptr;
-	switch (field->desc.flags &
-		(RomFields::RFT_DATETIME_HAS_DATE | RomFields::RFT_DATETIME_HAS_TIME))
-	{
-		case RomFields::RFT_DATETIME_HAS_DATE:
-			// Date only.
-			str = g_date_time_format(dateTime, "%x");
-			break;
+	static const char *const formats[8] = {
+		nullptr,	// No date or time.
+		"%x",		// Date
+		"%X",		// Time
+		"%x %X",	// Date Time
 
-		case RomFields::RFT_DATETIME_HAS_TIME:
-			// Time only.
-			str = g_date_time_format(dateTime, "%X");
-			break;
+		// TODO: Better localization here.
+		nullptr,	// No date or time.
+		"%b %d",	// Date (no year)
+		"%X",		// Time
+		"%b %d %X",	// Date Time (no year)
+	};
 
-		case RomFields::RFT_DATETIME_HAS_DATE |
-			RomFields::RFT_DATETIME_HAS_TIME:
-			// Date and time.
-			str = g_date_time_format(dateTime, "%x %X");
-			break;
+	const char *const format = formats[field->desc.flags & RomFields::RFT_DATETIME_HAS_DATETIME_NO_YEAR_MASK];
+	assert(format != nullptr);
+	if (format) {
+		gchar *str = g_date_time_format(dateTime, format);
 
-		default:
-			// Invalid combination.
-			assert(!"Invalid Date/Time formatting.");
-			break;
-	}
-	g_date_time_unref(dateTime);
-
-	if (str) {
-		gtk_label_set_text(GTK_LABEL(widget), str);
-		g_free(str);
+		if (str) {
+			gtk_label_set_text(GTK_LABEL(widget), str);
+			g_free(str);
+		} else {
+			// Invalid date/time.
+			gtk_widget_destroy(widget);
+			widget = nullptr;
+		}
 	} else {
-		// Invalid date/time.
+		// Invalid format.
 		gtk_widget_destroy(widget);
 		widget = nullptr;
 	}
+
+	g_date_time_unref(dateTime);
 	return widget;
 }
 
@@ -1050,47 +1169,14 @@ rom_data_view_init_age_ratings(G_GNUC_UNUSED RomDataView *page, const RomFields:
 	const RomFields::age_ratings_t *age_ratings = field->data.age_ratings;
 	assert(age_ratings != nullptr);
 	if (!age_ratings) {
-		// No age ratings data.
-		gtk_label_set_text(GTK_LABEL(widget), "ERROR");
+		// tr: No age ratings data.
+		gtk_label_set_text(GTK_LABEL(widget), C_("RomDataView", "ERROR"));
 		return widget;
 	}
 
 	// Convert the age ratings field to a string.
-	ostringstream oss;
-	unsigned int ratings_count = 0;
-	for (int i = 0; i < (int)age_ratings->size(); i++) {
-		const uint16_t rating = age_ratings->at(i);
-		if (!(rating & RomFields::AGEBF_ACTIVE))
-			continue;
-
-		if (ratings_count > 0) {
-			// Append a comma.
-			if (ratings_count % 4 == 0) {
-				// 4 ratings per line.
-				oss << ",\n";
-			} else {
-				oss << ", ";
-			}
-		}
-
-		const char *abbrev = RomFields::ageRatingAbbrev(i);
-		if (abbrev) {
-			oss << abbrev;
-		} else {
-			// Invalid age rating.
-			// Use the numeric index.
-			oss << i;
-		}
-		oss << '=' << RomFields::ageRatingDecode(i, rating);
-		ratings_count++;
-	}
-
-	if (ratings_count == 0) {
-		// No age ratings.
-		oss << "None";
-	}
-
-	gtk_label_set_text(GTK_LABEL(widget), oss.str().c_str());
+	string str = RomFields::ageRatingsDecode(age_ratings);
+	gtk_label_set_text(GTK_LABEL(widget), str.c_str());
 	return widget;
 }
 
@@ -1117,6 +1203,12 @@ rom_data_view_update_display(RomDataView *page)
 	}
 	page->tabs->clear();
 
+	if (page->tabWidget) {
+		// Delete the tab widget.
+		gtk_widget_destroy(page->tabWidget);
+		page->tabWidget = nullptr;
+	}
+
 	// Clear the various widget references.
 	page->vecDescLabels->clear();
 	page->setDescLabelIsWarning->clear();
@@ -1135,6 +1227,9 @@ rom_data_view_update_display(RomDataView *page)
 		return;
 	}
 	const int count = fields->count();
+#if !GTK_CHECK_VERSION(3,0,0)
+	int rowCount = count;
+#endif
 
 	// Create the GtkNotebook.
 	if (fields->tabCount() > 1) {
@@ -1142,7 +1237,7 @@ rom_data_view_update_display(RomDataView *page)
 		page->tabWidget = gtk_notebook_new();
 		for (int i = 0; i < fields->tabCount(); i++) {
 			// Create a tab.
-			const rp_char *name = fields->tabName(i);
+			const char *name = fields->tabName(i);
 			if (!name) {
 				// Skip this tab.
 				continue;
@@ -1157,7 +1252,7 @@ rom_data_view_update_display(RomDataView *page)
 #else
 			tab.vbox = gtk_vbox_new(FALSE, 8);
 			// TODO: Adjust the table size?
-			tab.table = gtk_table_new(count, 2, FALSE);
+			tab.table = gtk_table_new(rowCount, 2, FALSE);
 			gtk_table_set_row_spacings(GTK_TABLE(tab.table), 2);
 			gtk_table_set_col_spacings(GTK_TABLE(tab.table), 8);
 #endif
@@ -1168,7 +1263,7 @@ rom_data_view_update_display(RomDataView *page)
 			gtk_widget_show(tab.vbox);
 
 			// Add the tab.
-			GtkWidget *label = gtk_label_new(rp_string_to_utf8(name).c_str());
+			GtkWidget *label = gtk_label_new(name);
 			gtk_notebook_append_page(GTK_NOTEBOOK(page->tabWidget), tab.vbox, label);
 		}
 		gtk_box_pack_start(GTK_BOX(page), page->tabWidget, TRUE, TRUE, 0);
@@ -1227,6 +1322,7 @@ rom_data_view_update_display(RomDataView *page)
 		}
 
 		GtkWidget *widget = nullptr;
+		bool separate_rows = false;
 		switch (field->type) {
 			case RomFields::RFT_INVALID:
 				// No data here.
@@ -1241,6 +1337,7 @@ rom_data_view_update_display(RomDataView *page)
 				break;
 
 			case RomFields::RFT_LISTDATA:
+				separate_rows = !!(field->desc.list_data.flags & RomFields::RFT_LISTDATA_SEPARATE_ROW);
 				widget = rom_data_view_init_listdata(page, field);
 				break;
 
@@ -1262,12 +1359,9 @@ rom_data_view_update_display(RomDataView *page)
 			// Add the widget to the table.
 			auto &tab = page->tabs->at(tabIdx);
 
-			// TODO: Localization.
-			std::string gtkdesc = rp_string_to_utf8(field->name);
-			gtkdesc += ':';
-
-			// Description label.
-			GtkWidget *lblDesc = gtk_label_new(gtkdesc.c_str());
+			// tr: Field description label.
+			string txt = rp_sprintf(C_("RomDataView", "%s:"), field->name.c_str());
+			GtkWidget *lblDesc = gtk_label_new(txt.c_str());
 			gtk_label_set_use_underline(GTK_LABEL(lblDesc), false);
 			gtk_widget_show(lblDesc);
 			gtk_size_group_add_widget(size_group, lblDesc);
@@ -1290,14 +1384,44 @@ rom_data_view_update_display(RomDataView *page)
 
 			// Widget halign is set above.
 			gtk_widget_set_valign(widget, GTK_ALIGN_START);
-			gtk_grid_attach(GTK_GRID(tab.table), widget, 1, row, 1, 1);
+			if (separate_rows) {
+				// Separate rows.
+
+				// Make sure the description label is left-aligned.
+#if GTK_CHECK_VERSION(3,16,0)
+				gtk_label_set_xalign(GTK_LABEL(lblDesc), 0.0);
+#else
+				gtk_misc_set_alignment(GTK_MISC(lblDesc), 0.0f, 0.0f);
+#endif
+
+				gtk_grid_attach(GTK_GRID(tab.table), widget, 0, row+1, 1, 1);
+				row += 2;
+			} else {
+				// Single row.
+				gtk_grid_attach(GTK_GRID(tab.table), widget, 1, row, 2, 1);
+				row++;
+			}
 #else
 			gtk_table_attach(GTK_TABLE(tab.table), lblDesc, 0, 1, row, row+1,
 				GTK_FILL, GTK_FILL, 0, 0);
-			gtk_table_attach(GTK_TABLE(tab.table), widget, 1, 2, row, row+1,
-				GTK_FILL, GTK_FILL, 0, 0);
+			if (separate_rows) {
+				// Separate rows.
+				rowCount++;
+				gtk_table_resize(GTK_TABLE(tab.table), rowCount, 2);
+
+				// Make sure the description label is left-aligned.
+				gtk_misc_set_alignment(GTK_MISC(lblDesc), 0.0f, 0.0f);
+
+				gtk_table_attach(GTK_TABLE(tab.table), widget, 0, 1, row+1, row+2,
+					GTK_FILL, GTK_FILL, 0, 0);
+				row += 2;
+			} else {
+				// Single row.
+				gtk_table_attach(GTK_TABLE(tab.table), widget, 1, 2, row, row+1,
+					GTK_FILL, GTK_FILL, 0, 0);
+				row++;
+			}
 #endif
-			row++;
 		}
 	}
 }
@@ -1331,9 +1455,8 @@ rom_data_view_load_rom_data(gpointer data)
 		delete file;
 	}
 
-	// Start the animation timer.
-	// TODO: Start/stop on window show/hide?
-	start_anim_timer(page);
+	// Animation timer will be started when the page
+	// receives the "map" signal.
 
 	// Clear the timeout.
 	page->changed_idle = 0;
@@ -1366,6 +1489,120 @@ checkbox_no_toggle_signal_handler(GtkToggleButton	*togglebutton,
 	}
 }
 
+/**
+ * RomDataView is being mapped onto the screen.
+ * @param page RomDataView
+ * @param user_data User data.
+ */
+static void
+rom_data_view_map_signal_handler(RomDataView	*page,
+				 gpointer	 user_data)
+{
+	RP_UNUSED(user_data);
+	start_anim_timer(page);
+}
+
+/**
+ * RomDataView is being unmapped from the screen.
+ * @param page RomDataView
+ * @param user_data User data.
+ */
+static void
+rom_data_view_unmap_signal_handler(RomDataView	*page,
+				   gpointer	 user_data)
+{
+	RP_UNUSED(user_data);
+	stop_anim_timer(page);
+}
+
+/**
+ * GtkTreeView widget has been realized.
+ * @param treeView GtkTreeView
+ * @param page RomDataView
+ */
+static void
+tree_view_realize_signal_handler(GtkTreeView	*treeView,
+				 RomDataView	*page)
+{
+	// TODO: Redo this if the system font and/or style changes.
+
+	// Recalculate the row heights for this GtkTreeView.
+	auto iter = page->map_listDataRowCounts->find(treeView);
+	assert(iter != page->map_listDataRowCounts->end());
+	if (iter == page->map_listDataRowCounts->end()) {
+		// This GtkTreeView doesn't have a fixed number of rows.
+		return;
+	}
+
+	const int rows_visible = iter->second;
+	if (rows_visible <= 0) {
+		// Nothing to do...
+		return;
+	}
+
+	// Get the parent widget.
+	// This should be a GtkScrolledWindow.
+	GtkWidget *scrolledWindow = gtk_widget_get_ancestor(GTK_WIDGET(treeView), GTK_TYPE_SCROLLED_WINDOW);
+	if (!scrolledWindow || !GTK_IS_SCROLLED_WINDOW(scrolledWindow)) {
+		// No parent widget, or not a GtkScrolledWindow.
+		return;
+	}
+
+	// Get the height of the first item.
+	GtkTreePath *path = gtk_tree_path_new_from_string("0");
+	GdkRectangle rect;
+	gtk_tree_view_get_background_area(GTK_TREE_VIEW(treeView), path, nullptr, &rect);
+	gtk_tree_path_free(path);
+	if (rect.height <= 0) {
+		// GtkListStore probably doesn't have any items.
+		return;
+	}
+	int height = rect.height * rows_visible;
+
+	if (gtk_tree_view_get_headers_visible(treeView)) {
+		// Get the header widget of the first column.
+		GtkTreeViewColumn *column = gtk_tree_view_get_column(treeView, 0);
+		assert(column != nullptr);
+		if (!column) {
+			// No columns...
+			return;
+		}
+
+		GtkWidget *header = gtk_tree_view_column_get_widget(column);
+		if (!header) {
+			header = gtk_tree_view_column_get_button(column);
+		}
+		if (header) {
+			// TODO: gtk_widget_get_allocated_height() for GTK+ 3.x?
+			GtkAllocation allocation;
+			gtk_widget_get_allocation(header, &allocation);
+			height += allocation.height;
+		}
+	}
+
+#if GTK_CHECK_VERSION(3,0,0)
+	// Get the GtkScrolledWindow's border, padding, and margin.
+	GtkStyleContext *context = gtk_widget_get_style_context(scrolledWindow);
+	GtkBorder border, padding, margin;
+	gtk_style_context_get_border(context, GTK_STATE_FLAG_NORMAL, &border);
+	gtk_style_context_get_padding(context, GTK_STATE_FLAG_NORMAL, &padding);
+	gtk_style_context_get_margin(context, GTK_STATE_FLAG_NORMAL, &margin);
+	height += border.top + border.bottom;
+	height += padding.top + padding.bottom;
+	height += margin.top + margin.bottom;
+#else
+	// Get the GtkScrolledWindow's border.
+	// NOTE: Assuming we have a border set.
+	GtkStyle *style = gtk_widget_get_style(scrolledWindow);
+	height += (style->ythickness * 2);
+#endif
+
+	// Set the GtkScrolledWindow's height.
+	// NOTE: gtk_scrolled_window_set_max_content_height() doesn't seem to
+	// work properly for rows_visible=4, and it's GTK+ 3.x only.
+	gtk_widget_set_size_request(scrolledWindow, -1, height);
+}
+
 /** Icon animation timer. **/
 
 /**
@@ -1373,7 +1610,7 @@ checkbox_no_toggle_signal_handler(GtkToggleButton	*togglebutton,
  */
 static void start_anim_timer(RomDataView *page)
 {
-	if (!page->iconAnimData || !page->iconAnimHelper->isAnimated()) {
+	if (!page->iconAnimHelper->isAnimated()) {
 		// Not an animated icon.
 		return;
 	}
@@ -1381,6 +1618,7 @@ static void start_anim_timer(RomDataView *page)
 	// Get the current frame information.
 	page->last_frame_number = page->iconAnimHelper->frameNumber();
 	const int delay = page->iconAnimHelper->frameDelay();
+	assert(delay > 0);
 	if (delay <= 0) {
 		// Invalid delay value.
 		return;
@@ -1412,11 +1650,17 @@ static void stop_anim_timer(RomDataView *page)
  */
 static gboolean anim_timer_func(RomDataView *page)
 {
+	if (page->tmrIconAnim == 0) {
+		// Shutting down...
+		return FALSE;
+	}
+
 	// Next frame.
 	int delay = 0;
 	int frame = page->iconAnimHelper->nextFrame(&delay);
 	if (delay <= 0 || frame < 0) {
 		// Invalid frame...
+		page->tmrIconAnim = 0;
 		return FALSE;
 	}
 

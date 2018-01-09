@@ -9,6 +9,19 @@ SET(rom-properties-kde_SRCS
 	RomThumbCreator.cpp
 	RpQt.cpp
 	RpQImageBackend.cpp
+	QTreeWidgetOpt.cpp
+	config/stub-export.cpp
+	config/ConfigDialog.cpp
+	config/ITab.cpp
+	config/ImageTypesTab.cpp
+	config/DownloadsTab.cpp
+	config/AboutTab.cpp
+	config/QTreeViewOpt.cpp
+	config/KeyStoreQt.cpp
+	config/KeyStoreModel.cpp
+	config/KeyStoreItemDelegate.cpp
+	config/MessageWidget.cpp
+	config/MessageWidgetStack.cpp
 	)
 SET(rom-properties-kde_H
 	RomPropertiesDialogPlugin.hpp
@@ -16,7 +29,38 @@ SET(rom-properties-kde_H
 	RomThumbCreator.hpp
 	RpQt.hpp
 	RpQImageBackend.hpp
+	QTreeWidgetOpt.hpp
+	QImageData_qt4.hpp
+	config/ConfigDialog.hpp
+	config/ITab.hpp
+	config/ImageTypesTab.hpp
+	config/DownloadsTab.hpp
+	config/AboutTab.hpp
+	config/QTreeViewOpt.hpp
+	config/KeyStoreQt.hpp
+	config/KeyStoreModel.hpp
+	config/KeyStoreItemDelegate.hpp
+	config/MessageWidget.hpp
+	config/MessageWidgetStack.hpp
 	)
+SET(rom-properties-kde_UIS
+	RomDataView.ui
+	config/ConfigDialog.ui
+	config/ImageTypesTab.ui
+	config/DownloadsTab.ui
+	config/AboutTab.ui
+	)
+
+IF(ENABLE_DECRYPTION)
+	SET(rom-properties-kde_SRCS ${rom-properties-kde_SRCS} config/KeyManagerTab.cpp)
+	SET(rom-properties-kde_H    ${rom-properties-kde_H}    config/KeyManagerTab.hpp)
+	SET(rom-properties-kde_UIS  ${rom-properties-kde_UIS}  config/KeyManagerTab.ui)
+ENDIF(ENABLE_DECRYPTION)
+
+IF(ENABLE_NLS)
+	SET(rom-properties-kde_SRCS ${rom-properties-kde_SRCS} GettextTranslator.cpp)
+	SET(rom-properties-kde_H    ${rom-properties-kde_H}    GettextTranslator.hpp)
+ENDIF(ENABLE_NLS)
 
 # Qt options:
 # - Fast QString concatenation. (Qt 4.6+, plus 4.8-specific version)

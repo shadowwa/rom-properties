@@ -21,6 +21,7 @@
 
 #include "WiiUData.hpp"
 
+// C includes.
 #include <stdlib.h>
 
 namespace LibRomData {
@@ -62,7 +63,7 @@ class WiiUDataPrivate {
 		 * @param b
 		 * @return
 		 */
-		static int compar(const void *a, const void *b);
+		static int RP_C_API compar(const void *a, const void *b);
 };
 
 /** WiiUDataPrivate **/
@@ -200,6 +201,7 @@ const WiiUDataPrivate::WiiUDiscPublisher WiiUDataPrivate::disc_publishers_noregi
 	{'ATKx', '00AF'},	// Tank! Tank! Tank!
 	{'ATRx', '0052'},	// Transformers: Prime
 	{'ATWx', '0001'},	// New Super Mario Bros. U + New Super Luigi U
+	// FIXME: Minecraft: Super Mario Mash-Up is AUMxD2.
 	{'AUMx', '00DU'},	// Minecraft: Wii U Edition
 	{'AUNx', '00AF'},	// One Piece: Unlimited World Red
 	{'AURx', '0001'},	// Mario & Sonic at the Sochi 2014 Olympic Winter Games
@@ -222,11 +224,13 @@ const WiiUDataPrivate::WiiUDiscPublisher WiiUDataPrivate::disc_publishers_noregi
 	{'AZBx', '005G'},	// Zumba Fitness World Party
 	{'AZEx', '00WR'},	// Batman: Arkham Origins
 	{'AZUx', '0041'},	// ZombiU
+	{'BA4x', '00WR'},	// Cars 3: Driven to Win
 	{'BAKx', '00TL'},	// Minecraft: Story Mode - The Complete Adventure
 	{'BCZx', '0001'},	// The Legend of Zelda: The Wind Waker HD
 	{'BD3x', '004Q'},	// Disney Infinity 3.0
 	{'BDLx', '00GD'},	// Dragon Quest X Inishie no Ryu no Denshou Online
 	{'BDQx', '00GD'},	// Dragon Quest X All in One Package
+	{'BEDx', '0078'},	// Darksiders - Warmastered Edition
 	{'BENx', '008X'},	// Runbow Deluxe
 	{'BFNx', '00VZ'},	// Adventure Time: Finn & Jake Investigations
 	{'BJ7x', '0041'},	// Just Dance 2017
@@ -328,7 +332,7 @@ const WiiUDataPrivate::WiiUDiscPublisher WiiUDataPrivate::disc_publishers_region
  * @param b
  * @return
  */
-int WiiUDataPrivate::compar(const void *a, const void *b)
+int RP_C_API WiiUDataPrivate::compar(const void *a, const void *b)
 {
 	unsigned int id4_1 = static_cast<const WiiUDiscPublisher*>(a)->id4;
 	unsigned int id4_2 = static_cast<const WiiUDiscPublisher*>(b)->id4;

@@ -82,7 +82,7 @@ class RpPng
 		 * @param img rp_image to save.
 		 * @return 0 on success; negative POSIX error code on error.
 		 */
-		static int save(const rp_char *filename, const rp_image *img);
+		static int save(const char *filename, const rp_image *img);
 
 		/**
 		 * Save an animated image in APNG format to an IRpFile.
@@ -107,7 +107,6 @@ class RpPng
 
 		/**
 		 * Save an animated image in APNG format to a file.
-		 * IRpFile must be open for writing.
 		 *
 		 * If the animated image contains a single frame,
 		 * a standard PNG image will be written.
@@ -121,7 +120,7 @@ class RpPng
 		 * @param iconAnimData Animated image data to save.
 		 * @return 0 on success; negative POSIX error code on error.
 		 */
-		static int save(const rp_char *filename, const IconAnimData *iconAnimData);
+		static int save(const char *filename, const IconAnimData *iconAnimData);
 };
 
 }

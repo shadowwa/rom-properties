@@ -29,9 +29,10 @@ using LibCacheMgr::CacheManager;
 
 // librpbase
 #include "librpbase/RomData.hpp"
+#include "librpbase/TextFuncs.hpp"
 #include "librpbase/img/rp_image.hpp"
-using LibRpBase::RomData;
-using LibRpBase::rp_image;
+#include "librpbase/img/RpPngWriter.hpp"
+using namespace LibRpBase;
 
 // libromdata
 #include "libromdata/RomDataFactory.hpp"
@@ -50,14 +51,35 @@ using LibRomData::TCreateThumbnail;
 
 // C++ includes.
 #include <memory>
+#include <string>
+using std::string;
 using std::unique_ptr;
 
+// Qt includes.
+#include <QtCore/QDateTime>
+#include <QtCore/QFileInfo>
 #include <QtCore/QUrl>
 #include <QtGui/QImage>
+#if QT_VERSION >= QT_VERSION_CHECK(5,0,0)
+#include <QtCore/QMimeDatabase>
+#else
+#include <kmimetype.h>
+#endif
 
 // KDE protocol manager.
 // Used to find the KDE proxy settings.
 #include <kprotocolmanager.h>
+
+// Qt major version.
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+# error Needs updating for Qt6.
+#elif QT_VERSION >= QT_VERSION_CHECK(5,0,0)
+# define QT_MAJOR_STR "5"
+#elif QT_VERSION >= QT_VERSION_CHECK(4,0,0)
+# define QT_MAJOR_STR "4"
+#else
+# error Qt is too old.
+#endif
 
 /**
  * Factory method.
@@ -123,10 +145,18 @@ class RomThumbCreatorPrivate : public TCreateThumbnail<QImage>
 		virtual QImage rescaleImgClass(const QImage &imgClass, const ImgSize &sz) const override final;
 
 		/**
+		 * Get the size of the specified ImgClass.
+		 * @param imgClass	[in] ImgClass object.
+		 * @param pOutSize	[out] Pointer to ImgSize to store the image size.
+		 * @return 0 on success; non-zero on error.
+		 */
+		virtual int getImgClassSize(const QImage &imgClass, ImgSize *pOutSize) const override final;
+
+		/**
 		 * Get the proxy for the specified URL.
 		 * @return Proxy, or empty string if no proxy is needed.
 		 */
-		virtual rp_string proxyForUrl(const rp_string &url) const override final;
+		virtual string proxyForUrl(const string &url) const override final;
 };
 
 /** RomThumbCreatorPrivate **/
@@ -183,19 +213,32 @@ QImage RomThumbCreatorPrivate::rescaleImgClass(const QImage &imgClass, const Img
 }
 
 /**
+ * Get the size of the specified ImgClass.
+ * @param imgClass	[in] ImgClass object.
+ * @param pOutSize	[out] Pointer to ImgSize to store the image size.
+ * @return 0 on success; non-zero on error.
+ */
+int RomThumbCreatorPrivate::getImgClassSize(const QImage &imgClass, ImgSize *pOutSize) const
+{
+	pOutSize->width = imgClass.width();
+	pOutSize->height = imgClass.height();
+	return 0;
+}
+
+/**
  * Get the proxy for the specified URL.
  * @return Proxy, or empty string if no proxy is needed.
  */
-rp_string RomThumbCreatorPrivate::proxyForUrl(const rp_string &url) const
+string RomThumbCreatorPrivate::proxyForUrl(const string &url) const
 {
-	QString proxy = KProtocolManager::proxyForUrl(QUrl(RP2Q(url)));
+	QString proxy = KProtocolManager::proxyForUrl(QUrl(U82Q(url)));
 	if (proxy.isEmpty() || proxy == QLatin1String("DIRECT")) {
 		// No proxy.
-		return rp_string();
+		return string();
 	}
 
 	// Proxy is required..
-	return Q2RP(proxy);
+	return Q2U8(proxy);
 }
 
 /** RomThumbCreator **/
@@ -234,7 +277,7 @@ bool RomThumbCreator::create(const QString &path, int width, int height, QImage 
 	// Assuming width and height are the same.
 	// TODO: What if they aren't?
 	Q_D(RomThumbCreator);
-	int ret = d->getThumbnail(Q2RP(path), width, img);
+	int ret = d->getThumbnail(Q2U8(path), width, img);
 	return (ret == 0);
 }
 
@@ -249,3 +292,183 @@ ThumbCreator::Flags RomThumbCreator::flags(void) const
 	return ThumbCreator::None;
 }
 
+/** CreateThumbnail **/
+
+/**
+ * Thumbnail creator function for wrapper programs.
+ * @param source_file Source file. (UTF-8)
+ * @param output_file Output file. (UTF-8)
+ * @param maximum_size Maximum size.
+ * @return 0 on success; non-zero on error.
+ */
+extern "C"
+Q_DECL_EXPORT int rp_create_thumbnail(const char *source_file, const char *output_file, int maximum_size)
+{
+	// NOTE: TCreateThumbnail() has wrappers for opening the
+	// ROM file and getting RomData*, but we're doing it here
+	// in order to return better error codes.
+
+	// Register RpQImageBackend.
+	// TODO: Static initializer somewhere?
+	rp_image::setBackendCreatorFn(RpQImageBackend::creator_fn);
+
+	// Attempt to open the ROM file.
+	// TODO: RpQFile wrapper.
+	// For now, using RpFile, which is an stdio wrapper.
+	unique_ptr<IRpFile> file(new RpFile(U82RP_cs(source_file), RpFile::FM_OPEN_READ));
+	if (!file || !file->isOpen()) {
+		// Could not open the file.
+		return RPCT_SOURCE_FILE_ERROR;
+	}
+
+	// Get the appropriate RomData class for this ROM.
+	// RomData class *must* support at least one image type.
+	RomData *romData = RomDataFactory::create(file.get(), true);
+	file.reset(nullptr);	// file is dup()'d by RomData.
+	if (!romData) {
+		// ROM is not supported.
+		return RPCT_SOURCE_FILE_NOT_SUPPORTED;
+	}
+
+	// Create the thumbnail.
+	// TODO: If image is larger than maximum_size, resize down.
+	RomThumbCreatorPrivate *d = new RomThumbCreatorPrivate();
+	QImage ret_img;
+	rp_image::sBIT_t sBIT;
+	int ret = d->getThumbnail(romData, maximum_size, ret_img, &sBIT);
+	delete d;
+
+	if (ret != 0 || ret_img.isNull()) {
+		// No image.
+		romData->unref();
+		return RPCT_SOURCE_FILE_NO_IMAGE;
+	}
+
+	// Save the image using RpPngWriter.
+	const int height = ret_img.height();
+
+	/** tEXt chunks. **/
+	// NOTE: These are written before IHDR in order to put the
+	// tEXt chunks before the IDAT chunk.
+
+	// NOTE: QString::toStdString() uses toAscii() in Qt4.
+	// Hence, we'll use toUtf8() manually.
+
+	// Get values for the XDG thumbnail cache text chunks.
+	// KDE uses this order: Software, MTime, Mimetype, Size, URI
+	RpPngWriter::kv_vector kv;
+
+	// Determine the image format.
+	rp_image::Format format;
+	switch (ret_img.format()) {
+		case QImage::Format_Indexed8:
+			format = rp_image::FORMAT_CI8;
+			break;
+		case QImage::Format_ARGB32:
+			format = rp_image::FORMAT_ARGB32;
+			break;
+		default:
+			// Unsupported...
+			assert(!"Unsupported QImage image format.");
+			romData->unref();
+			return RPCT_OUTPUT_FILE_FAILED;
+	}
+
+	RpPngWriter *pngWriter = new RpPngWriter(U82RP_c(output_file),
+		ret_img.width(), height, format);
+	if (!pngWriter->isOpen()) {
+		// Could not open the PNG writer.
+		delete pngWriter;
+		romData->unref();
+		return RPCT_OUTPUT_FILE_FAILED;
+	}
+
+	// Software.
+	static const char sw[] = "ROM Properties Page shell extension (KDE" QT_MAJOR_STR ")";
+	kv.push_back(std::make_pair("Software", sw));
+
+	// Modification time.
+	const QString qs_source_file = U82Q(source_file);
+	QFileInfo fi_src(qs_source_file);
+	int64_t mtime = fi_src.lastModified().toMSecsSinceEpoch() / 1000;
+	if (mtime > 0) {
+		kv.push_back(std::make_pair("Thumb::MTime",
+			string(QString::number(mtime).toUtf8().constData())));
+	}
+
+	// MIME type.
+#if QT_VERSION >= QT_VERSION_CHECK(5,0,0)
+	// Use QMimeDatabase for Qt5.
+	QMimeDatabase mimeDatabase;
+	QMimeType mimeType = mimeDatabase.mimeTypeForFile(fi_src);
+	kv.push_back(std::make_pair("Thumb::Mimetype",
+		string(mimeType.name().toUtf8().constData())));
+#else /* QT_VERSION < QT_VERSION_CHECK(5,0,0) */
+	// Use KMimeType for Qt4.
+	KMimeType::Ptr mimeType = KMimeType::findByPath(qs_source_file, 0, true);
+	if (mimeType) {
+		kv.push_back(std::make_pair("Thumb::Mimetype",
+			string(mimeType->name().toUtf8().constData())));
+	}
+#endif
+
+	// File size.
+	int64_t szFile = fi_src.size();
+	if (szFile > 0) {
+		kv.push_back(std::make_pair("Thumb::Size",
+			string(QString::number(szFile).toUtf8().constData())));
+	}
+
+	// URI.
+	// NOTE: KDE desktops don't urlencode spaces or non-ASCII characters.
+	// GTK+ desktops do urlencode spaces and non-ASCII characters.
+	QUrl url = QUrl::fromLocalFile(fi_src.absoluteFilePath());
+	if (url.isValid() && !url.isEmpty()) {
+		kv.push_back(std::make_pair("Thumb::URI",
+			string(url.toString().toUtf8().constData())));
+	}
+
+	// Write the tEXt chunks.
+	pngWriter->write_tEXt(kv);
+
+	/** IHDR **/
+
+	// CI8 palette.
+	// This will be an empty vector if the image isn't CI8.
+	// RpPngWriter will ignore the palette arguments in that case.
+	QVector<QRgb> colorTable = ret_img.colorTable();
+
+	// If sBIT wasn't found, all fields will be 0.
+	// RpPngWriter will ignore sBIT in this case.
+	int pwRet = pngWriter->write_IHDR(&sBIT,
+		colorTable.constData(), colorTable.size());
+	if (pwRet != 0) {
+		// Error writing IHDR.
+		// TODO: Unlink the PNG image.
+		delete pngWriter;
+		romData->unref();
+		return RPCT_OUTPUT_FILE_FAILED;
+	}
+
+	/** IDAT chunk. **/
+
+	// Initialize the row pointers.
+	unique_ptr<const uint8_t*[]> row_pointers(new const uint8_t*[height]);
+	const uint8_t *bits = ret_img.bits();
+	const int bytesPerLine = ret_img.bytesPerLine();
+	for (int y = 0; y < height; y++, bits += bytesPerLine) {
+		row_pointers[y] = bits;
+	}
+
+	// Write the IDAT section.
+	pwRet = pngWriter->write_IDAT(row_pointers.get());
+	if (pwRet != 0) {
+		// Error writing IDAT.
+		// TODO: Unlink the PNG image.
+		ret = RPCT_OUTPUT_FILE_FAILED;
+	}
+
+	delete pngWriter;
+	romData->unref();
+	return ret;
+}

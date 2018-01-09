@@ -29,6 +29,9 @@
 // libwin32common
 #include "libwin32common/RpWin32_sdk.h"
 
+// Atomic reference counter.
+#include "../threads/Atomics.h"
+
 // References:
 // - https://msdn.microsoft.com/en-us/library/windows/desktop/aa376234%28v=vs.85%29.aspx?f=255&MSPPError=-2147217396
 #include <bcrypt.h>
@@ -54,6 +57,15 @@ class AesCAPI_NG_Private
 		RP_DISABLE_COPY(AesCAPI_NG_Private)
 
 	public:
+		// Reference counter.
+		static volatile int ref_cnt;
+
+		/**
+		 * Load bcrypt.dll and associated function pointers.
+		 * @return 0 on success; non-zero on error.
+		 */
+		static int load_bcrypt(void);
+
 		/** bcrypt.dll handle and function pointers. **/
 		static HMODULE hBcryptDll;
 		static DECL_FUNCPTR(BCryptOpenAlgorithmProvider);
@@ -93,6 +105,9 @@ class AesCAPI_NG_Private
 
 /** AesCAPI_NG_Private **/
 
+// Reference counter.
+volatile int AesCAPI_NG_Private::ref_cnt = 0;
+
 /** bcrypt.dll handle and function pointers. **/
 HMODULE AesCAPI_NG_Private::hBcryptDll = nullptr;
 DEF_FUNCPTR(BCryptOpenAlgorithmProvider);
@@ -116,10 +131,15 @@ AesCAPI_NG_Private::AesCAPI_NG_Private()
 	memset(key, 0, sizeof(key));
 	memset(iv, 0, sizeof(iv));
 
-	if (!hBcryptDll) {
+	// Increment the reference counter.
+	assert(ref_cnt >= 0);
+	if (ATOMIC_INC_FETCH(&ref_cnt) == 1) {
+		// First AesCAPI_NG reference.
 		// Attempt to load bcrypt.dll.
-		if (AesCAPI_NG::isUsable()) {
-			// Failed to load bcrypt.dll.
+		if (load_bcrypt() != 0 || !hBcryptDll) {
+			// Error loading bcrypt.dll.
+			// NOTE: Not resetting the reference count here.
+			// It will be decremented in the destructor.
 			return;
 		}
 	}
@@ -155,40 +175,33 @@ AesCAPI_NG_Private::~AesCAPI_NG_Private()
 		}
 	}
 
-	free(pbKeyObject);
-}
-
-/** AesCAPI_NG **/
-
-AesCAPI_NG::AesCAPI_NG()
-	: d_ptr(new AesCAPI_NG_Private())
-{ }
-
-AesCAPI_NG::~AesCAPI_NG()
-{
-	delete d_ptr;
+	assert(ref_cnt > 0);
+	if (ATOMIC_DEC_FETCH(&ref_cnt) == 0) {
+		// Unload bcrypt.dll.
+		// TODO: Clear the function pointers?
+		if (hBcryptDll) {
+			FreeLibrary(hBcryptDll);
+			hBcryptDll = nullptr;
+		}
+	}
 }
 
 /**
- * Is CryptoAPI NG usable on this system?
- *
- * If CryptoAPI NG is usable, this function will load
- * bcrypt.dll and all required function pointers.
- *
- * @return True if this system supports CryptoAPI NG.
+ * Load bcrypt.dll and associated function pointers.
+ * @return 0 on success; non-zero on error.
  */
-bool AesCAPI_NG::isUsable(void)
+int AesCAPI_NG_Private::load_bcrypt(void)
 {
-	if (AesCAPI_NG_Private::hBcryptDll) {
+	if (hBcryptDll) {
 		// bcrypt.dll has already been loaded.
-		return true;
+		return 0;
 	}
 
 	// Attempt to load bcrypt.dll.
-	HMODULE hBcryptDll = LoadLibrary(L"bcrypt.dll");
+	hBcryptDll = LoadLibrary(L"bcrypt.dll");
 	if (!hBcryptDll) {
 		// bcrypt.dll not found.
-		return false;
+		return -ENOENT;
 	}
 
 	// Load the function pointers.
@@ -222,21 +235,58 @@ bool AesCAPI_NG::isUsable(void)
 		AesCAPI_NG_Private::pBCryptEncrypt = nullptr;
 
 		FreeLibrary(hBcryptDll);
-		return false;
+		return -ENOENT;
 	}
 
 	// bcrypt.dll has been loaded.
-	AesCAPI_NG_Private::hBcryptDll = hBcryptDll;
-	return true;
+	return 0;
+}
+
+/** AesCAPI_NG **/
+
+AesCAPI_NG::AesCAPI_NG()
+	: d_ptr(new AesCAPI_NG_Private())
+{ }
+
+AesCAPI_NG::~AesCAPI_NG()
+{
+	delete d_ptr;
+}
+
+/**
+ * Is CryptoAPI NG usable on this system?
+ *
+ * If CryptoAPI NG is usable, this function will load
+ * bcrypt.dll and all required function pointers.
+ *
+ * @return True if this system supports CryptoAPI NG.
+ */
+bool AesCAPI_NG::isUsable(void)
+{
+	if (AesCAPI_NG_Private::hBcryptDll) {
+		// bcrypt.dll is loaded.
+		return true;
+	}
+
+	// NOTE: We can't call load_bcrypt() due to reference counting,
+	// so assume it works as long as bcrypt.dll is present and
+	// BCryptOpenAlgorithmProvider exists.
+	bool bRet = false;
+	HMODULE hBcryptDll = LoadLibrary(L"bcrypt.dll");
+	if (hBcryptDll) {
+		bRet = (GetProcAddress(hBcryptDll, "BCryptOpenAlgorithmProvider") != nullptr);
+		FreeLibrary(hBcryptDll);
+	}
+	return bRet;
 }
 
 /**
  * Get the name of the AesCipher implementation.
  * @return Name.
  */
-const rp_char *AesCAPI_NG::name(void) const
+const char *AesCAPI_NG::name(void) const
 {
-	return _RP("CryptoAPI NG");
+	return "CryptoAPI NG";
 }
 
 /**
@@ -256,7 +306,7 @@ bool AesCAPI_NG::isInit(void) const
  * @param len Key length, in bytes.
  * @return 0 on success; negative POSIX error code on error.
  */
-int AesCAPI_NG::setKey(const uint8_t *key, unsigned int len)
+int AesCAPI_NG::setKey(const uint8_t *RESTRICT key, unsigned int len)
 {
 	// Acceptable key lengths:
 	// - 16 (AES-128)
@@ -395,7 +445,7 @@ int AesCAPI_NG::setChainingMode(ChainingMode mode)
  * @param len IV/counter length, in bytes.
  * @return 0 on success; negative POSIX error code on error.
  */
-int AesCAPI_NG::setIV(const uint8_t *iv, unsigned int len)
+int AesCAPI_NG::setIV(const uint8_t *RESTRICT iv, unsigned int len)
 {
 	RP_D(AesCAPI_NG);
 	if (!iv || len != 16) {
@@ -439,7 +489,7 @@ int AesCAPI_NG::setIV(const uint8_t *iv, unsigned int len)
  * @param data_len Length of data block.
  * @return Number of bytes decrypted on success; 0 on error.
  */
-unsigned int AesCAPI_NG::decrypt(uint8_t *data, unsigned int data_len)
+unsigned int AesCAPI_NG::decrypt(uint8_t *RESTRICT data, unsigned int data_len)
 {
 	RP_D(AesCAPI_NG);
 	if (!d->hBcryptDll || !d->hAesAlg || !d->hKey) {
@@ -494,18 +544,30 @@ unsigned int AesCAPI_NG::decrypt(uint8_t *data, unsigned int data_len)
 			break;
 
 		case CM_CTR: {
+			// CTR isn't supported by CryptoAPI-NG directly.
 			// Need to decrypt each block manually.
-			uint8_t ctr_crypt[16];
+
+			// Using a union to allow 64-bit XORs
+			// for improved performance.
+			// NOTE: Can't use u128_t, since that's in libromdata. (N3DSVerifyKeys.hpp)
+			union ctr_block {
+				uint8_t u8[16];
+				uint64_t u64[2];
+			};
+
+			// TODO: Verify data alignment.
+			ctr_block ctr_crypt;
+			ctr_block *ctr_data = reinterpret_cast<ctr_block*>(data);
 			ULONG cbTmpResult;
 			cbResult = 0;
-			for (; data_len > 0; data_len -= 16, data += 16) {
+			for (; data_len > 0; data_len -= 16, ctr_data++) {
 				// Encrypt the current counter.
-				memcpy(ctr_crypt, d->iv, sizeof(ctr_crypt));
+				memcpy(ctr_crypt.u8, d->iv, sizeof(ctr_crypt.u8));
 				status = d->pBCryptEncrypt(d->hKey,
-						ctr_crypt, sizeof(ctr_crypt),
+						ctr_crypt.u8, sizeof(ctr_crypt.u8),
 						nullptr,
 						nullptr, 0,
-						ctr_crypt, sizeof(ctr_crypt),
+						ctr_crypt.u8, sizeof(ctr_crypt.u8),
 						&cbTmpResult, 0);
 				if (!NT_SUCCESS(status)) {
 					// Encryption failed.
@@ -514,10 +576,8 @@ unsigned int AesCAPI_NG::decrypt(uint8_t *data, unsigned int data_len)
 				cbResult += cbTmpResult;
 
 				// XOR with the ciphertext.
-				// TODO: Optimized XOR.
-				for (int i = 15; i >= 0; i--) {
-					data[i] ^= ctr_crypt[i];
-				}
+				ctr_data->u64[0] ^= ctr_crypt.u64[0];
+				ctr_data->u64[1] ^= ctr_crypt.u64[1];
 
 				// Increment the counter.
 				for (int i = 15; i >= 0; i--) {
@@ -546,8 +606,8 @@ unsigned int AesCAPI_NG::decrypt(uint8_t *data, unsigned int data_len)
  * @param iv_len Length of the IV/counter.
  * @return Number of bytes decrypted on success; 0 on error.
  */
-unsigned int AesCAPI_NG::decrypt(uint8_t *data, unsigned int data_len,
-	const uint8_t *iv, unsigned int iv_len)
+unsigned int AesCAPI_NG::decrypt(uint8_t *RESTRICT data, unsigned int data_len,
+	const uint8_t *RESTRICT iv, unsigned int iv_len)
 {
 	RP_D(AesCAPI_NG);
 	if (!d->hBcryptDll || !d->hAesAlg || !d->hKey) {

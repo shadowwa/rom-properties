@@ -24,12 +24,14 @@
 #include "rp_image_backend.hpp"
 
 #include "common.h"
+#include "aligned_malloc.h"
 
 // C includes.
 #include <stdlib.h>
 
 // C includes. (C++ namespace)
 #include <cassert>
+#include <cstring>
 
 // Workaround for RP_D() expecting the no-underscore, UpperCamelCase naming convention.
 #define rp_imagePrivate rp_image_private
@@ -94,7 +96,15 @@ rp_image_backend_default::rp_image_backend_default(int width, int height, rp_ima
 	, m_palette(nullptr)
 	, m_palette_len(0)
 {
+	if (width == 0 || height == 0) {
+		// Error initializing the backend.
+		// (Width, height, or format is probably broken.)
+		return;
+	}
+
 	// Allocate memory for the image.
+	// We're using the full stride for the last row
+	// to make it easier to manage.
 	m_data_len = height * stride;
 	assert(m_data_len > 0);
 	if (m_data_len == 0) {
@@ -103,7 +113,7 @@ rp_image_backend_default::rp_image_backend_default(int width, int height, rp_ima
 		return;
 	}
 
-	m_data = malloc(m_data_len);
+	m_data = aligned_malloc(16, m_data_len);
 	assert(m_data != nullptr);
 	if (!m_data) {
 		// Failed to allocate memory.
@@ -116,10 +126,11 @@ rp_image_backend_default::rp_image_backend_default(int width, int height, rp_ima
 		// Palette is initialized to 0 to ensure
 		// there's no weird artifacts if the caller
 		// is converting a lower-color image.
-		m_palette = (uint32_t*)calloc(256, sizeof(*m_palette));
+		const size_t palette_sz = 256*sizeof(*m_palette);
+		m_palette = static_cast<uint32_t*>(aligned_malloc(16, palette_sz));
 		if (!m_palette) {
 			// Failed to allocate memory.
-			free(m_data);
+			aligned_free(m_data);
 			m_data = nullptr;
 			m_data_len = 0;
 			clear_properties();
@@ -127,14 +138,15 @@ rp_image_backend_default::rp_image_backend_default(int width, int height, rp_ima
 		}
 
 		// 256 colors allocated in the palette.
+		memset(m_palette, 0, palette_sz);
 		m_palette_len = 256;
 	}
 }
 
 rp_image_backend_default::~rp_image_backend_default()
 {
-	free(m_data);
-	free(m_palette);
+	aligned_free(m_data);
+	aligned_free(m_palette);
 }
 
 /** rp_image_private **/
@@ -152,7 +164,11 @@ rp_image::rp_image_backend_creator_fn rp_image_private::backend_fn = nullptr;
  * @param format Image format.
  */
 rp_image_private::rp_image_private(int width, int height, rp_image::Format format)
+	: has_sBIT(false)
 {
+	// Clear the metadata.
+	memset(&sBIT, 0, sizeof(sBIT));
+
 	if (width <= 0 || height <= 0 ||
 	    (format != rp_image::FORMAT_CI8 && format != rp_image::FORMAT_ARGB32))
 	{
@@ -178,7 +194,12 @@ rp_image_private::rp_image_private(int width, int height, rp_image::Format forma
  */
 rp_image_private::rp_image_private(rp_image_backend *backend)
 	: backend(backend)
-{ }
+	, has_sBIT(false)
+{
+	// Clear the metadata.
+	// TODO: Store sBIT in the backend and copy it?
+	memset(&sBIT, 0, sizeof(sBIT));
+}
 
 rp_image_private::~rp_image_private()
 {
@@ -290,13 +311,36 @@ bool rp_image::isSquare(void) const
 }
 
 /**
- * Get the number of bytes per line.
+ * Get the total number of bytes per line.
+ * This includes memory alignment padding.
  * @return Bytes per line.
  */
 int rp_image::stride(void) const
 {
 	RP_D(const rp_image);
 	return d->backend->stride;
+}
+
+/**
+ * Get the number of active bytes per line.
+ * This does not include memory alignment padding.
+ * @return Number of active bytes per line.
+ */
+int rp_image::row_bytes(void) const
+{
+	RP_D(const rp_image);
+	switch (d->backend->format) {
+		case FORMAT_CI8:
+			return d->backend->width;
+		case rp_image::FORMAT_ARGB32:
+			return d->backend->width * sizeof(uint32_t);
+		default:
+			assert(!"Unsupported rp_image::Format.");
+			break;
+	}
+
+	// Should not get here...
+	return 0;
 }
 
 /**
@@ -363,7 +407,7 @@ void *rp_image::scanLine(int i)
 
 /**
  * Get the image data size, in bytes.
- * This is width * height * pixel size.
+ * This is height * stride.
  * @return Image data size, in bytes.
  */
 size_t rp_image::data_len(void) const
@@ -441,22 +485,67 @@ void rp_image::set_tr_idx(int tr_idx)
 * @param format Format.
 * @return String containing the user-friendly name of a format.
 */
-const rp_char *rp_image::getFormatName(Format format)
+const char *rp_image::getFormatName(Format format)
 {
 	assert(format >= FORMAT_NONE && format < FORMAT_LAST);
 	if (format < FORMAT_NONE || format >= FORMAT_LAST) {
 		return nullptr;
 	}
 
-	static const rp_char *format_names[] = {
-		_RP("None"),
-		_RP("CI8"),
-		_RP("ARGB32"),
+	static const char *format_names[] = {
+		"None",
+		"CI8",
+		"ARGB32",
 	};
 	static_assert(ARRAY_SIZE(format_names) == FORMAT_LAST,
 		"format_names[] needs to be updated.");
 
 	return format_names[format];
+}
+
+/** Metadata. **/
+
+/**
+ * Set the number of significant bits per channel.
+ * @param sBIT	[in] sBIT_t struct.
+ */
+void rp_image::set_sBIT(const sBIT_t *sBIT)
+{
+	RP_D(rp_image);
+	if (sBIT) {
+		d->sBIT = *sBIT;
+		d->has_sBIT = true;
+	} else {
+		d->has_sBIT = false;
+	}
+}
+
+/**
+ * Get the number of significant bits per channel.
+ * @param sBIT	[out,opt] sBIT_t struct.
+ * @return 0 on success; non-zero if not set or error.
+ */
+int rp_image::get_sBIT(sBIT_t *sBIT) const
+{
+	RP_D(const rp_image);
+	assert(sBIT != nullptr);
+	if (!d->has_sBIT) {
+		// sBIT data isn't set.
+		return -ENOENT;
+	}
+	if (sBIT) {
+		*sBIT = d->sBIT;
+	}
+	return 0;
+}
+
+/**
+ * Clear the sBIT data.
+ */
+void rp_image::clear_sBIT(void)
+{
+	RP_D(rp_image);
+	d->has_sBIT = false;
 }
 
 }

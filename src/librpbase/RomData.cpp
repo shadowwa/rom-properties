@@ -19,19 +19,25 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
  ***************************************************************************/
 
+#include "config.librpbase.h"
+
 #include "RomData.hpp"
 #include "RomData_p.hpp"
 
 #include "TextFuncs.hpp"
 #include "file/IRpFile.hpp"
-#include "img/rp_image.hpp"
-#include "img/IconAnimData.hpp"
+#include "threads/Atomics.h"
+#include "libi18n/i18n.h"
 
 // C includes. (C++ namespace)
 #include <cassert>
+#include <cerrno>
+#include <ctime>
 
 // C++ includes.
+#include <string>
 #include <vector>
+using std::string;
 using std::vector;
 
 namespace LibRpBase {
@@ -48,13 +54,16 @@ namespace LibRpBase {
  */
 RomDataPrivate::RomDataPrivate(RomData *q, IRpFile *file)
 	: q_ptr(q)
-	, ref_count(1)
+	, ref_cnt(1)
 	, isValid(false)
 	, file(nullptr)
 	, fields(new RomFields())
 	, className(nullptr)
 	, fileType(RomData::FTYPE_ROM_IMAGE)
 {
+	// Initialize i18n.
+	rp_i18n_init();
+
 	if (!file)
 		return;
 
@@ -90,11 +99,8 @@ static inline int calc_frac_part(int64_t size, int64_t mask)
  * @param size File size.
  * @return Formatted file size.
  */
-rp_string RomDataPrivate::formatFileSize(int64_t size)
+string RomDataPrivate::formatFileSize(int64_t size)
 {
-	// TODO: Thousands formatting?
-	char buf[64];
-
 	const char *suffix;
 	// frac_part is always 0 to 100.
 	// If whole_part >= 10, frac_part is divided by 10.
@@ -104,43 +110,53 @@ rp_string RomDataPrivate::formatFileSize(int64_t size)
 	// TODO: Localize this?
 	if (size < 0) {
 		// Invalid size. Print the value as-is.
-		suffix = "";
+		suffix = nullptr;
 		whole_part = (int)size;
 		frac_part = 0;
 	} else if (size < (2LL << 10)) {
-		suffix = (size == 1 ? " byte" : " bytes");
+		// tr: Bytes (< 1,024)
+		suffix = NC_("RomData|FileSize", "byte", "bytes", (int)size);
 		whole_part = (int)size;
 		frac_part = 0;
 	} else if (size < (2LL << 20)) {
-		suffix = " KB";
+		// tr: Kilobytes
+		suffix = C_("RomData|FileSize", "KB");
 		whole_part = (int)(size >> 10);
 		frac_part = calc_frac_part(size, (1LL << 10));
 	} else if (size < (2LL << 30)) {
-		suffix = " MB";
+		// tr: Megabytes
+		suffix = C_("RomData|FileSize", "MB");
 		whole_part = (int)(size >> 20);
 		frac_part = calc_frac_part(size, (1LL << 20));
 	} else if (size < (2LL << 40)) {
-		suffix = " GB";
+		// tr: Gigabytes
+		suffix = C_("RomData|FileSize", "GB");
 		whole_part = (int)(size >> 30);
 		frac_part = calc_frac_part(size, (1LL << 30));
 	} else if (size < (2LL << 50)) {
-		suffix = " TB";
+		// tr: Terabytes
+		suffix = C_("RomData|FileSize", "TB");
 		whole_part = (int)(size >> 40);
 		frac_part = calc_frac_part(size, (1LL << 40));
 	} else if (size < (2LL << 60)) {
-		suffix = " PB";
+		// tr: Petabytes
+		suffix = C_("RomData|FileSize", "PB");
 		whole_part = (int)(size >> 50);
 		frac_part = calc_frac_part(size, (1LL << 50));
 	} else /*if (size < (2ULL << 70))*/ {
-		suffix = " EB";
+		// tr: Exabytes
+		suffix = C_("RomData|FileSize", "EB");
 		whole_part = (int)(size >> 60);
 		frac_part = calc_frac_part(size, (1LL << 60));
 	}
 
-	int len;
 	if (size < (2LL << 10)) {
 		// Bytes or negative value. No fractional part.
-		len = snprintf(buf, sizeof(buf), "%d%s", whole_part, suffix);
+		if (suffix) {
+			return rp_sprintf("%d %s", whole_part, suffix);
+		} else {
+			return rp_sprintf("%d", whole_part);
+		}
 	} else {
 		// TODO: Localized decimal point?
 		int frac_digits = 2;
@@ -150,13 +166,18 @@ rp_string RomDataPrivate::formatFileSize(int64_t size)
 			frac_part += round_adj;
 			frac_digits = 1;
 		}
-		len = snprintf(buf, sizeof(buf), "%d.%0*d%s",
-			whole_part, frac_digits, frac_part, suffix);
+		if (suffix) {
+			return rp_sprintf("%d.%0*d %s",
+				whole_part, frac_digits, frac_part, suffix);
+		} else {
+			return rp_sprintf("%d.%0*d",
+				whole_part, frac_digits, frac_part);
+		}
 	}
 
-	if (len > (int)sizeof(buf))
-		len = (int)sizeof(buf);
-	return (len > 0 ? latin1_to_rp_string(buf, len) : _RP(""));
+	// Should not get here...
+	assert(!"Invalid code path.");
+	return "QUACK";
 }
 
 /**
@@ -169,19 +190,13 @@ rp_string RomDataPrivate::formatFileSize(int64_t size)
  * TODO: PAL multi-region selection?
  * @return GameTDB URL.
  */
-LibRpBase::rp_string RomDataPrivate::getURL_GameTDB(
+string RomDataPrivate::getURL_GameTDB(
 	const char *system, const char *type,
 	const char *region, const char *gameID,
 	const char *ext)
 {
-	char buf[128];
-	int len = snprintf(buf, sizeof(buf), "http://art.gametdb.com/%s/%s/%s/%s%s",
-			system, type, region, gameID, ext);
-	if (len > (int)sizeof(buf))
-		len = sizeof(buf);	// TODO: Handle truncation better.
-
-	// TODO: UTF-8, not Latin-1?
-	return (len > 0 ? latin1_to_rp_string(buf, len) : _RP(""));
+	return rp_sprintf("http://art.gametdb.com/%s/%s/%s/%s%s",
+		system, type, region, gameID, ext);
 }
 
 /**
@@ -194,19 +209,13 @@ LibRpBase::rp_string RomDataPrivate::getURL_GameTDB(
  * TODO: PAL multi-region selection?
  * @return GameTDB cache key.
  */
-LibRpBase::rp_string RomDataPrivate::getCacheKey_GameTDB(
+string RomDataPrivate::getCacheKey_GameTDB(
 	const char *system, const char *type,
 	const char *region, const char *gameID,
 	const char *ext)
 {
-	char buf[128];
-	int len = snprintf(buf, sizeof(buf), "%s/%s/%s/%s%s",
-			system, type, region, gameID, ext);
-	if (len > (int)sizeof(buf))
-		len = sizeof(buf);	// TODO: Handle truncation better.
-
-	// TODO: UTF-8, not Latin-1?
-	return (len > 0 ? latin1_to_rp_string(buf, len) : _RP(""));
+	return rp_sprintf("%s/%s/%s/%s%s",
+		system, type, region, gameID, ext);
 }
 
 /**
@@ -273,7 +282,7 @@ const RomData::ImageSizeDef *RomDataPrivate::selectBestSize(const std::vector<Ro
 		// Found a match already.
 		return ret;
 	}
-	for (auto iter = sizeDefs.begin()+1; iter != sizeDefs.end(); ++iter) {
+	for (auto iter = sizeDefs.cbegin()+1; iter != sizeDefs.cend(); ++iter) {
 		const RomData::ImageSizeDef *sizeDef = &(*iter);
 		const int szchk = std::max(sizeDef->width, sizeDef->height);
 		if (sz >= size) {
@@ -302,6 +311,59 @@ const RomData::ImageSizeDef *RomDataPrivate::selectBestSize(const std::vector<Ro
 	}
 
 	return ret;
+}
+
+/**
+ * Convert an ASCII release date in YYYYMMDD format to Unix time_t.
+ * This format is used by Sega Saturn and Dreamcast.
+ * @param ascii_date ASCII release date. (Must be 8 characters.)
+ * @return Unix time_t, or -1 on error.
+ */
+time_t RomDataPrivate::ascii_yyyymmdd_to_unix_time(const char *ascii_date)
+{
+	// Release date format: "YYYYMMDD"
+
+	// Convert the date to an unsigned integer first.
+	unsigned int ymd = 0;
+	for (unsigned int i = 0; i < 8; i++) {
+		if (unlikely(!isdigit(ascii_date[i]))) {
+			// Invalid digit.
+			return -1;
+		}
+		ymd *= 10;
+		ymd += (ascii_date[i] & 0xF);
+	}
+
+	// Sanity checks:
+	// - Must be higher than 19000101.
+	// - Must be lower than 99991231.
+	if (unlikely(ymd < 19000101 || ymd > 99991231)) {
+		// Invalid date.
+		return -1;
+	}
+
+	// Convert to Unix time.
+	// NOTE: struct tm has some oddities:
+	// - tm_year: year - 1900
+	// - tm_mon: 0 == January
+	struct tm ymdtime;
+
+	ymdtime.tm_year = (ymd / 10000) - 1900;
+	ymdtime.tm_mon  = ((ymd / 100) % 100) - 1;
+	ymdtime.tm_mday = ymd % 100;
+
+	// Time portion is empty.
+	ymdtime.tm_hour = 0;
+	ymdtime.tm_min = 0;
+	ymdtime.tm_sec = 0;
+
+	// tm_wday and tm_yday are output variables.
+	ymdtime.tm_wday = 0;
+	ymdtime.tm_yday = 0;
+	ymdtime.tm_isdst = 0;
+
+	// If conversion fails, this will return -1.
+	return timegm(&ymdtime);
 }
 
 /** RomData **/
@@ -356,22 +418,20 @@ RomData::~RomData()
  */
 LibRpBase::RomData *RomData::ref(void)
 {
-	// TODO: Atomic addition.
 	RP_D(RomData);
-	++d->ref_count;
+	ATOMIC_INC_FETCH(&d->ref_cnt);
 	return this;
 }
 
 /**
  * Unreference this RomData* object.
- * If ref_count reaches 0, the RomData* object is deleted.
+ * If ref_cnt reaches 0, the RomData* object is deleted.
  */
 void RomData::unref(void)
 {
-	// TODO: Atomic subtraction.
 	RP_D(RomData);
-	assert(d->ref_count > 0);
-	if (--d->ref_count <= 0) {
+	assert(d->ref_cnt > 0);
+	if (ATOMIC_DEC_FETCH(&d->ref_cnt) <= 0) {
 		// All references removed.
 		delete this;
 	}
@@ -432,7 +492,7 @@ RomData::FileType RomData::fileType(void) const
  * Get the general file type as a string.
  * @return General file type as a string, or nullptr if unknown.
  */
-const rp_char *RomData::fileType_string(void) const
+const char *RomData::fileType_string(void) const
 {
 	RP_D(const RomData);
 	assert(d->fileType >= FTYPE_UNKNOWN && d->fileType < FTYPE_LAST);
@@ -440,30 +500,54 @@ const rp_char *RomData::fileType_string(void) const
 		return nullptr;
 	}
 
-	static const rp_char *const fileType_names[] = {
-		nullptr,			// FTYPE_UNKNOWN
-		_RP("ROM Image"),		// FTYPE_ROM_IMAGE
-		_RP("Disc Image"),		// FTYPE_DISC_IMAGE
-		_RP("Save File"),		// FTYPE_SAVE_FILE
-		_RP("Embedded Disc Image"),	// FTYPE_EMBEDDED_DISC_IMAGE
-		_RP("Application Package"),	// FTYPE_APPLICATION_PACKAGE
-		_RP("NFC Dump"),		// FTYPE_NFC_DUMP
-		_RP("Disk Image"),		// FTYPE_DISK_IMAGE
-		_RP("Executable"),		// FTYPE_EXECUTABLE
-		_RP("Dynamic Link Library"),	// FTYPE_DLL
-		_RP("Device Driver"),		// FTYPE_DEVICE_DRIVER
-		_RP("Resource Library"),	// FTYPE_RESOURCE_LIBRARY
-		_RP("Icon File"),		// FTYPE_ICON_FILE
-		_RP("Banner File"),		// FTYPE_BANNER_FILE
-		_RP("Homebrew Application"),	// FTYPE_HOMEBREW
-		_RP("eMMC Dump"),		// FTYPE_EMMC_DUMP
-		_RP("Title Contents"),		// FTYPE_TITLE_CONTENTS
-		_RP("Firmware Binary"),		// FTYPE_FIRMWARE_BINARY
+	static const char *const fileType_names[] = {
+		// FTYPE_UNKNOWN
+		nullptr,
+		// tr: FTYPE_ROM_IMAGE
+		NOP_C_("RomData|FileType", "ROM Image"),
+		// tr: FTYPE_DISC_IMAGE
+		NOP_C_("RomData|FileType", "Disc Image"),
+		// tr: FTYPE_SAVE_FILE
+		NOP_C_("RomData|FileType", "Save File"),
+		// tr: FTYPE_EMBEDDED_DISC_IMAGE
+		NOP_C_("RomData|FileType", "Embedded Disc Image"),
+		// tr: FTYPE_APPLICATION_PACKAGE
+		NOP_C_("RomData|FileType", "Application Package"),
+		// tr: FTYPE_NFC_DUMP
+		NOP_C_("RomData|FileType", "NFC Dump"),
+		// tr: FTYPE_DISK_IMAGE
+		NOP_C_("RomData|FileType", "Disk Image"),
+		// tr: FTYPE_EXECUTABLE
+		NOP_C_("RomData|FileType", "Executable"),
+		// tr: FTYPE_DLL
+		NOP_C_("RomData|FileType", "Dynamic Link Library"),
+		// tr: FTYPE_DEVICE_DRIVER
+		NOP_C_("RomData|FileType", "Device Driver"),
+		// tr: FTYPE_RESOURCE_LIBRARY
+		NOP_C_("RomData|FileType", "Resource Library"),
+		// tr: FTYPE_ICON_FILE
+		NOP_C_("RomData|FileType", "Icon File"),
+		// tr: FTYPE_BANNER_FILE
+		NOP_C_("RomData|FileType", "Banner File"),
+		// tr: FTYPE_HOMEBREW
+		NOP_C_("RomData|FileType", "Homebrew Application"),
+		// tr: FTYPE_EMMC_DUMP
+		NOP_C_("RomData|FileType", "eMMC Dump"),
+		// tr: FTYPE_TITLE_CONTENTS
+		NOP_C_("RomData|FileType", "Title Contents"),
+		// tr: FTYPE_FIRMWARE_BINARY
+		NOP_C_("RomData|FileType", "Firmware Binary"),
+		// tr: FTYPE_TEXTURE_FILE
+		NOP_C_("RomData|FileType", "Texture File"),
 	};
 	static_assert(ARRAY_SIZE(fileType_names) == FTYPE_LAST,
 		"fileType_names[] needs to be updated.");
-
-	return fileType_names[d->fileType];
+ 
+	const char *const fileType = fileType_names[d->fileType];
+	if (fileType != nullptr) {
+		return dpgettext_expr(RP_I18N_DOMAIN, "RomData|FileType", fileType);
+	}
+	return nullptr;
 }
 
 /**
@@ -505,8 +589,8 @@ std::vector<RomData::ImageSizeDef> RomData::supportedImageSizes(ImageType imageT
  */
 uint32_t RomData::imgpf(ImageType imageType) const
 {
-	assert(imageType >= IMG_EXT_MIN && imageType <= IMG_EXT_MAX);
-	if (imageType < IMG_EXT_MIN || imageType > IMG_EXT_MAX) {
+	assert(imageType >= IMG_INT_MIN && imageType <= IMG_EXT_MAX);
+	if (imageType < IMG_INT_MIN || imageType > IMG_EXT_MAX) {
 		// ImageType is out of range.
 		return 0;
 	}
@@ -625,12 +709,12 @@ int RomData::extURLs(ImageType imageType, vector<ExtURL> *pExtURLs, int size) co
  * @param size Size of HTML data.
  * @return Image URL, or empty string if not found or not supported.
  */
-rp_string RomData::scrapeImageURL(const char *html, size_t size) const
+string RomData::scrapeImageURL(const char *html, size_t size) const
 {
 	// Not supported in the base class.
 	RP_UNUSED(html);
 	RP_UNUSED(size);
-	return rp_string();
+	return string();
 }
 
 /**
@@ -638,28 +722,41 @@ rp_string RomData::scrapeImageURL(const char *html, size_t size) const
 * @param imageType Image type.
 * @return String containing user-friendly name of an image type.
 */
-const rp_char *RomData::getImageTypeName(ImageType imageType) {
+const char *RomData::getImageTypeName(ImageType imageType) {
 	assert(imageType >= IMG_INT_MIN && imageType <= IMG_EXT_MAX);
 	if (imageType < IMG_INT_MIN || imageType > IMG_EXT_MAX) {
 		return nullptr;
 	}
 
-	static const rp_char *const image_type_names[] = {
-		// Internal
-		_RP("Internal icon"),				// IMG_INT_ICON
-		_RP("Internal banner"),				// IMG_INT_BANNER
-		_RP("Internal media scan"),			// IMG_INT_MEDIA
-		// External
-		_RP("External media scan"),			// IMG_EXT_MEDIA
-		_RP("External cover scan"),			// IMG_EXT_COVER
-		_RP("External cover scan (3D version)"),	// IMG_EXT_COVER_3D
-		_RP("External cover scan (front and back)"),	// IMG_EXT_COVER_FULL
-		_RP("External box scan"),			// IMG_EXT_BOX
-	};
-	static_assert(ARRAY_SIZE(image_type_names) == IMG_EXT_MAX + 1,
-		"image_type_names[] needs to be updated.");
+	static const char *const imageType_names[] = {
+		/** Internal **/
 
-	return image_type_names[imageType];
+		// tr: IMG_INT_ICON
+		NOP_C_("RomData|ImageType", "Internal icon"),
+		// tr: IMG_INT_BANNER
+		NOP_C_("RomData|ImageType", "Internal banner"),
+		// tr: IMG_INT_MEDIA
+		NOP_C_("RomData|ImageType", "Internal media scan"),
+		// tr: IMG_INT_IMAGE
+		NOP_C_("RomData|ImageType", "Internal image"),
+
+		/** External **/
+
+		// tr: IMG_EXT_MEDIA
+		NOP_C_("RomData|ImageType", "External media scan"),
+		// tr: IMG_EXT_COVER
+		NOP_C_("RomData|ImageType", "External cover scan"),
+		// tr: IMG_EXT_COVER_3D
+		NOP_C_("RomData|ImageType", "External cover scan (3D version)"),
+		// tr: IMG_EXT_COVER_FULL
+		NOP_C_("RomData|ImageType", "External cover scan (front and back)"),
+		// tr: IMG_EXT_BOX
+		NOP_C_("RomData|ImageType", "External box scan"),
+	};
+	static_assert(ARRAY_SIZE(imageType_names) == IMG_EXT_MAX + 1,
+		"imageType_names[] needs to be updated.");
+
+	return dpgettext_expr(RP_I18N_DOMAIN, "RomData|ImageType", imageType_names[imageType]);
 }
 
 /**

@@ -33,7 +33,6 @@
 #include "stdafx.h"
 #include "config.version.h"
 
-#include "RP_ComBase.hpp"
 #include "RP_ExtractIcon.hpp"
 #include "RP_ClassFactory.hpp"
 #include "RP_ExtractImage.hpp"
@@ -41,6 +40,7 @@
 #include "RP_ThumbnailProvider.hpp"
 
 // libwin32common
+#include "libwin32common/ComBase.hpp"
 #include "libwin32common/RegKey.hpp"
 using LibWin32Common::RegKey;
 
@@ -63,12 +63,11 @@ using LibRomData::RomDataFactory;
 #include <vector>
 #include <list>
 using std::list;
+using std::string;
 using std::unique_ptr;
 using std::vector;
 using std::wstring;
 
-extern HINSTANCE g_hInstance;
-HINSTANCE g_hInstance = nullptr;
 extern wchar_t dll_filename[];
 wchar_t dll_filename[MAX_PATH];
 
@@ -87,12 +86,9 @@ BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD dwReason, LPVOID /*lpReserved*/)
 {
 	switch (dwReason) {
 		case DLL_PROCESS_ATTACH: {
-			// DLL loaded by a process.
-			g_hInstance = hInstance;
-
 			// Get the DLL filename.
 			SetLastError(ERROR_SUCCESS);
-			DWORD dwResult = GetModuleFileName(g_hInstance,
+			DWORD dwResult = GetModuleFileName(hInstance,
 				dll_filename, ARRAY_SIZE(dll_filename));
 			if (dwResult == 0 || GetLastError() != ERROR_SUCCESS) {
 				// Cannot get the DLL filename.
@@ -134,7 +130,7 @@ BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD dwReason, LPVOID /*lpReserved*/)
  */
 STDAPI DllCanUnloadNow(void)
 {
-	return (RP_ComBase_isReferenced() ? S_FALSE : S_OK);
+	return (LibWin32Common::ComBase_isReferenced() ? S_FALSE : S_OK);
 }
 
 /**
@@ -329,7 +325,7 @@ static LONG UnregisterFileType(RegKey &hkcr, const RomDataFactory::ExtInfo &extI
  * @param ext File extension.
  * @return Overridden file association ProgID, or empty string if none.
  */
-static wstring GetUserFileAssoc(const wstring &sid, const rp_char *ext)
+static wstring GetUserFileAssoc(const wstring &sid, const char *ext)
 {
 	// Check if the user has already associated this file extension.
 	// TODO: Check all users.
@@ -396,8 +392,9 @@ static LONG RegisterUserFileType(const wstring &sid, const RomDataFactory::ExtIn
 	}
 
 	// Use an ExtInfo with the progID instead of the extension.
+	string progID_u8 = W2U8(progID);
 	const RomDataFactory::ExtInfo progID_info = {
-		(const rp_char*)progID.c_str(),
+		progID_u8.c_str(),
 		ext_info.hasThumbnail
 	};
 
@@ -474,8 +471,9 @@ static LONG UnregisterUserFileType(const wstring &sid, const RomDataFactory::Ext
 	}
 
 	// Use an ExtInfo with the progID instead of the extension.
+	string progID_u8 = W2U8(progID);
 	const RomDataFactory::ExtInfo progID_info = {
-		(const rp_char*)progID.c_str(),
+		progID_u8.c_str(),
 		ext_info.hasThumbnail
 	};
 
@@ -699,7 +697,7 @@ STDAPI DllGetVersion(_Out_ DLLVERSIONINFO2 *pdvi)
 	pdvi->info1.dwMajorVersion = RP_VERSION_MAJOR;
 	pdvi->info1.dwMinorVersion = RP_VERSION_MINOR;
 	pdvi->info1.dwBuildNumber = RP_VERSION_PATCH;	// Not technically a build number...
-	pdvi->info1.dwBuildNumber = DLLVER_PLATFORM_NT;	// TODO: 9x?
+	pdvi->info1.dwPlatformID = DLLVER_PLATFORM_NT;	// TODO: 9x?
 
 	if (pdvi->info1.cbSize >= sizeof(DLLVERSIONINFO2)) {
 		// DLLVERSIONINFO2

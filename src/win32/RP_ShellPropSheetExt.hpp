@@ -30,7 +30,7 @@
 // - http://www.codeproject.com/Articles/338268/COM-in-C
 // - https://code.msdn.microsoft.com/windowsapps/CppShellExtPropSheetHandler-d93b49b7
 // - https://msdn.microsoft.com/en-us/library/ms677109(v=vs.85).aspx
-#include "RP_ComBase.hpp"
+#include "libwin32common/ComBase.hpp"
 
 namespace LibWin32Common {
 	class RegKey;
@@ -47,14 +47,14 @@ extern "C" {
 class RP_ShellPropSheetExt_Private;
 
 class UUID_ATTR("{2443C158-DF7C-4352-B435-BC9F885FFD52}")
-RP_ShellPropSheetExt : public RP_ComBase2<IShellExtInit, IShellPropSheetExt>
+RP_ShellPropSheetExt : public LibWin32Common::ComBase2<IShellExtInit, IShellPropSheetExt>
 {
 	public:
 		RP_ShellPropSheetExt();
 		virtual ~RP_ShellPropSheetExt();
 
 	private:
-		typedef RP_ComBase2<IShellExtInit, IShellPropSheetExt> super;
+		typedef LibWin32Common::ComBase2<IShellExtInit, IShellPropSheetExt> super;
 		RP_DISABLE_COPY(RP_ShellPropSheetExt)
 	private:
 		friend class RP_ShellPropSheetExt_Private;
@@ -123,32 +123,6 @@ RP_ShellPropSheetExt : public RP_ComBase2<IShellExtInit, IShellPropSheetExt>
 		// IShellPropSheetExt
 		IFACEMETHODIMP AddPages(LPFNADDPROPSHEETPAGE pfnAddPage, LPARAM lParam) override final;
 		IFACEMETHODIMP ReplacePage(UINT uPageID, LPFNADDPROPSHEETPAGE pfnReplaceWith, LPARAM lParam) override final;
-
-	protected:
-		// Property sheet callback functions.
-		static INT_PTR CALLBACK DlgProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
-		static UINT CALLBACK CallbackProc(HWND hWnd, UINT uMsg, LPPROPSHEETPAGE ppsp);
-
-		// Subclass procedure for ES_MULTILINE EDIT controls.
-		static LRESULT CALLBACK MultilineEditProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
-
-		/**
-		 * Animated icon timer.
-		 * @param hWnd
-		 * @param uMsg
-		 * @param idEvent
-		 * @param dwTime
-		 */
-		static void CALLBACK AnimTimerProc(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
-
-		/**
-		 * Dialog procedure for subtabs.
-		 * @param hWnd
-		 * @param uMsg
-		 * @param wParam
-		 * @param lParam
-		 */
-		static INT_PTR CALLBACK SubtabDlgProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 };
 
 #ifdef __CRT_UUID_DECL

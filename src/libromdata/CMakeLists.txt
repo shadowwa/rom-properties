@@ -2,26 +2,41 @@ PROJECT(libromdata)
 
 # Sources.
 SET(libromdata_SRCS
-	MegaDrive.cpp
-	MegaDriveRegions.cpp
-	GameCube.cpp
-	NintendoDS.cpp
 	RomDataFactory.cpp
-	DMG.cpp
-	GameBoyAdvance.cpp
-	GameCubeSave.cpp
-	N64.cpp
-	SNES.cpp
-	DreamcastSave.cpp
-	PlayStationSave.cpp
-	VirtualBoy.cpp
-	Amiibo.cpp
-	NES.cpp
-	EXE.cpp
-	WiiU.cpp
-	Nintendo3DS.cpp
-	Nintendo3DSFirm.cpp
-	data/MegaDrivePublishers.cpp
+
+	Console/MegaDrive.cpp
+	Console/MegaDriveRegions.cpp
+	Console/Dreamcast.cpp
+	Console/DreamcastSave.cpp
+	Console/GameCube.cpp
+	Console/GameCubeSave.cpp
+	Console/N64.cpp
+	Console/NES.cpp
+	Console/Sega8Bit.cpp
+	Console/SegaSaturn.cpp
+	Console/SNES.cpp
+	Console/PlayStationSave.cpp
+	Console/WiiU.cpp
+
+	Handheld/DMG.cpp
+	Handheld/Lynx.cpp
+	Handheld/GameBoyAdvance.cpp
+	Handheld/Nintendo3DS.cpp
+	Handheld/Nintendo3DSFirm.cpp
+	Handheld/NintendoDS.cpp
+	Handheld/VirtualBoy.cpp
+
+	Texture/DirectDrawSurface.cpp
+	Texture/KhronosKTX.cpp
+	Texture/SegaPVR.cpp
+	Texture/ValveVTF.cpp
+	Texture/ValveVTF3.cpp
+
+	Other/Amiibo.cpp
+	Other/EXE.cpp
+	Other/NintendoBadge.cpp
+
+	data/SegaPublishers.cpp
 	data/NintendoPublishers.cpp
 	data/AmiiboData.cpp
 	data/WiiSystemMenuVersion.cpp
@@ -29,6 +44,9 @@ SET(libromdata_SRCS
 	data/EXEData.cpp
 	data/WiiUData.cpp
 	data/Nintendo3DSFirmData.cpp
+	data/Nintendo3DSSysTitles.cpp
+	data/NintendoLanguage.cpp
+	data/GLenumStrings.cpp
 	#img/TCreateThumbnail.cpp	# NOT listed here due to template stuff.
 	disc/WbfsReader.cpp
 	disc/CisoGcnReader.cpp
@@ -39,47 +57,83 @@ SET(libromdata_SRCS
 	disc/PEResourceReader.cpp
 	disc/NEResourceReader.cpp
 	disc/NCCHReader.cpp
+	disc/CIAReader.cpp
+	disc/Cdrom2352Reader.cpp
+	disc/IsoPartition.cpp
+	disc/GdiReader.cpp
 	#config/TImageTypesConfig.cpp	# NOT listed here due to template stuff.
+	utils/SuperMagicDrive.cpp
 	)
 # Headers.
 SET(libromdata_H
-	MegaDrive.hpp
-	MegaDriveRegions.hpp
-	GameCube.hpp
-	NintendoDS.hpp
 	RomDataFactory.hpp
-	DMG.hpp
-	GameBoyAdvance.hpp
 	CopierFormats.h
-	GameCubeSave.hpp
-	PlayStationSave.hpp
-	N64.hpp
-	SNES.hpp
-	DreamcastSave.hpp
-	VirtualBoy.hpp
-	Amiibo.hpp
-	NES.hpp
-	EXE.hpp
-	EXE_p.hpp
-	WiiU.hpp
-	Nintendo3DS.hpp
-	Nintendo3DSFirm.hpp
-	md_structs.h
-	gcn_structs.h
-	gcn_card.h
-	nds_structs.h
-	n64_structs.h
-	dmg_structs.h
-	gba_structs.h
-	ps1_structs.h
-	snes_structs.h
-	dc_structs.h
-	vb_structs.h
-	nfp_structs.h
-	nes_structs.h
-	wiiu_structs.h
-	n3ds_structs.h
-	data/MegaDrivePublishers.hpp
+	cdrom_structs.h
+	iso_structs.h
+
+	Console/Dreamcast.hpp
+	Console/DreamcastSave.hpp
+	Console/GameCube.hpp
+	Console/GameCubeSave.hpp
+	Console/MegaDrive.hpp
+	Console/MegaDriveRegions.hpp
+	Console/N64.hpp
+	Console/NES.hpp
+	Console/PlayStationSave.hpp
+	Console/Sega8Bit.hpp
+	Console/SegaSaturn.hpp
+	Console/SNES.hpp
+	Console/WiiU.hpp
+
+	Console/dc_structs.h
+	Console/gcn_structs.h
+	Console/gcn_card.h
+	Console/md_structs.h
+	Console/n64_structs.h
+	Console/nes_structs.h
+	Console/ps1_structs.h
+	Console/saturn_structs.h
+	Console/sega8_structs.h
+	Console/snes_structs.h
+	Console/wiiu_structs.h
+
+	Handheld/DMG.hpp
+	Handheld/Lynx.hpp
+	Handheld/GameBoyAdvance.hpp
+	Handheld/Nintendo3DS.hpp
+	Handheld/Nintendo3DSFirm.hpp
+	Handheld/NintendoDS.hpp
+	Handheld/VirtualBoy.hpp
+
+	Handheld/dmg_structs.h
+	Handheld/gba_structs.h
+	Handheld/n3ds_structs.h
+	Handheld/nds_structs.h
+	Handheld/lnx_structs.h
+	Handheld/vb_structs.h
+
+	Texture/DirectDrawSurface.hpp
+	Texture/KhronosKTX.hpp
+	Texture/SegaPVR.hpp
+	Texture/ValveVTF.hpp
+	Texture/ValveVTF3.hpp
+
+	Texture/dds_structs.h
+	Texture/ktx_structs.h
+	Texture/pvr_structs.h
+	Texture/vtf_structs.h
+	Texture/vtf3_structs.h
+
+	Other/Amiibo.hpp
+	Other/EXE.hpp
+	Other/EXE_p.hpp
+	Other/NintendoBadge.hpp
+
+	Other/badge_structs.h
+	Other/exe_structs
+	Other/nfp_structs.h
+
+	data/SegaPublishers.hpp
 	data/NintendoPublishers.hpp
 	data/AmiiboData.hpp
 	data/WiiSystemMenuVersion.hpp
@@ -87,6 +141,9 @@ SET(libromdata_H
 	data/EXEData.hpp
 	data/WiiUData.hpp
 	data/Nintendo3DSFirmData.hpp
+	data/Nintendo3DSSysTitles.hpp
+	data/NintendoLanguage.hpp
+	data/GLenumStrings.hpp
 	img/TCreateThumbnail.hpp
 	disc/WbfsReader.hpp
 	disc/libwbfs.h
@@ -101,70 +158,112 @@ SET(libromdata_H
 	disc/NEResourceReader.hpp
 	disc/NCCHReader.hpp
 	disc/NCCHReader_p.hpp
+	disc/CIAReader.hpp
+	disc/Cdrom2352Reader.hpp
+	disc/IsoPartition.hpp
+	disc/GdiReader.hpp
 	config/TImageTypesConfig.hpp
+	utils/SuperMagicDrive.hpp
 	)
 
 IF(ENABLE_XML)
-	SET(libromdata_SRCS ${libromdata_SRCS} EXE_manifest.cpp)
-	IF(WIN32 AND (NOT USE_INTERNAL_XML OR USE_INTERNAL_XML_DLL))
-		SET(libromdata_SRCS ${libromdata_SRCS} EXE_delayload.cpp)
-	ENDIF(WIN32 AND (NOT USE_INTERNAL_XML OR USE_INTERNAL_XML_DLL))
+	SET(libromdata_SRCS ${libromdata_SRCS} Other/EXE_manifest.cpp)
+	IF(MSVC AND (NOT USE_INTERNAL_XML OR USE_INTERNAL_XML_DLL))
+		SET(libromdata_SRCS ${libromdata_SRCS} Other/EXE_delayload.cpp)
+	ENDIF(MSVC AND (NOT USE_INTERNAL_XML OR USE_INTERNAL_XML_DLL))
 ENDIF(ENABLE_XML)
 
 IF(ENABLE_DECRYPTION)
 	SET(libromdata_CRYPTO_SRCS
 		crypto/CtrKeyScrambler.cpp
-		disc/NCCHReader_VerifyKeys.cpp
+		crypto/N3DSVerifyKeys.cpp
+		crypto/KeyStoreUI.cpp
 		)
 	SET(libromdata_CRYPTO_H
 		crypto/CtrKeyScrambler.hpp
+		crypto/N3DSVerifyKeys.hpp
+		crypto/KeyStoreUI.hpp
 		)
 ENDIF(ENABLE_DECRYPTION)
+
+# Optimized sources.
+STRING(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" arch)
+IF(arch MATCHES "^(i.|x)86$|^x86_64$|^amd64$")
+	# IFUNC requires glibc.
+	# We're not checking for glibc here, but we do have preprocessor
+	# checks, so even if this does get compiled on a non-glibc system,
+	# it won't do anything.
+	# TODO: Might be supported on other Unix-like operating systems...
+	IF(UNIX AND NOT APPLE)
+		SET(libromdata_IFUNC_SRCS utils/SuperMagicDrive_ifunc.cpp)
+	ENDIF(UNIX AND NOT APPLE)
+
+	# MSVC does not support MMX intrinsics in 64-bit builds.
+	# Reference: https://msdn.microsoft.com/en-us/library/08x3t697(v=vs.110).aspx
+	# TODO: Disable MMX on all 64-bit builds?
+	IF(NOT MSVC OR NOT CMAKE_CL_64)
+		SET(libromdata_SSE2_SRCS utils/SuperMagicDrive_mmx.cpp)
+	ENDIF(NOT MSVC OR NOT CMAKE_CL_64)
+	SET(libromdata_SSE2_SRCS
+		${libromdata_SSE2_SRCS}
+		utils/SuperMagicDrive_sse2.cpp
+		)
+
+	IF(MSVC AND NOT CMAKE_CL_64)
+		SET(SSE2_FLAG "/arch:SSE2")
+	ELSEIF(NOT MSVC)
+		# TODO: Other compilers?
+		# TODO: Not needed on 64-bit.
+		SET(MMX_FLAG "-mmmx")
+		SET(SSE2_FLAG "-msse2")
+	ENDIF()
+
+	IF(MMX_FLAG)
+		SET_SOURCE_FILES_PROPERTIES(utils/SuperMagicDrive_mmx.cpp
+			APPEND_STRING PROPERTIES COMPILE_FLAGS " ${MMX_FLAG} ")
+	ENDIF(MMX_FLAG)
+	IF(SSE2_FLAG)
+		SET_SOURCE_FILES_PROPERTIES(utils/SuperMagicDrive_sse2.cpp
+			APPEND_STRING PROPERTIES COMPILE_FLAGS " ${SSE2_FLAG} ")
+	ENDIF(SSE2_FLAG)
+ENDIF()
+UNSET(arch)
 
 ######################
 # Build the library. #
 ######################
 
-# UTF-8 version.
-ADD_LIBRARY(romdata8 STATIC
+ADD_LIBRARY(romdata STATIC
 	${libromdata_SRCS} ${libromdata_H}
 	${libromdata_OS_SRCS} ${libromdata_OS_H}
 	${libromdata_CRYPTO_SRCS} ${libromdata_CRYPTO_H}
+	${libromdata_IFUNC_SRCS}
+	${libromdata_SSE2_SRCS}
 	)
-TARGET_LINK_LIBRARIES(romdata8 rpbase8)
+TARGET_LINK_LIBRARIES(romdata rpbase)
 
-# UTF-16 version.
-ADD_LIBRARY(romdata16 STATIC
-	${libromdata_SRCS} ${libromdata_H}
-	${libromdata_OS_SRCS} ${libromdata_OS_H}
-	${libromdata_CRYPTO_SRCS} ${libromdata_CRYPTO_H}
+# Include paths:
+# - Public: Current source and binary directories.
+# - Private: Parent source and binary directories,
+#            and top-level binary directory for git_version.h.
+TARGET_INCLUDE_DIRECTORIES(romdata
+	PUBLIC  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>		# libromdata
+		$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>		# libromdata
+	PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>	# src
+		$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>	# src
+		$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>			# top-level
 	)
-TARGET_LINK_LIBRARIES(romdata16 rpbase16)
+IF(MSVC)
+	TARGET_LINK_LIBRARIES(romdata delayimp)
+ENDIF(MSVC)
+# Exclude from ALL builds.
+SET_TARGET_PROPERTIES(romdata PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
-# Common properties for romdata8 and romdata16.
-FOREACH(_target romdata8 romdata16)
-	# Include paths:
-	# - Public: Current source and binary directories.
-	# - Private: Parent source and binary directories,
-	#            and top-level binary directory for git_version.h.
-	TARGET_INCLUDE_DIRECTORIES(${_target}
-		PUBLIC  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>		# libromdata
-			$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>		# libromdata
-		PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>	# src
-			$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>	# src
-			$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>			# top-level
-		)
-	IF(MSVC)
-		TARGET_LINK_LIBRARIES(${_target} delayimp)
-	ENDIF(MSVC)
-	# Exclude from ALL builds.
-	SET_TARGET_PROPERTIES(${_target} PROPERTIES EXCLUDE_FROM_ALL TRUE)
-
-	# Other libraries.
-	IF(ENABLE_XML AND TinyXML2_FOUND)
-		TARGET_LINK_LIBRARIES(${_target} ${TinyXML2_LIBRARY})
-	ENDIF(ENABLE_XML AND TinyXML2_FOUND)
-ENDFOREACH()
+# Other libraries.
+TARGET_LINK_LIBRARIES(romdata ${ZLIB_LIBRARY})
+IF(ENABLE_XML AND TinyXML2_FOUND)
+	TARGET_LINK_LIBRARIES(romdata ${TinyXML2_LIBRARY})
+ENDIF(ENABLE_XML AND TinyXML2_FOUND)
 
 # Unix: Add -fpic/-fPIC in order to use this static library in plugins.
 IF(UNIX AND NOT APPLE)
