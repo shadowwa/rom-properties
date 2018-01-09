@@ -1,5 +1,5 @@
 Name:          rom-properties
-Version:       1.0
+Version:       1.2
 Release:       1
 Summary:       ROM Properties Page shell extension
 Group:         games
@@ -17,7 +17,7 @@ BuildRequires: curl-devel
 BuildRequires: png-devel
 BuildRequires: jpeg-devel
 BuildRequires: pkgconfig(tinyxml2)
-#Requires:      
+#Requires:
 
 %description
 This shell extension provides thumbnailing and property page functionality
@@ -43,6 +43,16 @@ This shell extension provides thumbnailing and property page functionality
 for ROM images, disc images, and save files for various game consoles,
 including Nintendo GameCube and Wii.
 This package contains the command line version.
+
+%package -n rom-properties-stub
+Summary:       ROM Properties Page shell extension
+
+%description -n rom-properties-stub
+This shell extension provides thumbnailing and property page functionality
+for ROM images, disc images, and save files for various game consoles,
+including Nintendo GameCube and Wii.
+This package contains the stub executable, which is used for the
+configuration UI and GNOME thumbnailer.
 
 %package -n rom-properties-xfce
 Summary:       ROM Properties Page shell extension XFCE
@@ -81,11 +91,14 @@ This package contains the Nautilus (GNOME 3, Unity) version.
 	-DBUILD_KDE4=ON \
 	-DBUILD_KDE5=ON \
 	-DBUILD_XFCE=ON \
-	-DBUILD_CLI=ON
+	-DBUILD_CLI=ON \
+	-DENABLE_LTO=OFF
 %make_build
 
 %install
 %{makeinstall_std} -C build
+ln -vfs %{_bindir}/rp-stub %{buildroot}/%{_libexecdir}/rp-thumbnail
+ln -vfs %{_bindir}/rp-stub %{buildroot}%{_bindir}/rp-config
 
 %if %{with test}
 %check
@@ -102,6 +115,7 @@ LC_NUMERIC=en_US CTEST_OUTPUT_ON_FAILURE=1 %make_build -C build test
 %doc doc/keys.conf.example
 %doc doc/rom-properties.conf.example
 %defattr(-,root,root,0755)
+/usr/share/locale/*
 
 %files -n rom-properties-kde5
 %{_datadir}/kservices5/rom-properties-kde5.desktop
@@ -110,8 +124,17 @@ LC_NUMERIC=en_US CTEST_OUTPUT_ON_FAILURE=1 %make_build -C build test
 %files -n rom-properties-cli
 %{_bindir}/rpcli
 
+
+%files -n rom-properties-stub
+%{_libexecdir}/rp-thumbnail
+%{_bindir}/rp-stub
+%{_bindir}/rp-config
+
 %files -n rom-properties-xfce
 %{_libdir}/thunarx-2/rom-properties-xfce.so
+%{_bindir}/rp-thumbnailer-dbus
+%{_datadir}/dbus-1/services/com.gerbilsoft.rom-properties.SpecializedThumbnailer1.service
+%{_datadir}/thumbnailers/com.gerbilsoft.rom-properties.SpecializedThumbnailer1.service
 
 %files -n rom-properties-gnome
 %{_libdir}/nautilus/extensions-3.0/rom-properties-gnome.so
@@ -120,6 +143,9 @@ LC_NUMERIC=en_US CTEST_OUTPUT_ON_FAILURE=1 %make_build -C build test
 
 
 %changelog
+
+* Sun Nov 12 2017 shad <shad> 1.2-1
+- update to 1.2
 
 * Mon May 22 2017 shad <shad> 1.0-1
 - add rom-properties.conf.example file
