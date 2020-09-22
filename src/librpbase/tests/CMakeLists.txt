@@ -1,4 +1,12 @@
-PROJECT(librpbase-tests)
+# librpbase test suite
+CMAKE_MINIMUM_REQUIRED(VERSION 3.0)
+CMAKE_POLICY(SET CMP0048 NEW)
+IF(POLICY CMP0063)
+	# CMake 3.3: Enable symbol visibility presets for all
+	# target types, including static libraries and executables.
+	CMAKE_POLICY(SET CMP0063 NEW)
+ENDIF(POLICY CMP0063)
+PROJECT(librpbase-tests LANGUAGES CXX)
 
 # Top-level src directory.
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/../..)
@@ -12,26 +20,33 @@ IF(NOT WIN32)
 	ENDIF(ENABLE_DECRYPTION)
 ENDIF(NOT WIN32)
 
-# RpImageLoader test.
+# librptest library
+ADD_LIBRARY(rptest STATIC gtest_init.cpp)
+TARGET_LINK_LIBRARIES(rptest PUBLIC rpsecure)
+IF(WIN32)
+	# rptexture is only used for GDI+ rp_image backend registration on Windows.
+	TARGET_LINK_LIBRARIES(rptest PRIVATE rptexture)
+ENDIF(WIN32)
+INCLUDE(SetMSVCDebugPath)
+SET_MSVC_DEBUG_PATH(rptest)
+
+# RpImageLoader test
 ADD_EXECUTABLE(RpImageLoaderTest
-	gtest_init.cpp
 	img/RpImageLoaderTest.cpp
 	img/RpPngFormatTest.cpp
 	)
-IF(WIN32)
-	TARGET_LINK_LIBRARIES(RpImageLoaderTest win32common)
-ENDIF(WIN32)
-TARGET_LINK_LIBRARIES(RpImageLoaderTest rpbase)
-TARGET_LINK_LIBRARIES(RpImageLoaderTest gtest ${ZLIB_LIBRARY})
+TARGET_LINK_LIBRARIES(RpImageLoaderTest PRIVATE rptest rpcpu rpbase)
+TARGET_LINK_LIBRARIES(RpImageLoaderTest PRIVATE gtest ${ZLIB_LIBRARY})
 TARGET_INCLUDE_DIRECTORIES(RpImageLoaderTest PRIVATE ${ZLIB_INCLUDE_DIRS})
 TARGET_COMPILE_DEFINITIONS(RpImageLoaderTest PRIVATE ${ZLIB_DEFINITIONS})
 IF(PNG_LIBRARY)
-	TARGET_LINK_LIBRARIES(RpImageLoaderTest ${PNG_LIBRARY})
+	TARGET_LINK_LIBRARIES(RpImageLoaderTest PRIVATE ${PNG_LIBRARY})
 	TARGET_INCLUDE_DIRECTORIES(RpImageLoaderTest PRIVATE ${PNG_INCLUDE_DIRS})
 	TARGET_COMPILE_DEFINITIONS(RpImageLoaderTest PRIVATE ${PNG_DEFINITIONS})
 ENDIF(PNG_LIBRARY)
 DO_SPLIT_DEBUG(RpImageLoaderTest)
 SET_WINDOWS_SUBSYSTEM(RpImageLoaderTest CONSOLE)
+SET_WINDOWS_ENTRYPOINT(RpImageLoaderTest wmain OFF)
 ADD_TEST(NAME RpImageLoaderTest COMMAND RpImageLoaderTest)
 
 # Copy the reference images to:
@@ -57,74 +72,40 @@ FOREACH(test_image ${RpImageLoaderTest_images})
 ENDFOREACH(test_image ${RpImageLoaderTest_images})
 
 IF(ENABLE_DECRYPTION)
-	# AesCipher test.
-	ADD_EXECUTABLE(AesCipherTest
-		gtest_init.cpp
-		AesCipherTest.cpp
-		)
-	TARGET_LINK_LIBRARIES(AesCipherTest rpbase)
-	TARGET_LINK_LIBRARIES(AesCipherTest gtest)
+	# Crypto tests
+	ADD_EXECUTABLE(CryptoTests AesCipherTest.cpp MD5HashTest.cpp)
+	TARGET_LINK_LIBRARIES(CryptoTests PRIVATE rptest rpbase)
+	TARGET_LINK_LIBRARIES(CryptoTests PRIVATE gtest)
 	IF(WIN32)
-		TARGET_LINK_LIBRARIES(AesCipherTest win32common)
-		TARGET_LINK_LIBRARIES(AesCipherTest advapi32)
+		TARGET_LINK_LIBRARIES(CryptoTests PRIVATE advapi32)
 	ENDIF(WIN32)
 	IF(NETTLE_LIBRARY)
-		TARGET_LINK_LIBRARIES(AesCipherTest ${NETTLE_LIBRARY})
-		TARGET_INCLUDE_DIRECTORIES(AesCipherTest PRIVATE ${NETTLE_INCLUDE_DIRS})
+		TARGET_LINK_LIBRARIES(CryptoTests PRIVATE ${NETTLE_LIBRARY})
+		TARGET_INCLUDE_DIRECTORIES(CryptoTests PRIVATE ${NETTLE_INCLUDE_DIRS})
 	ENDIF(NETTLE_LIBRARY)
-	DO_SPLIT_DEBUG(AesCipherTest)
-	SET_WINDOWS_SUBSYSTEM(AesCipherTest CONSOLE)
-	ADD_TEST(NAME AesCipherTest COMMAND AesCipherTest)
+	DO_SPLIT_DEBUG(CryptoTests)
+	SET_WINDOWS_SUBSYSTEM(CryptoTests CONSOLE)
+	SET_WINDOWS_ENTRYPOINT(CryptoTests wmain OFF)
+	ADD_TEST(NAME CryptoTests COMMAND CryptoTests)
 ENDIF(ENABLE_DECRYPTION)
 
-# TextFuncsTest.
+# TextFuncsTest
 ADD_EXECUTABLE(TextFuncsTest
-	gtest_init.cpp
 	TextFuncsTest.cpp
 	TextFuncsTest_data.hpp
 	)
-IF(WIN32)
-	TARGET_LINK_LIBRARIES(TextFuncsTest win32common)
-ENDIF(WIN32)
-TARGET_LINK_LIBRARIES(TextFuncsTest rpbase)
-TARGET_LINK_LIBRARIES(TextFuncsTest gtest)
+TARGET_LINK_LIBRARIES(TextFuncsTest PRIVATE rptest rpcpu rpbase)
+TARGET_LINK_LIBRARIES(TextFuncsTest PRIVATE gtest)
 DO_SPLIT_DEBUG(TextFuncsTest)
 SET_WINDOWS_SUBSYSTEM(TextFuncsTest CONSOLE)
+SET_WINDOWS_ENTRYPOINT(TextFuncsTest wmain OFF)
 ADD_TEST(NAME TextFuncsTest COMMAND TextFuncsTest)
 
-# ImageDecoderLinear test.
-# TODO: Move to libromdata, or move libromdata stuff here?
-ADD_EXECUTABLE(ImageDecoderLinearTest
-	../../librpbase/tests/gtest_init.cpp
-	img/ImageDecoderLinearTest.cpp
-	)
-IF(WIN32)
-	TARGET_LINK_LIBRARIES(ImageDecoderLinearTest win32common)
-ENDIF(WIN32)
-TARGET_LINK_LIBRARIES(ImageDecoderLinearTest romdata)
-TARGET_LINK_LIBRARIES(ImageDecoderLinearTest gtest ${ZLIB_LIBRARY})
-TARGET_INCLUDE_DIRECTORIES(ImageDecoderLinearTest PRIVATE ${ZLIB_INCLUDE_DIRS})
-TARGET_COMPILE_DEFINITIONS(ImageDecoderLinearTest PRIVATE ${ZLIB_DEFINITIONS})
-IF(PNG_LIBRARY)
-	TARGET_LINK_LIBRARIES(ImageDecoderLinearTest ${PNG_LIBRARY})
-	TARGET_INCLUDE_DIRECTORIES(ImageDecoderLinearTest PRIVATE ${PNG_INCLUDE_DIRS})
-	TARGET_COMPILE_DEFINITIONS(ImageDecoderLinearTest PRIVATE ${PNG_DEFINITIONS})
-ENDIF(PNG_LIBRARY)
-DO_SPLIT_DEBUG(ImageDecoderLinearTest)
-SET_WINDOWS_SUBSYSTEM(ImageDecoderLinearTest CONSOLE)
-ADD_TEST(NAME ImageDecoderLinearTest COMMAND ImageDecoderLinearTest "--gtest_filter=-*benchmark*")
-
-# ByteswapTest.
-ADD_EXECUTABLE(ByteswapTest
-	gtest_init.cpp
-	ByteswapTest.cpp
-	ByteswapTest_data.hpp
-	)
-IF(WIN32)
-	TARGET_LINK_LIBRARIES(ByteswapTest win32common)
-ENDIF(WIN32)
-TARGET_LINK_LIBRARIES(ByteswapTest rpbase)
-TARGET_LINK_LIBRARIES(ByteswapTest gtest)
-DO_SPLIT_DEBUG(ByteswapTest)
-SET_WINDOWS_SUBSYSTEM(ByteswapTest CONSOLE)
-ADD_TEST(NAME ByteswapTest COMMAND ByteswapTest)
+# TimegmTest
+ADD_EXECUTABLE(TimegmTest TimegmTest.cpp)
+TARGET_LINK_LIBRARIES(TimegmTest PRIVATE rptest rpbase)
+TARGET_LINK_LIBRARIES(TimegmTest PRIVATE gtest)
+DO_SPLIT_DEBUG(TimegmTest)
+SET_WINDOWS_SUBSYSTEM(TimegmTest CONSOLE)
+SET_WINDOWS_ENTRYPOINT(TimegmTest wmain OFF)
+ADD_TEST(NAME TimegmTest COMMAND TimegmTest)

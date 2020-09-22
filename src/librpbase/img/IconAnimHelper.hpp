@@ -2,53 +2,69 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * IconAnimHelper.hpp: Icon animation helper.                              *
  *                                                                         *
- * Copyright (c) 2016 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2019 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBRPBASE_IMG_ICONANIMHELPER_HPP__
 #define __ROMPROPERTIES_LIBRPBASE_IMG_ICONANIMHELPER_HPP__
 
 #include "common.h"
+#include "IconAnimData.hpp"
 
 namespace LibRpBase {
-
-struct IconAnimData;
 
 class IconAnimHelper
 {
 	public:
-		IconAnimHelper();
-		explicit IconAnimHelper(const IconAnimData *iconAnimData);
+		IconAnimHelper()
+			: m_iconAnimData(nullptr)
+			, m_seq_idx(0)
+			, m_frame(0)
+			, m_delay(0)
+			, m_last_valid_frame(0)
+		{ }
+
+		explicit IconAnimHelper(const IconAnimData *iconAnimData)
+			: m_iconAnimData(iconAnimData)
+			, m_seq_idx(0)
+			, m_frame(0)
+			, m_delay(0)
+			, m_last_valid_frame(0)
+		{
+			reset();
+		}
+
+		~IconAnimHelper()
+		{
+			UNREF(m_iconAnimData);
+		}
 
 	private:
 		RP_DISABLE_COPY(IconAnimHelper);
 
 	public:
 		/**
-		 * Set the iconAnimData.
+		 * Set the IconAnimData.
+		 * The iconAnimData() will be ref()'d.
 		 * @param iconAnimData New iconAnimData.
 		 */
-		void setIconAnimData(const IconAnimData *iconAnimData);
+		void setIconAnimData(const IconAnimData *iconAnimData)
+		{
+			UNREF(m_iconAnimData);
+			m_iconAnimData = iconAnimData->ref();
+			reset();
+		}
 
 		/**
-		 * Get the iconAnimData.
-		 * @return iconAnimData.
+		 * Get the IconAnimData.
+		 * The caller must take a ref() to the IconAnimData.
+		 * @return IconAnimData.
 		 */
-		const IconAnimData *iconAnimData(void) const;
+		const IconAnimData *iconAnimData(void) const
+		{
+			return m_iconAnimData;
+		}
 
 		/**
 		 * Is this an animated icon?
@@ -58,7 +74,13 @@ class IconAnimHelper
 		 *
 		 * @return True if this is an animated icon; false if not.
 		 */
-		bool isAnimated(void) const;
+		bool isAnimated(void) const
+		{
+			// TODO: Verify that the sequence references more than one frame?
+			return (m_iconAnimData &&
+				m_iconAnimData->count > 0 &&
+				m_iconAnimData->seq_count > 0);
+		}
 
 		/**
 		 * Get the current frame number.
@@ -68,13 +90,19 @@ class IconAnimHelper
 		 *
 		 * @return Frame number.
 		 */
-		int frameNumber(void) const;
+		int frameNumber(void) const
+		{
+			return m_last_valid_frame;
+		}
 
 		/**
 		 * Get the current frame's delay.
 		 * @return Current frame's delay, in milliseconds.
 		 */
-		int frameDelay(void) const;
+		int frameDelay(void) const
+		{
+			return m_delay;
+		}
 
 		/**
 		 * Reset the animation.

@@ -2,40 +2,20 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * GcnFst.cpp: GameCube/Wii FST parser.                                    *
  *                                                                         *
- * Copyright (c) 2016 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
+#include "librpbase/config.librpbase.h"
+
 #include "GcnFst.hpp"
+#include "../Console/gcn_structs.h"
 
 // librpbase
-#include "librpbase/byteswap.h"
-#include "librpbase/TextFuncs.hpp"
 using namespace LibRpBase;
 
-// C includes.
-#include <stdlib.h>
-
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cstring>
-
-// C++ includes.
-#include <string>
-#include <unordered_map>
+// C++ STL classes.
 using std::string;
 using std::unordered_map;
 
@@ -64,7 +44,7 @@ class GcnFstPrivate
 		// String table, converted to Unicode.
 		// - Key: String offset in the FST string table.
 		// - Value: string.
-		unordered_map<uint32_t, string> u8_string_table;
+		mutable unordered_map<uint32_t, string> u8_string_table;
 
 		// Offset shift.
 		uint8_t offsetShift;
@@ -116,8 +96,10 @@ GcnFstPrivate::GcnFstPrivate(const uint8_t *fstData, uint32_t len, uint8_t offse
 	, offsetShift(offsetShift)
 	, fstDirCount(0)
 {
-	if (len < sizeof(GCN_FST_Entry)) {
-		// Invalid FST length.
+	assert(fstData != nullptr);
+	assert(len >= sizeof(GCN_FST_Entry));
+	if (!fstData || len < sizeof(GCN_FST_Entry)) {
+		// Invalid parameters.
 		hasErrors = true;
 		return;
 	}
@@ -143,12 +125,7 @@ GcnFstPrivate::GcnFstPrivate(const uint8_t *fstData, uint32_t len, uint8_t offse
 
 	// Copy the FST data.
 	// NOTE: +1 for NULL termination.
-	uint8_t *fst8 = static_cast<uint8_t*>(malloc(fstData_sz + 1));
-	if (!fst8) {
-		// Could not allocate memory for the FST.
-		hasErrors = true;
-		return;
-	}
+	uint8_t *const fst8 = new uint8_t[fstData_sz + 1];
 	memcpy(fst8, fstData, fstData_sz);
 	fst8[fstData_sz] = 0; // Make sure the string table is NULL-terminated.
 	this->fstData = reinterpret_cast<GCN_FST_Entry*>(fst8);
@@ -157,7 +134,7 @@ GcnFstPrivate::GcnFstPrivate(const uint8_t *fstData, uint32_t len, uint8_t offse
 	string_table_ptr = reinterpret_cast<char*>(&fst8[string_table_offset]);
 	string_table_sz = fstData_sz - string_table_offset;
 
-#if !defined(_MSC_VER) || _MSC_VER >= 1700
+#ifdef HAVE_UNORDERED_MAP_RESERVE
 	// Reserve space in the string table.
 	// NOTE: file_count includes the root directory entry.
 	u8_string_table.reserve(file_count - 1);
@@ -167,7 +144,7 @@ GcnFstPrivate::GcnFstPrivate(const uint8_t *fstData, uint32_t len, uint8_t offse
 GcnFstPrivate::~GcnFstPrivate()
 {
 	assert(fstDirCount == 0);
-	free(fstData);
+	delete[] fstData;
 }
 
 /**
@@ -186,8 +163,6 @@ inline bool GcnFstPrivate::is_dir(const GCN_FST_Entry *fst_entry)
  */
 inline const char *GcnFstPrivate::entry_name(const GCN_FST_Entry *fst_entry) const
 {
-	// FIXME: Is returning c_str from the iterator valid?
-
 	// Get the name entry from the string table.
 	uint32_t offset = be32_to_cpu(fst_entry->file_type_name_offset) & 0xFFFFFF;
 	if (offset >= string_table_sz) {
@@ -205,9 +180,9 @@ inline const char *GcnFstPrivate::entry_name(const GCN_FST_Entry *fst_entry) con
 	// Name has not been converted.
 	// Do the conversion now.
 	const char *str = &string_table_ptr[offset];
-	int len = (int)strlen(str);	// TODO: Bounds checking.
+	int len = static_cast<int>(strlen(str));	// TODO: Bounds checking.
 	string u8str = cp1252_sjis_to_utf8(str, len);
-	iter = const_cast<GcnFstPrivate*>(this)->u8_string_table.insert(std::make_pair(offset, u8str)).first;
+	iter = u8_string_table.insert(std::make_pair(offset, u8str)).first;
 	return iter->second.c_str();
 }
 
@@ -229,7 +204,7 @@ const GCN_FST_Entry *GcnFstPrivate::entry(int idx, const char **ppszName) const
 	}
 
 	// NOTE: For the root directory, next_offset is the number of entries.
-	if ((uint32_t)idx >= be32_to_cpu(fstData[0].root_dir.file_count)) {
+	if (static_cast<uint32_t>(idx) >= be32_to_cpu(fstData[0].root_dir.file_count)) {
 		// Index is out of range.
 		return nullptr;
 	}
@@ -254,34 +229,9 @@ const GCN_FST_Entry *GcnFstPrivate::entry(int idx, const char **ppszName) const
  */
 const GCN_FST_Entry *GcnFstPrivate::find_path(const char *path) const
 {
-	// TODO: Combine multiple slashes together.
-
 	if (!path) {
 		// Invalid path.
 		return nullptr;
-	} else if (!path[0] || (path[0] == '/' && !path[1])) {
-		// Empty path or "/".
-		// Return the root directory.
-		return this->entry(0, nullptr);
-	}
-
-	// Store the path as a temporary string.
-	string s_path;
-	if (path[0] != 0 && path[0] != '/') {
-		// Prepend a slash.
-		// (Relative paths aren't supported.)
-		s_path = '/';
-	}
-	s_path.append(path);
-
-	if (s_path.empty()) {
-		// Invalid path.
-		return nullptr;
-	}
-
-	// If there's a trailing slash, remove it.
-	if (s_path[s_path.size()-1] == '/') {
-		s_path.resize(s_path.size()-1);
 	}
 
 	// Get the root directory.
@@ -291,9 +241,29 @@ const GCN_FST_Entry *GcnFstPrivate::find_path(const char *path) const
 		return nullptr;
 	}
 
-	// Should not have "" or "/" here.
-	assert(!s_path.empty());
-	assert(s_path != "/");
+	if (!path[0] || (path[0] == '/' && !path[1])) {
+		// Empty path or "/".
+		// Return the root directory.
+		return fst_entry;
+	}
+
+	// Store the path as a temporary string.
+	string s_path;
+	if (path[0] != '/') {
+		// Prepend a slash.
+		// (Relative paths aren't supported.)
+		s_path = '/';
+	}
+	s_path.append(path);
+
+	// Remove trailing slashes.
+	while (s_path.size() > 1 && s_path[s_path.size()-1] == '/') {
+		s_path.resize(s_path.size()-1);
+	}
+	if (s_path.empty() || s_path == "/") {
+		// After removing all trailing slashes, we have the root directory.
+		return fst_entry;
+	}
 
 	// Skip the initial slash.
 	int idx = 1;	// Ignore the root directory.
@@ -310,13 +280,13 @@ const GCN_FST_Entry *GcnFstPrivate::find_path(const char *path) const
 			path_component = s_path.substr(slash_pos + 1);
 		} else {
 			// Found another slash.
-			int sz = (int)(next_slash_pos - slash_pos - 1);
+			int sz = static_cast<int>(next_slash_pos - slash_pos - 1);
 			if (sz <= 0) {
 				// Empty path component.
 				slash_pos = next_slash_pos;
 				continue;
 			}
-			path_component = s_path.substr(slash_pos + 1, (size_t)sz);
+			path_component = s_path.substr(slash_pos + 1, static_cast<size_t>(sz));
 		}
 
 		if (path_component.empty()) {
@@ -445,7 +415,7 @@ IFst::Dir *GcnFst::opendir(const char *path)
 	d->fstDirCount++;
 	dirp->parent = this;
 	// TODO: Better way to get dir_idx?
-	dirp->dir_idx = (int)(fst_entry - d->fstData);
+	dirp->dir_idx = static_cast<int>(fst_entry - d->fstData);
 
 	// Initialize the entry to the root directory.
 	// readdir() will automatically seek to the next entry.
@@ -507,7 +477,7 @@ IFst::DirEnt *GcnFst::readdir(IFst::Dir *dirp)
 
 	// NOTE: next_offset is the entry index *after* the last entry,
 	// so this works for both the root directory and subdirectories.
-	if (idx >= (int)be32_to_cpu(dir_fst_entry->dir.next_offset)) {
+	if (idx >= static_cast<int>(be32_to_cpu(dir_fst_entry->dir.next_offset))) {
 		// Last entry in the directory.
 		return nullptr;
 	}
@@ -539,7 +509,7 @@ IFst::DirEnt *GcnFst::readdir(IFst::Dir *dirp)
 		dirp->entry.size = 0;
 	} else {
 		// Save the offset and size.
-		dirp->entry.offset = ((int64_t)be32_to_cpu(fst_entry->file.offset) << d->offsetShift);
+		dirp->entry.offset = static_cast<off64_t>(be32_to_cpu(fst_entry->file.offset)) << d->offsetShift;
 		dirp->entry.size = be32_to_cpu(fst_entry->file.size);
 	}
 
@@ -600,7 +570,7 @@ int GcnFst::find_file(const char *filename, DirEnt *dirent)
 		dirent->size = 0;
 	} else {
 		// Save the offset and size.
-		dirent->offset = ((int64_t)be32_to_cpu(fst_entry->file.offset) << d->offsetShift);
+		dirent->offset = static_cast<off64_t>(be32_to_cpu(fst_entry->file.offset)) << d->offsetShift;
 		dirent->size = be32_to_cpu(fst_entry->file.size);
 	}
 
@@ -615,14 +585,14 @@ int GcnFst::find_file(const char *filename, DirEnt *dirent)
  *
  * @return Size of all files, in bytes. (-1 on error)
  */
-int64_t GcnFst::totalUsedSize(void) const
+off64_t GcnFst::totalUsedSize(void) const
 {
 	if (!d->fstData) {
 		// No FST...
 		return -1;
 	}
 
-	int64_t total_size = 0;
+	off64_t total_size = 0;
 	const GCN_FST_Entry *entry = d->fstData;
 	uint32_t file_count = be32_to_cpu(entry->root_dir.file_count);
 	entry++;
@@ -632,7 +602,7 @@ int64_t GcnFst::totalUsedSize(void) const
 	for (; file_count > 1; file_count--, entry++) {
 		if (d->is_dir(entry))
 			continue;
-		total_size += (int64_t)be32_to_cpu(entry->file.size);
+		total_size += static_cast<off64_t>(be32_to_cpu(entry->file.size));
 	}
 	return total_size;
 }

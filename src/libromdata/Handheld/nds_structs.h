@@ -2,34 +2,20 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * nds_structs.h: Nintendo DS(i) data structures.                          *
  *                                                                         *
- * Copyright (c) 2016 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBROMDATA_NDS_STRUCTS_H__
 #define __ROMPROPERTIES_LIBROMDATA_NDS_STRUCTS_H__
 
-#include "librpbase/common.h"
 #include <stdint.h>
+#include "common.h"
+#include "nintendo_system_id.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#pragma pack(1)
 
 /**
  * Nintendo DS ROM header.
@@ -39,7 +25,7 @@ extern "C" {
  * All fields are little-endian.
  * NOTE: Strings are NOT null-terminated!
  */
-typedef struct PACKED _NDS_RomHeader {
+typedef struct _NDS_RomHeader {
 	char title[12];
 	union {
 		char id6[6];	// Game code. (ID6)
@@ -132,7 +118,7 @@ typedef struct PACKED _NDS_RomHeader {
 		uint32_t access_control;	// ???
 		uint32_t arm7_scfg_mask;
 		uint8_t reserved1[3];		// Unknown flags. (always 0)
-		uint8_t flags;			// Usually 0x01. (Browser: 0x0B) (bit 2: custom icon: 0=normal, 1=banner.sav)
+		uint8_t flags;			// See DSi_Flags.
 
 		// 0x1C0
 		struct {
@@ -175,22 +161,7 @@ typedef struct PACKED _NDS_RomHeader {
 		uint32_t modcrypt2_size;	// 0 for none
 
 		// 0x230
-		// TODO: Verify operation on big-endian.
-		union {
-			union {
-				uint64_t id;	// 64-bit Title ID.
-				struct {
-					uint32_t lo;	// Title ID low. (reversed game ID)
-					uint32_t hi;	// Title ID high.
-				};
-			} title_id;
-
-			struct {
-				uint8_t reserved4[4];	// Title ID low.
-				uint8_t filetype;	// See DSi_FileType.
-				uint8_t reserved5[3];	// 00 03 00
-			};
-		};
+		Nintendo_TitleID_LE_t title_id;	// [0x230] Title ID
 
 		// 0x238
 		uint32_t sd_public_sav_size;
@@ -222,13 +193,52 @@ ASSERT_STRUCT(NDS_RomHeader, 4096);
  * Nintendo DSi region code.
  */
 typedef enum {
-	DSi_REGION_JAPAN	= (1 << 0),
-	DSi_REGION_USA		= (1 << 1),
-	DSi_REGION_EUROPE	= (1 << 2),
-	DSi_REGION_AUSTRALIA	= (1 << 3),
-	DSi_REGION_CHINA	= (1 << 4),
-	DSi_REGION_SKOREA	= (1 << 5),
+	DSi_REGION_JAPAN	= (1U << 0),
+	DSi_REGION_USA		= (1U << 1),
+	DSi_REGION_EUROPE	= (1U << 2),
+	DSi_REGION_AUSTRALIA	= (1U << 3),
+	DSi_REGION_CHINA	= (1U << 4),
+	DSi_REGION_SKOREA	= (1U << 5),
 } DSi_Region;
+
+/**
+ * Nintendo DSi access control. (0x1B4)
+ */
+typedef enum {
+	DSi_ACCESS_COMMON_KEY			= (1U <<  0),
+	DSi_ACCESS_AES_SLOT_B			= (1U <<  1),
+	DSi_ACCESS_AES_SLOT_C			= (1U <<  2),
+	DSi_ACCESS_SD_CARD			= (1U <<  3),
+	DSi_ACCESS_eMMC_ACCESS			= (1U <<  4),
+	DSi_ACCESS_GAME_CARD_POWER_ON		= (1U <<  5),
+	DSi_ACCESS_SHARED2_FILE			= (1U <<  6),
+	DSi_ACCESS_SIGN_JPEG_FOR_LAUNCHER	= (1U <<  7),
+	DSi_ACCESS_GAME_CARD_NTR_MODE		= (1U <<  8),
+	DSi_ACCESS_SSL_CLIENT_CERT		= (1U <<  9),
+	DSi_ACCESS_SIGN_JPEG_FOR_USER		= (1U << 10),
+	DSi_ACCESS_PHOTO_READ_ACCESS		= (1U << 11),
+	DSi_ACCESS_PHOTO_WRITE_ACCESS		= (1U << 12),
+	DSi_ACCESS_SD_CARD_READ_ACCESS		= (1U << 13),
+	DSi_ACCESS_SD_CARD_WRITE_ACCESS		= (1U << 14),
+	DSi_ACCESS_GAME_CARD_SAVE_READ_ACCESS	= (1U << 15),
+	DSi_ACCESS_GAME_CARD_SAVE_WRITE_ACCESS	= (1U << 16),
+
+	DSi_ACCESS_DEBUG_KEY			= (1U << 31),
+} DSi_Access;
+
+/**
+ * Nintendo DSi Flags. (0x1BF)
+ */
+typedef enum {
+	DSi_FLAGS_TOUCHSCREEN_MODE	= (1U << 0),	// 0 == NDS; 1 == DSi
+	DSi_FLAGS_REQUIRE_EULA		= (1U << 1),
+	DSi_FLAGS_CUSTOM_ICON		= (1U << 2),	// 0 == normal; 1 == banner.sav
+	DSi_FLAGS_NINTENDO_WFC		= (1U << 3),	// Show Nintendo WFC icon in launcher
+	DSi_FLAGS_DS_WIRELESS		= (1U << 4),	// Show DS Wireless icon in launcher
+	DSi_FLAGS_NDS_ICON_SHA1		= (1U << 5),	// NDS cart with icon SHA-1 (DSi FW v1.4+)
+	DSi_FLAGS_NDS_HEADER_RSA	= (1U << 6),	// NDS cart with header RSA (DSi FW v1.0+)
+	DSi_FLAGS_DEVELOPER		= (1U << 7),	// Developer application
+} DSi_Flags;
 
 /**
  * Nintendo DSi file type.
@@ -260,16 +270,16 @@ typedef enum {
 // NDS_IconTitleData version.
 typedef enum {
 	NDS_ICON_VERSION_ORIGINAL	= 0x0001,	// Original
-	NDS_ICON_VERSION_ZH		= 0x0002,	// +ZHCN
-	NDS_ICON_VERSION_ZH_KO		= 0x0003,	// +KO
+	NDS_ICON_VERSION_HANS		= 0x0002,	// +HANS
+	NDS_ICON_VERSION_HANS_KO	= 0x0003,	// +KO
 	NDS_ICON_VERSION_DSi		= 0x0103,	// +DSi
 } NDS_IconTitleData_Version;
 
 // NDS_IconTitleData sizes.
 typedef enum {
 	NDS_ICON_SIZE_ORIGINAL		= 0x0840,	// Original
-	NDS_ICON_SIZE_ZH		= 0x0940,	// +ZHCN
-	NDS_ICON_SIZE_ZH_KO		= 0x0A40,	// +KO
+	NDS_ICON_SIZE_HANS		= 0x0940,	// +HANS
+	NDS_ICON_SIZE_HANS_KO		= 0x0A40,	// +KO
 	NDS_ICON_SIZE_DSi		= 0x23C0,	// +DSi
 } NDS_IconTitleData_Size;
 
@@ -281,8 +291,10 @@ typedef enum {
 	NDS_LANG_GERMAN		= 3,
 	NDS_LANG_ITALIAN	= 4,
 	NDS_LANG_SPANISH	= 5,
-	NDS_LANG_CHINESE	= 6,
+	NDS_LANG_CHINESE_SIMP	= 6,	// Simplified Chinese
 	NDS_LANG_KOREAN		= 7,
+
+	NDS_LANG_MAX
 } NDS_Language_ID;
 
 /**
@@ -291,7 +303,7 @@ typedef enum {
  *
  * All fields are little-endian.
  */
-typedef struct PACKED _NDS_IconTitleData{
+typedef struct _NDS_IconTitleData{
 	uint16_t version;		// known values: 0x0001, 0x0002, 0x0003, 0x0103
 	uint16_t crc16[4];		// CRC16s for the four known versions.
 	uint8_t reserved1[0x16];
@@ -313,8 +325,6 @@ typedef struct PACKED _NDS_IconTitleData{
 	uint16_t dsi_icon_seq[0x40];		// Icon animation sequence.
 } NDS_IconTitleData;
 ASSERT_STRUCT(NDS_IconTitleData, 9152);
-
-#pragma pack()
 
 #ifdef __cplusplus
 }

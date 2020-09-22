@@ -1,22 +1,9 @@
 /***************************************************************************
- * ROM Properties Page shell extension. (KDE4/KDE5)                        *
+ * ROM Properties Page shell extension. (KDE4/KF5)                         *
  * RomPropertiesDialogPlugin.cpp: KPropertiesDialogPlugin.                 *
  *                                                                         *
- * Copyright (c) 2016 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 /**
@@ -27,60 +14,50 @@
  * - https://github.com/KDE/calligra-history/blob/5e323f11f11ec487e1ef801d61bb322944f454a5/libs/main/kodocinfopropspage.desktop
  */
 
+#include "stdafx.h"
 #include "RomPropertiesDialogPlugin.hpp"
 #include "RomDataView.hpp"
-#include "RpQt.hpp"
 
-// librpbase
-#include "librpbase/RomData.hpp"
-#include "librpbase/file/RpFile.hpp"
+// librpbase, librpfile
 using LibRpBase::RomData;
-using LibRpBase::RpFile;
-
-// libi18n
-#include "libi18n/i18n.h"
+using LibRpFile::IRpFile;
 
 // libromdata
 #include "libromdata/RomDataFactory.hpp"
 using LibRomData::RomDataFactory;
 
-// C++ includes.
-#include <memory>
-using std::unique_ptr;
-
 RomPropertiesDialogPlugin::RomPropertiesDialogPlugin(KPropertiesDialog *props, const QVariantList&)
 	: super(props)
 {
+	if (getuid() == 0 || geteuid() == 0) {
+		qCritical("*** rom-properties-" RP_KDE_LOWER "%u does not support running as root.", QT_VERSION >> 16);
+		return;
+	}
+
 	// Check if a single file was specified.
-#if QT_VERSION >= 0x050000
-	QUrl url = props->url();
-#else /* QT_VERSION < 0x050000 */
-	KUrl url = props->kurl();
-#endif
-	if (!url.isValid() || !url.isLocalFile())
+	KFileItemList items = props->items();
+	if (items.size() != 1) {
+		// Either zero items or more than one item.
 		return;
+	}
 
-	// Single file, and it's local.
-	// Open it and read the first 65536+512 bytes.
-	// TODO: Use KIO and transparent decompression?
-	QString filename = url.toLocalFile();
-	if (filename.isEmpty())
+	// Attempt to open the ROM file.
+	IRpFile *const file = openQUrl(items.at(0).url(), false);
+	if (!file) {
+		// Unable to open the file.
 		return;
-
-	// TODO: RpQFile wrapper.
-	// For now, using RpFile, which is an stdio wrapper.
-	unique_ptr<RpFile> file(new RpFile(Q2U8(filename), RpFile::FM_OPEN_READ));
-	if (!file || !file->isOpen())
-		return;
+	}
 
 	// Get the appropriate RomData class for this ROM.
-	// file is dup()'d by RomData.
-	RomData *romData = RomDataFactory::create(file.get());
-	if (!romData)
+	RomData *const romData = RomDataFactory::create(file);
+	file->unref();	// file is ref()'d by RomData.
+	if (!romData) {
+		// ROM is not supported.
 		return;
+	}
 
 	// ROM is supported. Show the properties.
-	RomDataView *romDataView = new RomDataView(romData, props);
+	RomDataView *const romDataView = new RomDataView(romData, props);
 	// tr: Tab title.
 	props->addPage(romDataView, U82Q(C_("RomDataView", "ROM Properties")));
 
@@ -93,6 +70,3 @@ RomPropertiesDialogPlugin::RomPropertiesDialogPlugin(KPropertiesDialog *props, c
 	// We don't need to hold on to it.
 	romData->unref();
 }
-
-RomPropertiesDialogPlugin::~RomPropertiesDialogPlugin()
-{ }

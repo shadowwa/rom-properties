@@ -2,24 +2,13 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * SuperMagicDrive_ifunc.cpp: SuperMagicDrive IFUNC resolution functions.  *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License       *
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.   *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "config.librpbase.h"
-#include "cpu_dispatch.h"
+#include "librpcpu/cpu_dispatch.h"
 
 #ifdef RP_HAS_IFUNC
 
@@ -34,20 +23,20 @@ extern "C" {
  * IFUNC resolver function for decodeBlock().
  * @return Function pointer.
  */
-static RP_IFUNC_ptr_t decodeBlock_resolve(void)
+static __typeof__(&SuperMagicDrive::decodeBlock_cpp) decodeBlock_resolve(void)
 {
 #ifdef SMD_HAS_SSE2
 	if (RP_CPU_HasSSE2()) {
-		return (RP_IFUNC_ptr_t)&SuperMagicDrive::decodeBlock_sse2;
+		return &SuperMagicDrive::decodeBlock_sse2;
 	} else
 #endif /* SMD_HAS_SSE2 */
 #ifdef SMD_HAS_MMX
 	if (RP_CPU_HasMMX()) {
-		return (RP_IFUNC_ptr_t)&SuperMagicDrive::decodeBlock_mmx;
+		return &SuperMagicDrive::decodeBlock_mmx;
 	} else
 #endif /* SMD_HAS_MMX */
 	{
-		return (RP_IFUNC_ptr_t)&SuperMagicDrive::decodeBlock_cpp;
+		return &SuperMagicDrive::decodeBlock_cpp;
 	}
 }
 #endif /* SMD_ALWAYS_HAS_SSE2 */

@@ -32,8 +32,10 @@
  *   implied warranty.
  *
  *===========================================================================*/
+/* SPDX-License-Identifier: libpng-2.0 */
 
-#define VERSION "2.3.0 of 7 July 2007"
+#include "stdafx.h"
+#define PNGCHECK_VERSION "2.3.0 of 7 July 2007"
 
 /*
  * NOTE:  current MNG support is informational; error-checking is MINIMAL!
@@ -131,12 +133,10 @@
  * instead of as a standalone program.
  */
 #include "pngcheck.hpp"
-#include "../../file/IRpFile.hpp"
-using LibRpBase::IRpFile;
+#include "librpfile/IRpFile.hpp"
+using LibRpFile::IRpFile;
 
-#include <memory>
-using std::unique_ptr;
-
+#if 0
 // C includes.
 #include <stdlib.h>
 
@@ -144,6 +144,13 @@ using std::unique_ptr;
 #include <cstdio>
 #include <cctype>
 #include <cstring>
+
+// C++ includes.
+#include <memory>
+#endif
+
+// C++ STL classes.
+using std::unique_ptr;
 
 // rom-properties: Uncomment this to enable printf() output.
 //#define RP_PRINTF_ENABLED 1
@@ -224,7 +231,7 @@ static void init_printbuf_state (printbuf_state *prbuf);
 static void print_buffer (printbuf_state *prbuf, uch *buffer, int size, int indent);
 static void report_printbuf (printbuf_state *prbuf, const char *fname, const char *chunkid);
 #endif /* rom-properties */
-static int  keywordlen (uch *buffer, int maxsize);
+static int  keywordlen (const uch *buffer, int maxsize);
 #ifdef RP_PRINTF_ENABLED
 static const char *getmonth (int m);
 static int  ratio (ulg uc, ulg c);
@@ -238,12 +245,12 @@ int  pngcheck (IRpFile *fp);
 #if 0 /* rom-properties */
 static int  pnginfile (FILE *fp, const char *fname, int ipng, int extracting);
 static void pngsearch (FILE *fp, const char *fname, int extracting);
-static int  check_magic (uch *magic, const char *fname, int which);
+static int  check_magic (const uch *magic, const char *fname, int which);
 static int  check_chunk_name (const char *chunk_name, const char *fname);
-static int  check_keyword (uch *buffer, int maxsize, int *pKeylen,
+static int  check_keyword (const uch *buffer, int maxsize, int *pKeylen,
                     const char *keyword_name, const char *chunkid, const char *fname);
-static int  check_text (uch *buffer, int maxsize, const char *chunkid, const char *fname);
-static int  check_ascii_float (uch *buffer, int len, const char *chunkid, const char *fname);
+static int  check_text (const uch *buffer, int maxsize, const char *chunkid, const char *fname);
+static int  check_ascii_float (const uch *buffer, int len, const char *chunkid, const char *fname);
 #endif
 
 #define BS 32000 /* size of read block for CRC calculation (and zlib) */
@@ -320,7 +327,7 @@ uch buffer[BS];
    uch outbuf[BS];
    z_stream zstrm;
 #ifdef RP_PRINTF_ENABLED
-   const char **pass_color;
+   const char *const *pass_color;
    const char *color_off;
 #endif /* RP_PRINTF_ENABLED */
 #endif
@@ -347,12 +354,12 @@ static inline void report_printbuf (printbuf_state *prbuf, const char *chunkid) 
 }
 #endif /* RP_PRINTF_ENABLED */
 
-int check_magic (uch *magic, int which);
+int check_magic (const uch *magic, int which);
 int check_chunk_name (const char *chunk_name);
-int check_keyword (uch *buffer, int maxsize, int *pKeylen,
+int check_keyword (const uch *buffer, int maxsize, int *pKeylen,
                    const char *keyword_name, const char *chunkid);
-int check_text (uch *buffer, int maxsize, const char *chunkid);
-int check_ascii_float (uch *buffer, int len, const char *chunkid);
+int check_text (const uch *buffer, int maxsize, const char *chunkid);
+int check_ascii_float (const uch *buffer, int len, const char *chunkid);
 
 public:
 	explicit CPngCheck(IRpFile *fp)
@@ -392,7 +399,7 @@ public:
 #if defined(USE_ZLIB) && defined(RP_PRINTF_ENABLED)
 		// Can't use the one declared later, so we'll
 		// copy it here.
-		static const char *pass_color_disabled[] = {
+		static const char *const pass_color_disabled[] = {
 			"", "", "", "", "", "", "", ""
 		};
 		pass_color = pass_color_disabled;
@@ -446,7 +453,7 @@ static const uch latin1_text_discouraged[256] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 
 };
 
-static const char *inv = "INVALID";
+static const char inv[] = "INVALID";
 
 #ifndef USE_ZLIB
    static ulg crc_table[256];           /* table of CRCs of all 8-bit messages */
@@ -455,7 +462,7 @@ static const char *inv = "INVALID";
 
 /* PNG stuff */
 
-static const char *png_type[] = {		/* IHDR, tRNS, BASI, summary */
+static const char *const png_type[] = {		/* IHDR, tRNS, BASI, summary */
   "grayscale",
   "INVALID",   /* can't use inv as initializer */
   "RGB",
@@ -466,7 +473,7 @@ static const char *png_type[] = {		/* IHDR, tRNS, BASI, summary */
 };
 
 #ifdef RP_PRINTF_ENABLED
-static const char *deflate_type[] = {			/* IDAT */
+static const char *const deflate_type[] = {		/* IDAT */
   "superfast",
   "fast",
   "default",
@@ -474,7 +481,7 @@ static const char *deflate_type[] = {			/* IDAT */
 };
 
 #ifdef USE_ZLIB
-static const char *zlib_error_type[] = {		/* IDAT */
+static const char *const zlib_error_type[] = {		/* IDAT */
   "filesystem error",
   "stream error",
   "data error",
@@ -484,7 +491,7 @@ static const char *zlib_error_type[] = {		/* IDAT */
 };
 
 #ifdef RP_MAIN_USAGE_ENABLED
-static const char *pass_color_enabled[] = {		/* IDAT */
+static const char *const pass_color_enabled[] = {	/* IDAT */
   COLOR_NORMAL,		/* color_off */
   COLOR_WHITE,		/* using 1-based indexing */
   COLOR_BLUE,
@@ -495,13 +502,13 @@ static const char *pass_color_enabled[] = {		/* IDAT */
   COLOR_MAGENTA
 };
 
-static const char *pass_color_disabled[] = {		/* IDAT */
+static const char *const pass_color_disabled[] = {	/* IDAT */
   "", "", "", "", "", "", "", ""
 };
 #endif /* RP_MAIN_USAGE_ENABLED */
 #endif /* USE_ZLIB */
 
-static const char *eqn_type[] = {			/* pCAL */
+static const char *const eqn_type[] = {			/* pCAL */
   "physical_value = p0 + p1 * original_sample / (x1-x0)",
   "physical_value = p0 + p1 * exp(p2 * original_sample / (x1-x0))",
   "physical_value = p0 + p1 * pow(p2, (original_sample / (x1-x0)))",
@@ -512,7 +519,7 @@ static const char *eqn_type[] = {			/* pCAL */
 static const int eqn_params[] = { 2, 3, 3, 4 };		/* pCAL */
 
 #ifdef RP_PRINTF_ENABLED
-static const char *rendering_intent[] = {		/* sRGB */
+static const char *const rendering_intent[] = {		/* sRGB */
   "perceptual",
   "relative colorimetric",
   "saturation-preserving",
@@ -522,7 +529,7 @@ static const char *rendering_intent[] = {		/* sRGB */
 
 /* JNG stuff */
 
-static const char *jng_type[] = {			/* JHDR, summary */
+static const char *const jng_type[] = {			/* JHDR, summary */
   "grayscale",
   "YCbCr",
   "grayscale+alpha",
@@ -532,7 +539,7 @@ static const char *jng_type[] = {			/* JHDR, summary */
 
 /* MNG stuff */
 
-static const char *delta_type[] = {			/* DHDR */
+static const char *const delta_type[] = {		/* DHDR */
   "full image replacement",
   "block pixel addition",
   "block alpha addition",
@@ -541,21 +548,21 @@ static const char *delta_type[] = {			/* DHDR */
   "no change"
 };
 
-static const char *termination_condition[] = {		/* LOOP */
+static const char *const termination_condition[] = {	/* LOOP */
   "deterministic",
   "decoder discretion",
   "user discretion",
   "external signal"
 };
 
-static const char *termination_action[] = {		/* TERM */
+static const char *const termination_action[] = {	/* TERM */
   "show last frame indefinitely",
   "cease displaying anything",
   "show first frame after TERM",
   "repeat sequence between TERM and MEND"
 };
 
-static const char *framing_mode[] = {			/* FRAM */
+static const char *const framing_mode[] = {		/* FRAM */
   "no change in framing mode",
   "no background layer; interframe delay before each image displayed",
   "no background layer; interframe delay before each FRAM chunk",
@@ -563,13 +570,13 @@ static const char *framing_mode[] = {			/* FRAM */
   "interframe delay and background layer after each FRAM chunk"
 };
 
-static const char *change_interframe_delay[] = {	/* FRAM */
+static const char *const change_interframe_delay[] = {	/* FRAM */
   "no change in interframe delay",
   "change interframe delay for next subframe",
   "change interframe delay and make default"
 };
 
-static const char *change_timeout_and_termination[] = {	/* FRAM */
+static const char *const change_timeout_and_termination[] = {	/* FRAM */
   "no change in timeout and termination",
   "deterministic change in timeout and termination for next subframe",
   "deterministic change in timeout and termination; make default",
@@ -581,31 +588,31 @@ static const char *change_timeout_and_termination[] = {	/* FRAM */
   "change in timeout and termination via signal; make default"
 };
 
-static const char *change_subframe_clipping_boundaries[] = {	/* FRAM */
+static const char *const change_subframe_clipping_boundaries[] = {	/* FRAM */
   "no change in subframe clipping boundaries",
   "change frame clipping boundaries for next subframe",
   "change frame clipping boundaries and make default"
 };
 
-static const char *change_sync_id_list[] = {		/* FRAM */
+static const char *const change_sync_id_list[] = {	/* FRAM */
   "no change in sync ID list",
   "change sync ID list for next subframe:",
   "change sync ID list and make default:"
 };
 
-static const char *clone_type[] = {			/* CLON */
+static const char *const clone_type[] = {		/* CLON */
   "full",
   "partial",
   "renumber"
 };
 
-static const char *do_not_show[] = {			/* DEFI, CLON */
+static const char *const do_not_show[] = {		/* DEFI, CLON */
   "potentially visible",
   "do not show",
   "same visibility as parent"
 };
 
-static const char *show_mode[] = {			/* SHOW */
+static const char *const show_mode[] = {		/* SHOW */
   "make objects potentially visible and display",
   "make objects invisible",
   "display potentially visible objects",
@@ -616,14 +623,14 @@ static const char *show_mode[] = {			/* SHOW */
   "make next object potentially visible but do not display; make rest invisible"
 };
 
-static const char *entry_type[] = {			/* SAVE */
+static const char *const entry_type[] = {		/* SAVE */
   "segment with full info",
   "segment",
   "subframe",
   "exported image"
 };
 
-static const char *pplt_delta_type[] = {		/* PPLT */
+static const char *const pplt_delta_type[] = {		/* PPLT */
   "replacement RGB samples",
   "delta RGB samples",
   "replacement alpha samples",
@@ -632,13 +639,13 @@ static const char *pplt_delta_type[] = {		/* PPLT */
   "delta RGBA samples"
 };
 
-static const char *composition_mode[] = {		/* PAST */
+static const char *const composition_mode[] = {		/* PAST */
   "composite over",
   "replace",
   "composite under"
 };
 
-static const char *orientation[] = {			/* PAST */
+static const char *const orientation[] = {		/* PAST */
   "same as source image",
   "flipped left-right then up-down",
   "flipped left-right",
@@ -646,7 +653,7 @@ static const char *orientation[] = {			/* PAST */
   "tiled with source image"
 };
 
-static const char *order_type[] = {			/* ORDR */
+static const char *const order_type[] = {		/* ORDR */
   "anywhere",
   "after IDAT and/or JDAT or JDAA",
   "before IDAT and/or JDAT or JDAA",
@@ -654,7 +661,7 @@ static const char *order_type[] = {			/* ORDR */
   "before IDAT but not after PLTE"
 };
 
-static const char *magnification_method[] = {		/* MAGN */
+static const char *const magnification_method[] = {	/* MAGN */
   "no magnification",
   "pixel replication of all samples",
   "linear interpolation of all samples",
@@ -664,22 +671,22 @@ static const char *magnification_method[] = {		/* MAGN */
 };
 
 #ifdef RP_MAIN_USAGE_ENABLED
-static const char *brief_error_color = COLOR_RED_BOLD "ERROR" COLOR_NORMAL;
-static const char *brief_error_plain = "ERROR";
+static const char brief_error_color[] = COLOR_RED_BOLD "ERROR" COLOR_NORMAL;
+static const char brief_error_plain[] = "ERROR";
 #endif /* RP_MAIN_USAGE_ENABLED */
-static const char *brief_warn_color = COLOR_YELLOW_BOLD "WARN" COLOR_NORMAL;
-static const char *brief_warn_plain = "WARN";
-static const char *brief_OK_color = COLOR_GREEN_BOLD "OK" COLOR_NORMAL;
-static const char *brief_OK_plain = "OK";
+static const char brief_warn_color[] = COLOR_YELLOW_BOLD "WARN" COLOR_NORMAL;
+static const char brief_warn_plain[] = "WARN";
+static const char brief_OK_color[] = COLOR_GREEN_BOLD "OK" COLOR_NORMAL;
+static const char brief_OK_plain[] = "OK";
 
 #ifdef RP_MAIN_USAGE_ENABLED
-static const char *errors_color = COLOR_RED_BOLD "ERRORS DETECTED" COLOR_NORMAL;
-static const char *errors_plain = "ERRORS DETECTED";
+static const char errors_color[] = COLOR_RED_BOLD "ERRORS DETECTED" COLOR_NORMAL;
+static const char errors_plain[] = "ERRORS DETECTED";
 #endif /* RP_MAIN_USAGE_ENABLED */
-static const char *warnings_color = COLOR_YELLOW_BOLD "WARNINGS DETECTED" COLOR_NORMAL;
-static const char *warnings_plain = "WARNINGS DETECTED";
-static const char *no_err_color = COLOR_GREEN_BOLD "No errors detected" COLOR_NORMAL;
-static const char *no_err_plain = "No errors detected";
+static const char warnings_color[] = COLOR_YELLOW_BOLD "WARNINGS DETECTED" COLOR_NORMAL;
+static const char warnings_plain[] = "WARNINGS DETECTED";
+static const char no_err_color[] = COLOR_GREEN_BOLD "No errors detected" COLOR_NORMAL;
+static const char no_err_plain[] = "No errors detected";
 #endif /* RP_PRINTF_ENABLED */
 
 
@@ -780,7 +787,7 @@ int main(int argc, char *argv[])
     if (isatty(0)) { /* if stdin not redirected, give the user help */
       usage(stdout);
     } else {
-      const char *fname = "stdin";
+      const char fname[] = "stdin";
 
       if (search)
         pngsearch(stdin, fname, extract);  /* currently returns void */
@@ -815,7 +822,7 @@ int main(int argc, char *argv[])
 
     /* main loop over files listed on command line */
     for (i = 1; i < argc; ++i) {
-      const char *fname = argv[i];
+      const char *const fname = argv[i];
 
       err = kOK;
       if (strcmp(fname, "-") == 0) {
@@ -874,7 +881,7 @@ int main(int argc, char *argv[])
 /* GRR 20061203 */
 static void usage(FILE *fpMsg)
 {
-  fprintf(fpMsg, "PNGcheck, version %s,\n", VERSION);
+  fprintf(fpMsg, "PNGcheck, version %s,\n", PNGCHECK_VERSION);
   fprintf(fpMsg, "   by Alexander Lehmann, Andreas Dilger and Greg Roelofs.\n");
 #ifdef USE_ZLIB
   fprintf(fpMsg, "   Compiled with zlib %s; using zlib %s.\n",
@@ -1084,7 +1091,7 @@ void CPngCheck::report_printbuf(printbuf_state *prbuf, const char *chunkid)
 
 
 
-static int keywordlen(uch *buf, int maxsize)
+static int keywordlen(const uch *buf, int maxsize)
 {
   int j = 0;
 
@@ -1099,7 +1106,7 @@ static int keywordlen(uch *buf, int maxsize)
 #ifdef RP_PRINTF_ENABLED
 static const char *getmonth(int m)
 {
-  static const char *month[] = {
+  static const char month[][4] = {
     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
   };
@@ -1208,10 +1215,10 @@ int CPngCheck::pngcheck(void)
 #ifdef RP_PRINTF_ENABLED
   struct stat statbuf;
   int first_file = 1;
-  const char *brief_warn  = color? brief_warn_color  : brief_warn_plain;
-  const char *brief_OK    = color? brief_OK_color    : brief_OK_plain;
-  const char *warnings_detected  = color? warnings_color : warnings_plain;
-  const char *no_errors_detected = color? no_err_color   : no_err_plain;
+  const char *const brief_warn  = color? brief_warn_color  : brief_warn_plain;
+  const char *const brief_OK    = color? brief_OK_color    : brief_OK_plain;
+  const char *const warnings_detected  = color? warnings_color : warnings_plain;
+  const char *const no_errors_detected = color? no_err_color   : no_err_plain;
 #endif /* RP_PRINTF_ENABLED */
 
   // FIXME: Need to use the stack or TLS in order to
@@ -3695,8 +3702,8 @@ FIXME: add support for decompressing/printing zTXt
           png? 'P':'J');
         set_err(kMinorError);
       } else if (sz > 0 && verbose) {
-        uch *p = buffer;
-        uch *lastbreak = buffer;
+        const uch *p = buffer;
+        const uch *const lastbreak = buffer;
 
         if (sz < 32)
           printf(":  ");
@@ -4738,8 +4745,10 @@ FIXME: add support for decompressing/printing zTXt
     if (no_err(kMinorError)) {
       if (fpOut != NULL) {
         putlong(fpOut, sz);
+#if 0 /* rom-properties */
         (void)fwrite(chunkid, 1, 4, fpOut);
         (void)fwrite(buffer, 1, toread, fpOut);
+#endif /* rom-properties */
       }
 
       while (sz > toread) {
@@ -4748,8 +4757,10 @@ FIXME: add support for decompressing/printing zTXt
         toread = (sz > BS)? BS:sz;
 
         data_read = (int)fp->read(buffer, toread);
+#if 0 /* rom-properties */
         if (fpOut != NULL)
           (void)fwrite(buffer, 1, data_read, fpOut);
+#endif /* rom-properties */
 
         if (data_read != toread) {
           printf("%s  EOF while reading %s%sdata\n",
@@ -5010,7 +5021,7 @@ static void pngsearch(FILE *fp, const char *fname, int extracting)
  * without any restrictions.
  *
  */
-int CPngCheck::check_magic(uch *magic, int which)
+int CPngCheck::check_magic(const uch *magic, int which)
 {
   int i;
   const uch *good_magic = (which == 0)? good_PNG_magic :
@@ -5091,7 +5102,7 @@ int CPngCheck::check_chunk_name(const char *chunk_name)
 /* caller must do set_err(kMinorError) based on return value (0 == OK) */
 /* keyword_name is "keyword" for most chunks, but it can instead be "name" or
  * "identifier" or whatever makes sense for the chunk in question */
-int CPngCheck::check_keyword(uch *buffer, int maxsize, int *pKeylen,
+int CPngCheck::check_keyword(const uch *buffer, int maxsize, int *pKeylen,
                   const char *keyword_name, const char *chunkid)
 {
   int j, prev_space = 0;
@@ -5152,7 +5163,7 @@ int CPngCheck::check_keyword(uch *buffer, int maxsize, int *pKeylen,
 
 /* GRR 20070707 */
 /* caller must do set_err(kMinorError) based on return value (0 == OK) */
-int CPngCheck::check_text(uch *buffer, int maxsize, const char *chunkid)
+int CPngCheck::check_text(const uch *buffer, int maxsize, const char *chunkid)
 {
   int j, ctrlwarn = verbose? 1 : 0;  /* print message once, only if verbose */
 
@@ -5175,9 +5186,9 @@ int CPngCheck::check_text(uch *buffer, int maxsize, const char *chunkid)
 
 /* GRR 20061203 (used only for sCAL) */
 /* caller must do set_err(kMinorError) based on return value (0 == OK) */
-int CPngCheck::check_ascii_float(uch *buffer, int len, const char *chunkid)
+int CPngCheck::check_ascii_float(const uch *buffer, int len, const char *chunkid)
 {
-  uch *qq = buffer, *bufEnd = buffer + len;
+  const uch *qq = buffer; const uch *const bufEnd = buffer + len;
   int have_sign = 0, have_integer = 0, have_dot = 0, have_fraction = 0;
   int have_E = 0, have_Esign = 0, have_exponent = 0, in_digits = 0;
   int have_nonzero = 0;

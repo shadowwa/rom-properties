@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * IPartition.hpp: Partition reader interface.                             *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBRPBASE_DISC_IPARTITION_HPP__
@@ -29,9 +16,10 @@ namespace LibRpBase {
 class IPartition : public IDiscReader
 {
 	protected:
-		IPartition() { }
-	public:
-		virtual ~IPartition() = 0;
+		explicit IPartition(LibRpFile::IRpFile *file) : super(file) { }
+		explicit IPartition(IDiscReader *discReader) : super(discReader) { }
+	protected:
+		virtual ~IPartition() = 0;	// call unref() instead
 
 	private:
 		typedef IDiscReader super;
@@ -46,7 +34,8 @@ class IPartition : public IDiscReader
 		 * TODO: Move to IPartition.cpp?
 		 * @return -1
 		 */
-		virtual int isDiscSupported(const uint8_t *pHeader, size_t szHeader) const override final
+		ATTR_ACCESS_SIZE(read_only, 2, 3)
+		int isDiscSupported(const uint8_t *pHeader, size_t szHeader) const final
 		{
 			RP_UNUSED(pHeader);
 			RP_UNUSED(szHeader);
@@ -60,7 +49,7 @@ class IPartition : public IDiscReader
 		 * metadata, e.g. Wii sector hashes, if present.
 		 * @return Partition size, or -1 on error.
 		 */
-		virtual int64_t partition_size(void) const = 0;
+		virtual off64_t partition_size(void) const = 0;
 
 		/**
 		 * Get the used partition size.
@@ -69,7 +58,7 @@ class IPartition : public IDiscReader
 		 * It does *not* include "empty" sectors.
 		 * @return Used partition size, or -1 on error.
 		 */
-		virtual int64_t partition_size_used(void) const = 0;
+		virtual off64_t partition_size_used(void) const = 0;
 };
 
 /**

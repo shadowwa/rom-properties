@@ -3,20 +3,7 @@
  * TImageTypesConfig.cpp: Image Types editor template.                     *
  *                                                                         *
  * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBROMDATA_CONFIG_TIMAGETYPESCONFIG_CPP__
@@ -29,16 +16,16 @@
 #include "librpbase/config/Config.hpp"
 
 // librpbase
-#include "librpbase/TextFuncs.hpp"
 #include "librpbase/RomData.hpp"	// for IMG_* constants
-#include "libi18n/i18n.h"
 using namespace LibRpBase;
+
+// libi18n
+#include "libi18n/i18n.h"
 
 // RomData subclasses with images.
 // Does not include texture files, since those are always
 // thumbnailed using IMG_INT_IMAGE.
 #include "Other/Amiibo.hpp"
-#include "Console/Dreamcast.hpp"
 #include "Console/DreamcastSave.hpp"
 #include "Console/GameCube.hpp"
 #include "Console/GameCubeSave.hpp"
@@ -47,6 +34,10 @@ using namespace LibRpBase;
 #include "Handheld/Nintendo3DS.hpp"
 #include "Console/PlayStationSave.hpp"
 #include "Console/WiiU.hpp"
+#include "Console/WiiWAD.hpp"
+
+// C++ includes.
+#include <string>
 
 namespace LibRomData {
 
@@ -55,7 +46,6 @@ template<typename ComboBox>
 const SysData_t TImageTypesConfig<ComboBox>::sysData[] = {
 	SysDataEntry(Amiibo),
 	SysDataEntry(NintendoBadge),
-	SysDataEntry(Dreamcast),
 	SysDataEntry(DreamcastSave),
 	SysDataEntry(GameCube),
 	SysDataEntry(GameCubeSave),
@@ -63,6 +53,7 @@ const SysData_t TImageTypesConfig<ComboBox>::sysData[] = {
 	SysDataEntry(Nintendo3DS),
 	SysDataEntry(PlayStationSave),
 	SysDataEntry(WiiU),
+	SysDataEntry(WiiWAD),
 };
 
 template<typename ComboBox>
@@ -200,24 +191,22 @@ bool TImageTypesConfig<ComboBox>::reset_int(bool loadDefaults)
 			if (p_cboImageType[imageType] && !imageTypeSet[imageType]) {
 				// Set the image type.
 				imageTypeSet[imageType] = true;
-				if (imageType < IMG_TYPE_COUNT) {
-					if (imageTypes[sys][imageType] != nextPrio) {
-						imageTypes[sys][imageType] = nextPrio;
-						hasChanged = true;
+				if (imageTypes[sys][imageType] != nextPrio) {
+					imageTypes[sys][imageType] = nextPrio;
+					hasChanged = true;
 
-						// NOTE: Using the actual priority value, not the ComboBox index.
-						cboImageType_setPriorityValue(sysAndImageTypeToCbid(sys, imageType), nextPrio);
-					}
-					cbo_needsReset[sys][imageType] = false;
-					nextPrio++;
+					// NOTE: Using the actual priority value, not the ComboBox index.
+					cboImageType_setPriorityValue(sysAndImageTypeToCbid(sys, imageType), nextPrio);
 				}
+				cbo_needsReset[sys][imageType] = false;
+				nextPrio++;
 			}
 		}
 	}
 
 	// Set ComboBoxes that don't have a priority to "No".
 	for (int sys = SYS_COUNT-1; sys >= 0; sys--) {
-		unsigned int cbid = sysAndImageTypeToCbid((unsigned int)sys, IMG_TYPE_COUNT-1);
+		unsigned int cbid = sysAndImageTypeToCbid(static_cast<unsigned int>(sys), IMG_TYPE_COUNT-1);
 		for (int imageType = IMG_TYPE_COUNT-1; imageType >= 0; imageType--, cbid--) {
 			if (cbo_needsReset[sys][imageType] && cboImageType[sys][imageType]) {
 				if (imageTypes[sys][imageType] != 0xFF) {
@@ -277,10 +266,8 @@ int TImageTypesConfig<ComboBox>::save(void)
 	// Image types are stored in the imageTypes[] array.
 	const uint8_t *pImageTypes = imageTypes[0];
 
-	// TODO: Switch back to std::ostringstream since everything's
-	// using UTF-8 now? (u16string ostringstream didn't work.)
 	std::string imageTypeList;
-	imageTypeList.reserve(128);
+	imageTypeList.reserve(128);	// TODO: Optimal reservation?
 	for (unsigned int sys = 0; sys < SYS_COUNT; sys++) {
 		// Is this system using the default configuration?
 		if (sysIsDefault[sys]) {
@@ -327,6 +314,7 @@ int TImageTypesConfig<ComboBox>::save(void)
 			"ExtCover3D",
 			"ExtCoverFull",
 			"ExtBox",
+			"ExtTitleScreen",
 		};
 		static_assert(ARRAY_SIZE(conf_imageTypeNames) == IMG_TYPE_COUNT, "conf_imageTypeNames[] is the wrong size.");
 
@@ -396,6 +384,8 @@ const char *TImageTypesConfig<ComboBox>::imageTypeName(unsigned int imageType)
 		NOP_C_("TImageTypesConfig|ImageTypeDisp", "External\nFull Cover"),
 		// tr: IMG_EXT_BOX
 		NOP_C_("TImageTypesConfig|ImageTypeDisp", "External\nBox"),
+		// tr: IMG_EXT_TITLE_SCREEN
+		NOP_C_("TImageTypesConfig|ImageTypeDisp", "External\nTitle Screen"),
 	};
 	static_assert(ARRAY_SIZE(imageType_names) == IMG_TYPE_COUNT,
 		"imageType_names[] needs to be updated.");
@@ -417,8 +407,6 @@ const char *TImageTypesConfig<ComboBox>::sysName(unsigned int sys)
 		NOP_C_("TImageTypesConfig|SysName", "amiibo"),
 		// tr: NintendoBadge
 		NOP_C_("TImageTypesConfig|SysName", "Badge Arcade"),
-		// tr: Dreamcast
-		NOP_C_("TImageTypesConfig|SysName", "Dreamcast"),
 		// tr: DreamcastSave
 		NOP_C_("TImageTypesConfig|SysName", "Dreamcast Saves"),
 		// tr: GameCube
@@ -433,6 +421,8 @@ const char *TImageTypesConfig<ComboBox>::sysName(unsigned int sys)
 		NOP_C_("TImageTypesConfig|SysName", "PlayStation Saves"),
 		// tr: WiiU
 		NOP_C_("TImageTypesConfig|SysName", "Wii U"),
+		// tr: WiiWAD
+		NOP_C_("TImageTypesConfig|SysName", "Wii WAD Files"),
 	};
 	static_assert(ARRAY_SIZE(sysNames) == SYS_COUNT,
 		"sysNames[] needs to be updated.");
@@ -463,9 +453,9 @@ bool TImageTypesConfig<ComboBox>::cboImageType_priorityValueChanged(unsigned int
 	if (prio >= 0 && prio != 0xFF) {
 		// Check for any image types that have the new priority.
 		for (int i = IMG_TYPE_COUNT-1; i >= 0; i--) {
-			if ((unsigned int)i == imageType)
+			if (static_cast<unsigned int>(i) == imageType)
 				continue;
-			if (cboImageType[sys][i] != nullptr && imageTypes[sys][i] == (uint8_t)prio) {
+			if (cboImageType[sys][i] != nullptr && imageTypes[sys][i] == static_cast<uint8_t>(prio)) {
 				// Found a match! Swap the priority.
 				imageTypes[sys][i] = prev_prio;
 				cboImageType_setPriorityValue(sysAndImageTypeToCbid(sys, i), prev_prio);

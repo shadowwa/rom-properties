@@ -2,39 +2,28 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * RpPng.cpp: PNG image handler.                                           *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
-#include "librpbase/config.librpbase.h"
+#include "stdafx.h"
+#include "config.librpbase.h"
 
 #include "RpPng.hpp"
-#include "rp_image.hpp"
-#include "../file/IRpFile.hpp"
+
+// librpfile
+#include "librpfile/RpFile.hpp"
+using LibRpFile::IRpFile;
+
+// librptexture
+#include "img/rp_image.hpp"
+using LibRpTexture::rp_image;
+using LibRpTexture::argb32_t;
 
 // PNG writer.
 #include "RpPngWriter.hpp"
 
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cstring>
-
-// C++ includes.
-#include <algorithm>
-#include <memory>
+// C++ STL classes.
 using std::unique_ptr;
 
 // Image format libraries.
@@ -71,7 +60,7 @@ using std::unique_ptr;
 // Need zlib for delay-load checks.
 #include <zlib.h>
 // MSVC: Exception handling for /DELAYLOAD.
-#include "libwin32common/DelayLoadHelper.hpp"
+#include "libwin32common/DelayLoadHelper.h"
 #endif /* defined(_MSC_VER) && (defined(ZLIB_IS_DLL) || defined(PNG_IS_DLL)) */
 
 namespace LibRpBase {
@@ -127,6 +116,22 @@ class RpPngPrivate
 		 * @param png_ptr	[in] PNG pointer.
 		 */
 		static void PNGCAPI png_io_IRpFile_flush(png_structp png_ptr);
+
+		/** Error handler functions. **/
+
+#ifdef PNG_WARNINGS_SUPPORTED
+		/**
+		 * libpng warning handler function that simply ignores warnings.
+		 *
+		 * Certain PNG images have "known incorrect" sRGB profiles,
+		 * and we don't want libpng to spam stderr with warnings
+		 * about them.
+		 *
+		 * @param png_ptr	[in] PNG pointer.
+		 * @param msg		[in] Warning message.
+		 */
+		static void PNGCAPI png_warning_fn(png_structp png_ptr, png_const_charp msg);
+#endif /* PNG_WARNINGS_SUPPORTED */
 
 		/** Read functions. **/
 
@@ -204,12 +209,31 @@ void PNGCAPI RpPngPrivate::png_io_IRpFile_write(png_structp png_ptr, png_bytep d
 void PNGCAPI RpPngPrivate::png_io_IRpFile_flush(png_structp png_ptr)
 {
 	// Assuming io_ptr is an IRpFile*.
-	IRpFile *file = static_cast<IRpFile*>(png_get_io_ptr(png_ptr));
+	IRpFile *const file = static_cast<IRpFile*>(png_get_io_ptr(png_ptr));
 	if (!file)
 		return;
 
 	// TODO: IRpFile::flush()
 }
+
+#ifdef PNG_WARNINGS_SUPPORTED
+/**
+ * libpng warning handler function that simply ignores warnings.
+ *
+ * Certain PNG images have "known incorrect" sRGB profiles,
+ * and we don't want libpng to spam stderr with warnings
+ * about them.
+ *
+ * @param png_ptr	[in] PNG pointer.
+ * @param msg		[in] Warning message.
+ */
+void PNGCAPI RpPngPrivate::png_warning_fn(png_structp png_ptr, png_const_charp msg)
+{
+	// Nothing to do here...
+	RP_UNUSED(png_ptr);
+	RP_UNUSED(msg);
+}
+#endif /* PNG_WARNINGS_SUPPORTED */
 
 /** Read functions. **/
 
@@ -227,8 +251,8 @@ void RpPngPrivate::Read_CI8_Palette(png_structp png_ptr, png_infop info_ptr,
 	png_bytep trans;
 	int num_palette, num_trans;
 
-	assert(img->format() == rp_image::FORMAT_CI8);
-	if (img->format() != rp_image::FORMAT_CI8)
+	assert(img->format() == rp_image::Format::CI8);
+	if (img->format() != rp_image::Format::CI8)
 		return;
 
 	// rp_image's palette data.
@@ -263,7 +287,7 @@ void RpPngPrivate::Read_CI8_Palette(png_structp png_ptr, png_infop info_ptr,
 				color.b = png_palette->blue;
 				if (trans && num_trans > 0) {
 					// Copy the transparency information.
-					color.a = *trans;
+					color.a = *trans++;
 					num_trans--;
 				} else {
 					// No transparency information.
@@ -314,17 +338,16 @@ rp_image *RpPngPrivate::loadPng(png_structp png_ptr, png_infop info_ptr)
 	const png_byte **row_pointers = nullptr;
 	rp_image *img = nullptr;
 
-#ifdef PNG_sBIT_SUPPORTED
 	bool has_sBIT = false;
 	png_color_8p png_sBIT = nullptr;
-#endif /* PNG_sBIT_SUPPORTED */
+	png_color_8 png_sBIT_fake;	// if sBIT isn't found
 
 #ifdef PNG_SETJMP_SUPPORTED
 	// WARNING: Do NOT initialize any C++ objects past this point!
 	if (setjmp(png_jmpbuf(png_ptr))) {
 		// PNG read failed.
 		png_free(png_ptr, row_pointers);
-		delete img;
+		img->unref();
 		return nullptr;
 	}
 #endif
@@ -358,6 +381,10 @@ rp_image *RpPngPrivate::loadPng(png_structp png_ptr, png_infop info_ptr)
 	// Read the sBIT chunk.
 	// TODO: Fake sBIT if the PNG doesn't have one?
 	has_sBIT = (png_get_sBIT(png_ptr, info_ptr, &png_sBIT) == PNG_INFO_sBIT);
+	assert(has_sBIT == (png_sBIT != nullptr));
+	if (!png_sBIT) {
+		has_sBIT = false;
+	}
 #endif /* PNG_sBIT_SUPPORTED */
 
 	// Check the color type.
@@ -367,41 +394,91 @@ rp_image *RpPngPrivate::loadPng(png_structp png_ptr, png_infop info_ptr)
 		case PNG_COLOR_TYPE_GRAY:
 			// Grayscale is handled as a 256-color image
 			// with a grayscale palette.
-			fmt = rp_image::FORMAT_CI8;
+			fmt = rp_image::Format::CI8;
 			if (bit_depth < 8) {
 				// Expand to 8-bit grayscale.
 				png_set_expand_gray_1_2_4_to_8(png_ptr);
 			}
+			if (!has_sBIT) {
+				// NOTE: The gray field isn't used anywhere,
+				// so we also have to set the RGB fields.
+				const uint8_t bits = static_cast<uint8_t>(bit_depth > 8 ? 8 : bit_depth);
+				png_sBIT_fake.red = bits;
+				png_sBIT_fake.green = bits;
+				png_sBIT_fake.blue = bits;
+				png_sBIT_fake.gray = bits;
+				png_sBIT_fake.alpha = 0;
+			}
 			break;
+
 		case PNG_COLOR_TYPE_GRAY_ALPHA:
 			// Grayscale+Alpha is handled as ARGB32.
 			// QImage, gdk-pixbuf, cairo, and GDI+ don't support IA8.
 			// TODO: Does this work with 1, 2, and 4-bit grayscale?
-			fmt = rp_image::FORMAT_ARGB32;
+			fmt = rp_image::Format::ARGB32;
 			png_set_gray_to_rgb(png_ptr);
+			if (!has_sBIT) {
+				const uint8_t bits = static_cast<uint8_t>(bit_depth > 8 ? 8 : bit_depth);
+				png_sBIT_fake.red = 0;
+				png_sBIT_fake.green = 0;
+				png_sBIT_fake.blue = 0;
+				png_sBIT_fake.gray = 0;
+				png_sBIT_fake.alpha = bits;
+			}
 			break;
+
 		case PNG_COLOR_TYPE_PALETTE:
 			if (bit_depth < 8) {
 				// Expand to 8-bit pixels.
 				png_set_packing(png_ptr);
 			}
-			fmt = rp_image::FORMAT_CI8;
+			fmt = rp_image::Format::CI8;
+			if (!has_sBIT) {
+				// NOTE: Assuming 24-bit RGB for the palette.
+				const bool has_tRNS = (png_get_valid(png_ptr, info_ptr, PNG_INFO_tRNS) == PNG_INFO_tRNS);
+				png_sBIT_fake.red = 8;
+				png_sBIT_fake.green = 8;
+				png_sBIT_fake.blue = 8;
+				png_sBIT_fake.gray = 0;
+				png_sBIT_fake.alpha = (has_tRNS ? 8 : 0);
+			}
 			break;
-		case PNG_COLOR_TYPE_RGB:
+
+		case PNG_COLOR_TYPE_RGB: {
 			// 24-bit RGB.
-			fmt = rp_image::FORMAT_ARGB32;
-			if (png_get_valid(png_ptr, info_ptr, PNG_INFO_tRNS) == PNG_INFO_tRNS) {
+			fmt = rp_image::Format::ARGB32;
+			const bool has_tRNS = (png_get_valid(png_ptr, info_ptr, PNG_INFO_tRNS) == PNG_INFO_tRNS);
+			if (has_tRNS) {
 				// tRNS chunk is present. Use it as the alpha channel.
 				png_set_tRNS_to_alpha(png_ptr);
 			} else {
 				// 24-bit RGB with no transparency.
 				is24bit = true;
 			}
+			if (!has_sBIT) {
+				const uint8_t bits = static_cast<uint8_t>(bit_depth > 8 ? 8 : bit_depth);
+				png_sBIT_fake.red = bits;
+				png_sBIT_fake.green = bits;
+				png_sBIT_fake.blue = bits;
+				png_sBIT_fake.gray = 0;
+				png_sBIT_fake.alpha = (has_tRNS ? bits : 0);
+			}
 			break;
+		}
+
 		case PNG_COLOR_TYPE_RGB_ALPHA:
 			// 32-bit ARGB.
-			fmt = rp_image::FORMAT_ARGB32;
+			fmt = rp_image::Format::ARGB32;
+			if (!has_sBIT) {
+				const uint8_t bits = static_cast<uint8_t>(bit_depth > 8 ? 8 : bit_depth);
+				png_sBIT_fake.red = bits;
+				png_sBIT_fake.green = bits;
+				png_sBIT_fake.blue = bits;
+				png_sBIT_fake.gray = 0;
+				png_sBIT_fake.alpha = bits;
+			}
 			break;
+
 		default:
 			// Unsupported color type.
 			return nullptr;
@@ -435,14 +512,15 @@ rp_image *RpPngPrivate::loadPng(png_structp png_ptr, png_infop info_ptr)
 	img = new rp_image(width, height, fmt);
 	if (!img->isValid()) {
 		// Could not allocate the image.
-		delete img;
+		img->unref();
 		return nullptr;
 	}
 
 	// Allocate the row pointers.
-	row_pointers = (const png_byte**)png_malloc(png_ptr, sizeof(const png_byte*) * height);
+	row_pointers = static_cast<const png_byte**>(
+		png_malloc(png_ptr, sizeof(const png_byte*) * height));
 	if (!row_pointers) {
-		delete img;
+		img->unref();
 		return nullptr;
 	}
 
@@ -458,15 +536,18 @@ rp_image *RpPngPrivate::loadPng(png_structp png_ptr, png_infop info_ptr)
 	png_free(png_ptr, row_pointers);
 
 	// If CI8, read the palette.
-	if (fmt == rp_image::FORMAT_CI8) {
+	if (fmt == rp_image::Format::CI8) {
 		Read_CI8_Palette(png_ptr, info_ptr, color_type, img);
 	}
 
 #ifdef PNG_sBIT_SUPPORTED
 	// Set the sBIT metadata.
-	if (has_sBIT && png_sBIT) {
-		// NOTE: rp_image::sBIT_t has the same format as png_color_8.
-		img->set_sBIT(reinterpret_cast<rp_image::sBIT_t*>(png_sBIT));
+	// NOTE: rp_image::sBIT_t has the same format as png_color_8.
+	if (has_sBIT) {
+		img->set_sBIT(reinterpret_cast<const rp_image::sBIT_t*>(png_sBIT));
+	} else {
+		// Use the fake sBIT.
+		img->set_sBIT(reinterpret_cast<const rp_image::sBIT_t*>(&png_sBIT_fake));
 	}
 #endif /* PNG_sBIT_SUPPORTED */
 
@@ -516,6 +597,11 @@ rp_image *RpPng::loadUnchecked(IRpFile *file)
 		return nullptr;
 	}
 
+#ifdef PNG_WARNINGS_SUPPORTED
+	// Initialize the custom warning handler.
+	png_set_error_fn(png_ptr, nullptr, nullptr, RpPngPrivate::png_warning_fn);
+#endif /* PNG_WARNINGS_SUPPORTED */
+
 	// Initialize the custom I/O handler for IRpFile.
 	png_set_read_fn(png_ptr, file, RpPngPrivate::png_io_IRpFile_read);
 
@@ -544,8 +630,11 @@ rp_image *RpPng::load(IRpFile *file)
 	// Check the image with pngcheck() first.
 	file->rewind();
 	int ret = pngcheck(file);
-	if (ret != kOK) {
-		// PNG image has errors.
+	// NOTE: BK Pocket Bike Racer's icon is missing the IEND chunk.
+	// pngcheck returns kMinorError in that case.
+	// TODO: Make it a special exception?
+	if (ret != kOK && ret != kMinorError) {
+		// PNG image has major errors.
 		return nullptr;
 	}
 

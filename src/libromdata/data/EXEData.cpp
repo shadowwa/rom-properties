@@ -2,28 +2,13 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * EXEData.cpp: DOS/Windows executable data.                               *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2019 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "EXEData.hpp"
 #include "Other/exe_structs.h"
-
-// C includes.
-#include <stdlib.h>
 
 namespace LibRomData {
 
@@ -72,14 +57,20 @@ const EXEDataPrivate::MachineType EXEDataPrivate::machineTypes_PE[] = {
 	{IMAGE_FILE_MACHINE_AM33,	"Matsushita AM33"},
 	{IMAGE_FILE_MACHINE_POWERPC,	"PowerPC"},
 	{IMAGE_FILE_MACHINE_POWERPCFP,	"PowerPC with FPU"},
+	{IMAGE_FILE_MACHINE_POWERPCBE,	"PowerPC (big-endian)"},
 	{IMAGE_FILE_MACHINE_IA64,	"Intel Itanium"},
 	{IMAGE_FILE_MACHINE_MIPS16,	"MIPS16"},
+	{IMAGE_FILE_MACHINE_M68K,	"Motorola 68000"},
+	{IMAGE_FILE_MACHINE_PA_RISC,	"PA-RISC"},
 	{IMAGE_FILE_MACHINE_ALPHA64,	"DEC Alpha AXP (64-bit)"},
 	{IMAGE_FILE_MACHINE_MIPSFPU,	"MIPS with FPU"},
 	{IMAGE_FILE_MACHINE_MIPSFPU16,	"MIPS16 with FPU"},
 	{IMAGE_FILE_MACHINE_TRICORE,	"Infineon TriCore"},
 	{IMAGE_FILE_MACHINE_CEF,	"Common Executable Format"},
 	{IMAGE_FILE_MACHINE_EBC,	"EFI Byte Code"},
+	{IMAGE_FILE_MACHINE_RISCV32,	"RISC-V (32-bit address space)"},
+	{IMAGE_FILE_MACHINE_RISCV64,	"RISC-V (64-bit address space)"},
+	{IMAGE_FILE_MACHINE_RISCV128,	"RISC-V (128-bit address space)"},
 	{IMAGE_FILE_MACHINE_AMD64,	"AMD64"},
 	{IMAGE_FILE_MACHINE_M32R,	"Mitsubishi M32R"},
 	{IMAGE_FILE_MACHINE_ARM64,	"ARM (64-bit)"},

@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * nfp_structs.h: Nintendo amiibo data structures.                         *
  *                                                                         *
- * Copyright (c) 2016 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 /**
@@ -29,14 +16,12 @@
 #ifndef __ROMPROPERTIES_LIBROMDATA_NFP_STRUCTS_H__
 #define __ROMPROPERTIES_LIBROMDATA_NFP_STRUCTS_H__
 
-#include "librpbase/common.h"
 #include <stdint.h>
+#include "common.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#pragma pack(1)
 
 /**
  * Amiibo binary file sizes.
@@ -61,7 +46,7 @@ typedef enum {
  * RO = read-only
  * RW = read/write
  */
-typedef struct PACKED _NFP_Data_t {
+typedef struct _NFP_Data_t {
 	/** NTAG215 header. **/
 	uint8_t serial[9];		// [0x00,RO] NTAG215 serial number.
 	uint8_t int_u8;			// [0x02,RO] "Internal" u8 value
@@ -112,8 +97,6 @@ typedef enum {
 	NFP_TYPE_CARD		= 0x01,
 	NFP_TYPE_YARN		= 0x02,
 } NFP_Type_t;
-
-#pragma pack()
 
 #ifdef __cplusplus
 }

@@ -2,23 +2,11 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * AmiiboData.cpp: Nintendo amiibo identification data.                    *
  *                                                                         *
- * Copyright (c) 2016 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2019 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "AmiiboData.hpp"
 
 namespace LibRomData {
@@ -90,7 +78,10 @@ class AmiiboDataPrivate {
 		static const char_variant_t pikmin_olimar_variants[];
 		static const char_variant_t mii_variants[];
 		static const char_variant_t splatoon_inkling_variants[];
+		static const char_variant_t splatoon_octoling_variants[];
+		static const char_variant_t ff_cloud_variants[];
 		static const char_variant_t fe_corrin_variants[];
+		static const char_variant_t bayonetta_variants[];
 
 		static const char_variant_t mss_mario_variants[];
 		static const char_variant_t mss_luigi_variants[];
@@ -135,6 +126,9 @@ class AmiiboDataPrivate {
 		static const char_variant_t mh_barioth_ayuria_variants[];
 		static const char_variant_t mh_qurupeco_dan_variants[];
 
+		// Cereal
+		static const char_variant_t cereal_smb_variants[];
+
 		// Character IDs.
 		static const char_id_t char_ids[];
 
@@ -174,7 +168,7 @@ const char *const AmiiboDataPrivate::char_series_names[] = {
 	"Super Mario Bros.",	// 0x000
 	nullptr,		// 0x004
 	"Yoshi",		// 0x008
-	nullptr,		// 0x00C
+	"Donkey Kong",		// 0x00C
 	"The Legend of Zelda",	// 0x010
 	"The Legend of Zelda",	// 0x014
 
@@ -239,11 +233,15 @@ const char *const AmiiboDataPrivate::char_series_names[] = {
 
 	nullptr, nullptr, nullptr, nullptr,	// 0x1C0
 
-	"Pokk\xC3\xA9n Tournament",		// 0x1D0
-	nullptr, nullptr, nullptr,		// 0x1D4
+	// Pokémon (special characters) (0x1D0 - 0x1D4)
+	"Pok\xC3\xA9mon",			// 0x1D0
+	"Pok\xC3\xA9mon",			// 0x1D4
+
+	nullptr, nullptr,			// 0x1D8
 	nullptr, nullptr, nullptr, nullptr,	// 0x1E0
 	"Kirby",				// 0x1F0
-	nullptr, nullptr, nullptr,		// 0x1F4
+	"BoxBoy!",				// 0x1F4
+	nullptr, nullptr,			// 0x1F8
 	nullptr, nullptr, nullptr, nullptr,	// 0x200
 	"Fire Emblem",				// 0x210
 	nullptr, nullptr, nullptr,		// 0x214
@@ -275,7 +273,7 @@ const char *const AmiiboDataPrivate::char_series_names[] = {
 	nullptr,				// 0x32C
 	nullptr,				// 0x330
 	"Pac-Man",				// 0x334
-	nullptr,				// 0x338
+	"Dark Souls",				// 0x338
 	nullptr,				// 0x33C
 	nullptr,				// 0x340
 	nullptr,				// 0x344
@@ -286,6 +284,17 @@ const char *const AmiiboDataPrivate::char_series_names[] = {
 	nullptr,				// 0x358
 	"Shovel Knight",			// 0x35C
 	"Final Fantasy",			// 0x360
+	nullptr,				// 0x364
+	nullptr,				// 0x368
+	nullptr,				// 0x36C
+	nullptr,				// 0x370
+	"Cereal",				// 0x374
+	"Metal Gear",				// 0x378
+	"Castlevania",				// 0x37C
+	"Jikkyou Powerful Pro Baseball",	// 0x380
+	nullptr,				// 0x384
+	nullptr,				// 0x388
+	"Diablo",				// 0x38C
 };
 
 // Character variants.
@@ -368,9 +377,26 @@ const AmiiboDataPrivate::char_variant_t AmiiboDataPrivate::splatoon_inkling_vari
 	{0x03, "Inkling Squid"},
 };
 
+const AmiiboDataPrivate::char_variant_t AmiiboDataPrivate::splatoon_octoling_variants[] = {
+	{0x00, "Octoling"},	// NOTE: Not actually assigned.
+	{0x01, "Octoling Girl"},
+	{0x02, "Octoling Boy"},
+	{0x03, "Octoling Octopus"},
+};
+
+const AmiiboDataPrivate::char_variant_t AmiiboDataPrivate::ff_cloud_variants[] = {
+	{0x00, "Cloud"},
+	{0x01, "Cloud (Player 2)"},
+};
+
 const AmiiboDataPrivate::char_variant_t AmiiboDataPrivate::fe_corrin_variants[] = {
 	{0x00, "Corrin"},
-	{0x01, "Corrin (Player 2"},
+	{0x01, "Corrin (Player 2)"},
+};
+
+const AmiiboDataPrivate::char_variant_t AmiiboDataPrivate::bayonetta_variants[] = {
+	{0x00, "Bayonetta"},
+	{0x01, "Bayonetta (Player 2)"},
 };
 
 // Mario Sports Superstars
@@ -408,7 +434,7 @@ MSS_VARIANT_ARRAY_DEF("Pink Gold Peach", pink_gold_peach);
 const AmiiboDataPrivate::char_variant_t AmiiboDataPrivate::ac_isabelle_variants[] = {
 	{0x00, "Isabelle (Summer Outfit)"},
 	{0x01, "Isabelle (Autumn Outfit)"},
-	// TODO: How are these ones different?
+	{0x02, "Isabelle (Series 3)"},
 	{0x03, "Isabelle (Series 4)"},
 };
 
@@ -419,44 +445,37 @@ const AmiiboDataPrivate::char_variant_t AmiiboDataPrivate::ac_kk_slider_variants
 
 const AmiiboDataPrivate::char_variant_t AmiiboDataPrivate::ac_tom_nook_variants[] = {
 	{0x00, "Tom Nook"},
-	// TODO: Variant description.
 	{0x01, "Tom Nook (Series 3)"},
 };
 
 const AmiiboDataPrivate::char_variant_t AmiiboDataPrivate::ac_timmy_variants[] = {
-	// TODO: Variant descriptions.
 	{0x00, "Timmy"},
 	{0x02, "Timmy (Series 3)"},
 	{0x04, "Timmy (Series 4)"},
 };
 
 const AmiiboDataPrivate::char_variant_t AmiiboDataPrivate::ac_tommy_variants[] = {
-	// TODO: Variant descriptions.
 	{0x01, "Tommy (Series 2)"},
 	{0x03, "Tommy (Series 4)"},
 };
 
 const AmiiboDataPrivate::char_variant_t AmiiboDataPrivate::ac_digby_variants[] = {
 	{0x00, "Digby"},
-	// TODO: Variant description.
 	{0x01, "Digby (Series 3)"},
 };
 
 const AmiiboDataPrivate::char_variant_t AmiiboDataPrivate::ac_resetti_variants[] = {
 	{0x00, "Resetti"},
-	// TODO: Variant description.
 	{0x01, "Resetti (Series 4)"},
 };
 
 const AmiiboDataPrivate::char_variant_t AmiiboDataPrivate::ac_don_resetti_variants[] = {
-	// TODO: Variant descriptions.
 	{0x00, "Don Resetti (Series 2)"},
 	{0x01, "Don Resetti (Series 3)"},
 };
 
 const AmiiboDataPrivate::char_variant_t AmiiboDataPrivate::ac_redd_variants[] = {
 	{0x00, "Redd"},
-	// TODO: Variant description.
 	{0x01, "Redd (Series 4)"},
 };
 
@@ -467,7 +486,6 @@ const AmiiboDataPrivate::char_variant_t AmiiboDataPrivate::ac_dr_shrunk_variants
 
 const AmiiboDataPrivate::char_variant_t AmiiboDataPrivate::ac_lottie_variants[] = {
 	{0x00, "Lottie"},
-	// TODO: Variant description.
 	{0x01, "Lottie (Series 4)"},
 };
 
@@ -488,7 +506,7 @@ const AmiiboDataPrivate::char_variant_t AmiiboDataPrivate::ac_toby_variants[] = 
 	{0x01, "Toby (Sanrio)"},
 };
 const AmiiboDataPrivate::char_variant_t AmiiboDataPrivate::ac_etoile_variants[] = {
-	{0x01, "\xC3\x89toile"},
+	{0x01, "\xC3\x89toile (Sanrio)"},
 };
 
 const AmiiboDataPrivate::char_variant_t AmiiboDataPrivate::mh_rathalos_variants[] = {
@@ -512,6 +530,12 @@ const AmiiboDataPrivate::char_variant_t AmiiboDataPrivate::mh_qurupeco_dan_varia
 	{0x01, "Qurupeco and Dan"},
 };
 
+// Cereal
+const AmiiboDataPrivate::char_variant_t AmiiboDataPrivate::cereal_smb_variants[] = {
+	{0x00, "Super Mario Cereal"},	// NOTE: Not actually assigned.
+	{0x01, "Super Mario Cereal"},
+};
+
 #define AMIIBO_CHAR_ID_ONE(id, name) {id, 0, name, nullptr}
 #define AMIIBO_CHAR_ID_VAR(id, name, vararray) {id, (uint8_t)ARRAY_SIZE(vararray), name, vararray}
 
@@ -531,23 +555,33 @@ const AmiiboDataPrivate::char_id_t AmiiboDataPrivate::char_ids[] = {
 	AMIIBO_CHAR_ID_ONE(0x000A, "Toad"),
 	AMIIBO_CHAR_ID_ONE(0x0013, "Daisy"),
 	AMIIBO_CHAR_ID_ONE(0x0014, "Waluigi"),
+	AMIIBO_CHAR_ID_ONE(0x0015, "Goomba"),
 	AMIIBO_CHAR_ID_ONE(0x0017, "Boo"),
+	AMIIBO_CHAR_ID_ONE(0x0023, "Koopa Troopa"),
+	AMIIBO_CHAR_ID_ONE(0x0024, "Piranha Plant"),
 
 	// Yoshi (character series = 0x008)
 	AMIIBO_CHAR_ID_VAR(0x0080, "Poochy", yoshi_poochy_variants),
+
+	// Donkey Kong (character series = 0x00C)
+	AMIIBO_CHAR_ID_ONE(0x00C0, "King K. Rool"),
 
 	// The Legend of Zelda (character series = 0x010)
 	AMIIBO_CHAR_ID_VAR(0x0100, "Link", tloz_link_variants),
 	AMIIBO_CHAR_ID_VAR(0x0101, "Zelda", tloz_zelda_variants),
 	AMIIBO_CHAR_ID_VAR(0x0102, "Ganondorf", tloz_ganondorf_variants),
 	AMIIBO_CHAR_ID_ONE(0x0103, "Midna & Wolf Link"),
-	// The Legend of Zelda (character series = 0x014)
+	AMIIBO_CHAR_ID_ONE(0x0105, "Daruk"),
+	AMIIBO_CHAR_ID_ONE(0x0106, "Urbosa"),
+	AMIIBO_CHAR_ID_ONE(0x0107, "Mipha"),
+	AMIIBO_CHAR_ID_ONE(0x0108, "Revali"),
+	// The Legend of Zelda [enemies] (character series = 0x014)
+	AMIIBO_CHAR_ID_ONE(0x0140, "Guardian"),
 	AMIIBO_CHAR_ID_ONE(0x0141, "Bokoblin"),
 
 	// Animal Crossing (character series = 0x018)
 	AMIIBO_CHAR_ID_ONE(0x0180, "Villager"),
 	AMIIBO_CHAR_ID_VAR(0x0181, "Isabelle", ac_isabelle_variants),
-	AMIIBO_CHAR_ID_ONE(0x0182, "DJ KK"),
 	AMIIBO_CHAR_ID_VAR(0x0182, "K.K. Slider", ac_kk_slider_variants),
 	AMIIBO_CHAR_ID_VAR(0x0183, "Tom Nook", ac_tom_nook_variants),
 	AMIIBO_CHAR_ID_ONE(0x0184, "Timmy & Tommy"),
@@ -946,7 +980,7 @@ const AmiiboDataPrivate::char_id_t AmiiboDataPrivate::char_ids[] = {
 	AMIIBO_CHAR_ID_ONE(0x04B4, "Spike"),
 	AMIIBO_CHAR_ID_ONE(0x04B6, "Hornsby"),
 	AMIIBO_CHAR_ID_ONE(0x04B9, "Merengue"),
-	// FIXME: MSVC 2010 interprets \xA9e as 2718 because
+	// NOTE: MSVC 2010 interprets \xA9e as 2718 because
 	// it's too dumb to realize \x takes *two* nybbles.
 	AMIIBO_CHAR_ID_ONE(0x04BA, "Ren\303\251e"),
 	AMIIBO_CHAR_ID_ONE(0x04C5, "Vesta"),
@@ -1001,10 +1035,14 @@ const AmiiboDataPrivate::char_id_t AmiiboDataPrivate::char_ids[] = {
 	// Star Fox (character series = 0x058)
 	AMIIBO_CHAR_ID_ONE(0x0580, "Fox"),
 	AMIIBO_CHAR_ID_ONE(0x0581, "Falco"),
+	// TODO: 0x0582, 0x0583
+	AMIIBO_CHAR_ID_ONE(0x0584, "Wolf"),
 
 	// Metroid (character series = 0x05C)
 	AMIIBO_CHAR_ID_VAR(0x05C0, "Samus", metroid_samus_variants),
 	AMIIBO_CHAR_ID_ONE(0x05C1, "Metroid"),
+	AMIIBO_CHAR_ID_ONE(0x05C2, "Ridley"),
+	AMIIBO_CHAR_ID_ONE(0x05C3, "Dark Samus"),
 
 	// F-Zero (character series = 0x060)
 	AMIIBO_CHAR_ID_ONE(0x0600, "Captain Falcon"),
@@ -1028,6 +1066,7 @@ const AmiiboDataPrivate::char_id_t AmiiboDataPrivate::char_ids[] = {
 	AMIIBO_CHAR_ID_ONE(0x0780, "Mr. Game & Watch"),
 	AMIIBO_CHAR_ID_ONE(0x0781, "R.O.B."),	// NES/Famicom variant is in Page 22, amiibo series.
 	AMIIBO_CHAR_ID_ONE(0x0782, "Duck Hunt"),
+	AMIIBO_CHAR_ID_ONE(0x078F, "Ice Climbers"),
 
 	// Mii (character series = 0x07C)
 	AMIIBO_CHAR_ID_VAR(0x07C0, "Mii Brawler", mii_variants),
@@ -1036,6 +1075,9 @@ const AmiiboDataPrivate::char_id_t AmiiboDataPrivate::char_ids[] = {
 	AMIIBO_CHAR_ID_VAR(0x0800, "Inkling", splatoon_inkling_variants),
 	AMIIBO_CHAR_ID_ONE(0x0801, "Callie"),
 	AMIIBO_CHAR_ID_ONE(0x0802, "Marie"),
+	AMIIBO_CHAR_ID_ONE(0x0803, "Pearl"),
+	AMIIBO_CHAR_ID_ONE(0x0804, "Marina"),
+	AMIIBO_CHAR_ID_VAR(0x0805, "Octoling", splatoon_octoling_variants),
 
 	// Mario Sports Superstars (character series = 0x09C)
 	AMIIBO_CHAR_ID_VAR(0x09C0, "Mario", mss_mario_variants),
@@ -1058,15 +1100,21 @@ const AmiiboDataPrivate::char_id_t AmiiboDataPrivate::char_ids[] = {
 	AMIIBO_CHAR_ID_VAR(0x09D1, "Pink Gold Peach", mss_pink_gold_peach_variants),
 
 	// Pokémon (character series = 0x190 - 0x1BC)
+	AMIIBO_CHAR_ID_ONE(0x1900+  2, "Ivysaur"),
 	AMIIBO_CHAR_ID_ONE(0x1900+  6, "Charizard"),
+	AMIIBO_CHAR_ID_ONE(0x1900+  7, "Squirtle"),
 	AMIIBO_CHAR_ID_ONE(0x1900+ 25, "Pikachu"),
 	AMIIBO_CHAR_ID_ONE(0x1900+ 39, "Jigglypuff"),
 	AMIIBO_CHAR_ID_ONE(0x1900+150, "Mewtwo"),
+	AMIIBO_CHAR_ID_ONE(0x1900+172, "Pichu"),
 	AMIIBO_CHAR_ID_ONE(0x1900+448, "Lucario"),
 	AMIIBO_CHAR_ID_ONE(0x1900+658, "Greninja"),
+	AMIIBO_CHAR_ID_ONE(0x1900+727, "Incineroar"),
 
-	// Pokkén Tournament (character series = 0x1D00)
+	// Pokémon (special characters) (character series = 0x1D0 - 0x1D4)
 	AMIIBO_CHAR_ID_ONE(0x1D00, "Shadow Mewtwo"),
+	AMIIBO_CHAR_ID_ONE(0x1D01, "Detective Pikachu"),
+	AMIIBO_CHAR_ID_ONE(0x1D40, "Pok\xC3\xA9mon Trainer"),
 
 	// Kirby (character series = 0x1F0)
 	AMIIBO_CHAR_ID_ONE(0x1F00, "Kirby"),
@@ -1086,6 +1134,8 @@ const AmiiboDataPrivate::char_id_t AmiiboDataPrivate::char_ids[] = {
 	AMIIBO_CHAR_ID_VAR(0x2105, "Corrin", fe_corrin_variants),
 	AMIIBO_CHAR_ID_ONE(0x2106, "Alm"),
 	AMIIBO_CHAR_ID_ONE(0x2107, "Celica"),
+	AMIIBO_CHAR_ID_ONE(0x2108, "Chrom"),
+	AMIIBO_CHAR_ID_ONE(0x2109, "Tiki"),
 
 	// Xenoblade (character series = 0x224)
 	AMIIBO_CHAR_ID_ONE(0x2240, "Shulk"),
@@ -1101,16 +1151,20 @@ const AmiiboDataPrivate::char_id_t AmiiboDataPrivate::char_ids[] = {
 	AMIIBO_CHAR_ID_ONE(0x3200, "Sonic"),
 
 	// Bayonetta (character series = 0x324)
-	AMIIBO_CHAR_ID_ONE(0x3240, "Bayonetta"),
+	AMIIBO_CHAR_ID_VAR(0x3240, "Bayonetta", bayonetta_variants),
 
 	// Pac-Man (character series = 0x334)
 	AMIIBO_CHAR_ID_ONE(0x3340, "Pac-Man"),
+
+	// Dark Souls (character series = 0x338)
+	AMIIBO_CHAR_ID_ONE(0x3380, "Solaire of Astora"),
 
 	// Mega Man (character series = 0x348)
 	AMIIBO_CHAR_ID_ONE(0x3480, "Mega Man"),
 
 	// Street Fighter (character series = 0x34C)
 	AMIIBO_CHAR_ID_ONE(0x34C0, "Ryu"),
+	AMIIBO_CHAR_ID_ONE(0x34C1, "Ken"),
 
 	// Monster Hunter (character series = 0x350)
 	AMIIBO_CHAR_ID_VAR(0x3500, "One-Eyed Rathalos and Rider", mh_rathalos_variants),
@@ -1121,9 +1175,34 @@ const AmiiboDataPrivate::char_id_t AmiiboDataPrivate::char_ids[] = {
 
 	// Shovel Knight (character series = 0x35C)
 	AMIIBO_CHAR_ID_ONE(0x35C0, "Shovel Knight"),
+	AMIIBO_CHAR_ID_ONE(0x35C1, "Plague Knight"),
+	AMIIBO_CHAR_ID_ONE(0x35C2, "Specter Knight"),
+	AMIIBO_CHAR_ID_ONE(0x35C3, "King Knight"),
 
 	// Final Fantasy (character series = 0x360)
-	AMIIBO_CHAR_ID_ONE(0x3600, "Cloud"),
+	AMIIBO_CHAR_ID_VAR(0x3600, "Cloud", ff_cloud_variants),
+
+	// Cereal (character series = 0x374)
+	AMIIBO_CHAR_ID_VAR(0x3740, "Super Mario Cereal", cereal_smb_variants),
+
+	// Metal Gear (character series = 0x378)
+	AMIIBO_CHAR_ID_ONE(0x3780, "Snake"),
+
+	// Castlevania (character series = 0x37C)
+	AMIIBO_CHAR_ID_ONE(0x37C0, "Simon"),
+	AMIIBO_CHAR_ID_ONE(0x37C1, "Richter"),
+
+	// Jikkyou Powerful Pro Baseball (character series = 0x380)
+	// FIXME: All of these have character variant = 0x01.
+	AMIIBO_CHAR_ID_ONE(0x3800, "Pawapuro"),
+	AMIIBO_CHAR_ID_ONE(0x3801, "Ikari"),
+	AMIIBO_CHAR_ID_ONE(0x3802, "Daijobu"),
+	AMIIBO_CHAR_ID_ONE(0x3803, "Hayakawa"),
+	AMIIBO_CHAR_ID_ONE(0x3804, "Yabe"),
+	AMIIBO_CHAR_ID_ONE(0x3805, "Ganda"),
+
+	// Diablo (character series = 0x38C)
+	AMIIBO_CHAR_ID_ONE(0x38C0, "Loot Goblin"),
 };
 
 /**
@@ -1159,13 +1238,17 @@ const char *const AmiiboDataPrivate::amiibo_series_names[] = {
 	"Shovel Knight",			// 0x0A
 	nullptr,				// 0x0B
 	"Kirby",				// 0x0C
-	"Pokk\xC3\xA9n Tournament",		// 0x0D
-	nullptr,				// 0x0E
+	"Special Pok\xC3\xA9mon",		// 0x0D
+	"Mario Sports Superstars",		// 0x0E
 	"Monster Hunter",			// 0x0F
 	"BoxBoy!",				// 0x10
 	"Pikmin",				// 0x11
 	"Fire Emblem",				// 0x12
 	"Metroid",				// 0x13
+	"Other",				// 0x14
+	"Mega Man",				// 0x15
+	"Diablo",				// 0x16
+	"Jikkyou Powerful Pro Baseball",	// 0x17
 };
 
 // amiibo IDs.
@@ -1196,7 +1279,7 @@ const AmiiboDataPrivate::amiibo_id_t AmiiboDataPrivate::amiibo_ids[] = {
 	{ 21, 3, "Lucario"},		// 0x0011 (Wave 3, out of order)
 	{ 18, 2, "Captain Falcon"},	// 0x0012
 
-	// Waves 3+ [0x0013-0x0033]
+	// SSB: Waves 3+ [0x0013-0x0033]
 	{ 19, 3, "Rosalina & Luma"},	// 0x0013
 	{ 20, 3, "Bowser"},		// 0x0014
 	{ 43, 6, "Bowser Jr."},		// 0x0015
@@ -1224,12 +1307,12 @@ const AmiiboDataPrivate::amiibo_id_t AmiiboDataPrivate::amiibo_ids[] = {
 	{ 25, 3, "Shulk"},		// 0x002B
 	{ 34, 4, "Ness"},		// 0x002C
 	{ 45, 6, "Mr. Game & Watch"},	// 0x002D
-	{ 54, 9, "R.O.B. (Famicom)"},	// 0x002E (FIXME: Localized release numbers.)
+	{ 54, 9, "R.O.B. (Famicom)"},	// 0x002E (TODO: Localized release numbers.)
 	{ 47, 6, "Duck Hunt"},		// 0x002F
 	{ 26, 3, "Sonic"},		// 0x0030
 	{ 27, 3, "Mega Man"},		// 0x0031
 	{ 35, 4, "Pac-Man"},		// 0x0032
-	{ 46, 6, "R.O.B. (NES)"},	// 0x0033 (FIXME: Localized release numbers.)
+	{ 46, 6, "R.O.B. (NES)"},	// 0x0033 (TODO: Localized release numbers.)
 
 	// SMB: Wave 1 [0x0034-0x0039]
 	{  1, 1, "Mario"},		// 0x0034
@@ -1262,7 +1345,7 @@ const AmiiboDataPrivate::amiibo_id_t AmiiboDataPrivate::amiibo_ids[] = {
 	// Animal Crossing Cards: Series 1 [0x0044-0x00A7]
 	{  1, 1, "Isabelle"},		// 0x0044
 	{  2, 1, "Tom Nook"},		// 0x0045
-	{  3, 1, "DJ KK"},		// 0x0046
+	{  3, 1, "DJ K.K."},		// 0x0046
 	{  4, 1, "Sable"},		// 0x0047
 	{  5, 1, "Kapp'n"},		// 0x0048
 	{  6, 1, "Resetti"},		// 0x0049
@@ -1285,7 +1368,7 @@ const AmiiboDataPrivate::amiibo_id_t AmiiboDataPrivate::amiibo_ids[] = {
 	{ 23, 1, "Cheri"},		// 0x005A
 	{ 24, 1, "Kyle"},		// 0x005B
 	{ 25, 1, "Al"},			// 0x005C
-	// FIXME: MSVC 2010 interprets \xA9e as 2718 because
+	// NOTE: MSVC 2010 interprets \xA9e as 2718 because
 	// it's too dumb to realize \x takes *two* nybbles.
 	{ 26, 1, "Ren\303\251e"},	// 0x005D
 	{ 27, 1, "Lopez"},		// 0x005E
@@ -1810,7 +1893,7 @@ const AmiiboDataPrivate::amiibo_id_t AmiiboDataPrivate::amiibo_ids[] = {
 	{ 58, 10, "Corrin"},		// 0x025A
 	{ 59, 10, "Bayonetta"},		// 0x025B
 
-	// Pokkén Tournament [0x025C]
+	// Special Pokémon [0x025C]
 	{  0, 0, "Shadow Mewtwo"},	// 0x025C
 
 	// Splatoon: Wave 2 [0x025D-0x0261]
@@ -2055,11 +2138,13 @@ const AmiiboDataPrivate::amiibo_id_t AmiiboDataPrivate::amiibo_ids[] = {
 	{  0, 3, "Link (Rider)"},		// 0x0354
 	{  0, 3, "Guardian"},			// 0x0355
 	{  0, 3, "Zelda"},			// 0x0356
-	// Unused [0x0357-0x35B]
-	{  0, 0, nullptr},			// 0x0357
-	{  0, 0, nullptr}, {  0, 0, nullptr},	// 0x0358,0x0359
-	{  0, 0, nullptr}, {  0, 0, nullptr},	// 0x035A,0x035B
-	// The Legend of Zelda: Breath of the Wild Series (continued)
+	{  0, 0, nullptr},			// 0x0357 (???)
+	// The Legend of Zelda: Breath of the Wild Series (Champions)
+	{  0, 4, "Daruk"},			// 0x0358
+	{  0, 4, "Urbosa"},			// 0x0359
+	{  0, 4, "Mipha"},			// 0x035A
+	{  0, 4, "Revali"},			// 0x035B
+	// The Legend of Zelda: Breath of the Wild Series (Wave 3, continued)
 	{  0, 3, "Bokoblin"},			// 0x035C
 
 	// Yarn Yoshi: Poochy [0x035D]
@@ -2072,8 +2157,8 @@ const AmiiboDataPrivate::amiibo_id_t AmiiboDataPrivate::amiibo_ids[] = {
 	{  0, 0, nullptr},			// 0x035F
 
 	// Fire Emblem [0x0360-0x0361]
-	{  0, 0, "Alm"},			// 0x0360
-	{  0, 0, "Celica"},			// 0x0361
+	{  1, 0, "Alm"},			// 0x0360
+	{  2, 0, "Celica"},			// 0x0361
 
 	// SSB: Wave 10 [0x0362-0x0364]
 	{ 60, 10, "Cloud (Player 2)"},		// 0x0362
@@ -2084,25 +2169,104 @@ const AmiiboDataPrivate::amiibo_id_t AmiiboDataPrivate::amiibo_ids[] = {
 	{  1, 1, "Samus Aran"},			// 0x0365
 	{  2, 1, "Metroid"},			// 0x0366
 
-	// Unused [0x0367-0x0368]
-	{  0, 0, nullptr}, {  0, 0, nullptr},	// 0x0367,0x0368
+	// SMB: Wave 3 [0x0367-0x0368]
+	{ 16, 3, "Goomba"},			// 0x0367
+	{ 17, 3, "Koopa Troopa"},		// 0x0368
 
-	// Splatoon: Wave 3 [0x0369-0x036A]
+	// Splatoon: Wave 3 [0x0369-0x036B]
 	{  0, 3, "Inkling Girl (Neon Pink)"},	// 0x0369
 	{  0, 3, "Inkling Boy (Neon Green)"},	// 0x036A
 	{  0, 3, "Inkling Squid (Neon Purple)"},// 0x036B
 
-#if 0
-	// TODO: Not released yet.
+	// Shovel Knight [0x36C-0x036E]
+	{  0, 0, "Plague Knight"},		// 0x036C
+	{  0, 0, "Specter Knight"},		// 0x036D
+	{  0, 0, "King Knight"},		// 0x036E
 
-	// The Legend of Zelda
-	{  0,  0, "Link (Majora's Mask)"},	// 0x0xxx
-	{  0,  0, "Link (Twilight Princess)"},	// 0x0xxx
-	{  0,  0, "Link (Skyward Sword)"},	// 0x0xxx
+	// Fire Emblem [0x036F-0x0370]
+	{  3, 0, "Chrom"},			// 0x036F
+	{  4, 0, "Tiki"},			// 0x0370
 
-	// Pikmin
-	{  0, 0, "Pikmin"},			// 0x0xxx
-#endif
+	// SMB: Wave 4 (Super Mario Odyssey) [0x0371-0x373]
+	{ 18, 4, "Mario - Wedding"},		// 0x0371
+	{ 19, 4, "Peach - Wedding"},		// 0x0372
+	{ 20, 4, "Bowser - Wedding"},		// 0x0373
+
+	// Cereal [0x374]
+	{  0, 0, "Super Mario Cereal"},		// 0x0374
+
+	// Special Pokémon [0x0375]
+	{  0, 0, "Detective Pikachu"},		// 0x0375
+
+	// Splatoon: Wave 4 [0x0376-0x0377]
+	{  0, 4, "Pearl"},			// 0x0376
+	{  0, 4, "Marina"},			// 0x0377
+
+	// Dark Souls [0x0378]
+	{  0, 0, "Solaire of Astora"},		// 0x0378
+
+	// Mega Man [0x0379]
+	{  0, 0, "Mega Man"},			// 0x0379
+
+	// SSBU: Wave 13 [0x037A]
+	{ 69, 13, "Daisy"},			// 0x037A
+
+	// SSBU: Wave 12 [0x037B]
+	{ 66, 12, "King K. Rool"},		// 0x037B
+
+	// SSBU: Wave 13 [0x037C-0x037D]
+	{ 73, 13, "Young Link"},		// 0x037C
+	{ 70, 13, "Isabelle"},			// 0x037D
+
+	// SSBU: Wave 11 [0x037E-0x037F]
+	{ 65, 11, "Wolf"},			// 0x037E
+	{ 64, 11, "Ridley"},			// 0x037F
+
+	// SSBU: Wave 12 [0x0380]
+	{ 81, 13, "Dark Samus"},		// 0x0380
+
+	// SSBU: Wave 12 [0x0381]
+	{ 67, 12, "Ice Climbers"},		// 0x0381
+
+	// SSBU: Wave 11 [0x0382]
+	{ 63, 11, "Inkling"},			// 0x0382
+
+	// SSBU: Wave 13 [0x0383-0x038B]
+	{ 76, 13, "Ivysaur"},			// 0x0383
+	{ 77, 13, "Squirtle"},			// 0x0384
+	{ 71, 13, "Pichu"},			// 0x0385
+	{ 79, 13, "Incineroar"},		// 0x0386
+	{ 74, 13, "Pok\xC3\xA9mon Trainer"},	// 0x0387
+	{ 80, 13, "Chrom"},			// 0x0388
+	{ 72, 13, "Ken"},			// 0x0389
+	{ 75, 13, "Snake"},			// 0x038A
+	{ 78, 13, "Simon"},			// 0x038B
+	{ 82, 13, "Richter"},			// 0x038C
+
+	// SSBU: Wave 12 [0x038D]
+	{ 68, 12, "Piranha Plant"},		// 0x038D
+
+	// Splatoon: Wave 5 [0x038E-0x0390]
+	{  0, 5, "Octoling Girl"},		// 0x038E
+	{  0, 5, "Octoling Boy"},		// 0x038F
+	{  0, 5, "Octoling Octopus"},		// 0x0390
+
+	// Diablo [0x0391]
+	{  0, 0, "Loot Goblin"},		// 0x0391
+
+	// Shovel Knight [0x0392]
+	{  0, 0, "Shovel Knight (Gold Edition)"},// 0x0392
+
+	// Jikkyou Powerful Pro Baseball [0x0393-0x0398]
+	{  1, 0, "Pawapuro"},			// 0x0393
+	{  2, 0, "Ikari"},			// 0x0394
+	{  6, 0, "Daijobu"},			// 0x0395
+	{  4, 0, "Hayakawa"},			// 0x0396
+	{  3, 0, "Yabe"},			// 0x0397
+	{  5, 0, "Ganda"},			// 0x0398
+
+	// The Legend of Zelda: Link's Awakening Series [0x0399]
+	{  0, 0, "Link"},			// 0x0399
 };
 
 /** AmiiboData **/
@@ -2114,7 +2278,7 @@ const AmiiboDataPrivate::amiibo_id_t AmiiboDataPrivate::amiibo_ids[] = {
  */
 const char *AmiiboData::lookup_char_series_name(uint32_t char_id)
 {
-	static_assert(ARRAY_SIZE(AmiiboDataPrivate::char_series_names) == (0x360/4)+1,
+	static_assert(ARRAY_SIZE(AmiiboDataPrivate::char_series_names) == (0x38C/4)+1,
 		"char_series_names[] is out of sync with the amiibo ID list.");
 
 	const unsigned int series_id = (char_id >> 22) & 0x3FF;
@@ -2181,10 +2345,10 @@ const char *AmiiboData::lookup_char_name(uint32_t char_id)
  */
 const char *AmiiboData::lookup_amiibo_series_name(uint32_t amiibo_id)
 {
-	// FIXME: gcc-6.3.0 is trying to interpret 0x035E+1 as a
+	// NOTE: gcc-6.3.0 is trying to interpret 0x035E+1 as a
 	// floating-point hex constant:
 	// error: unable to find numeric literal operator ‘operator""+1’
-	static_assert(ARRAY_SIZE(AmiiboDataPrivate::amiibo_ids) == ((0x036B)+1),
+	static_assert(ARRAY_SIZE(AmiiboDataPrivate::amiibo_ids) == ((0x0399)+1),
 		"amiibo_ids[] is out of sync with the amiibo ID list.");
 
 	const unsigned int series_id = (amiibo_id >> 8) & 0xFF;

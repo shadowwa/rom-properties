@@ -2,30 +2,26 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * RpPngWriter.cpp: PNG image writer.                                      *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
-#include "librpbase/config.librpbase.h"
+#include "stdafx.h"
+#include "config.librpbase.h"
 #include "RpPngWriter.hpp"
 
-#include "common.h"
 #include "byteorder.h"
 #include "TextFuncs.hpp"
-#include "file/RpFile.hpp"
+
+// librpfile
+#include "librpfile/RpFile.hpp"
+using LibRpFile::IRpFile;
+using LibRpFile::RpFile;
+
+// librptexture
+#include "img/rp_image.hpp"
+using LibRpTexture::rp_image;
+using LibRpTexture::argb32_t;
 
 // APNG
 #include "img/IconAnimData.hpp"
@@ -78,20 +74,19 @@
 #endif
 
 // C includes. (C++ namespace)
-#include <cassert>
-#include <cerrno>
+#include <csetjmp>
 
-// C++ includes.
-#include <string>
-#include <vector>
+// C++ STL classes.
+using std::array;
 using std::string;
+using std::unique_ptr;
 using std::vector;
 
 #if defined(_MSC_VER) && (defined(ZLIB_IS_DLL) || defined(PNG_IS_DLL))
 // Need zlib for delay-load checks.
 #include <zlib.h>
 // MSVC: Exception handling for /DELAYLOAD.
-#include "libwin32common/DelayLoadHelper.hpp"
+#include "libwin32common/DelayLoadHelper.h"
 #endif /* defined(_MSC_VER) && (defined(ZLIB_IS_DLL) || defined(PNG_IS_DLL)) */
 
 namespace LibRpBase {
@@ -118,11 +113,58 @@ static int DelayLoad_test_zlib_and_png(void)
 class RpPngWriterPrivate
 {
 	public:
-		// NOTE: The public class constructor must dup() file.
-		RpPngWriterPrivate(IRpFile *file, int width, int height, rp_image::Format format);
-		RpPngWriterPrivate(IRpFile *file, const rp_image *img);
-		RpPngWriterPrivate(IRpFile *file, const IconAnimData *iconAnimData);
+		// NOTE: The public class constructor must NOT ref() file.
+		// ref() is done here if needed.
+		RpPngWriterPrivate(IRpFile *file, int width, int height, rp_image::Format format)
+			: lastError(0), file(nullptr), imageTag(ImageTag::Invalid)
+			, png_ptr(nullptr), info_ptr(nullptr), IHDR_written(false)
+		{
+			init(file, width, height, format);
+		}
+		RpPngWriterPrivate(IRpFile *file, const rp_image *img)
+			: lastError(0), file(nullptr), imageTag(ImageTag::Invalid)
+			, png_ptr(nullptr), info_ptr(nullptr), IHDR_written(false)
+		{
+			init(file, img);
+		}
+		RpPngWriterPrivate(IRpFile *file, const IconAnimData *iconAnimData)
+			: lastError(0), file(nullptr), imageTag(ImageTag::Invalid)
+			, png_ptr(nullptr), info_ptr(nullptr), IHDR_written(false)
+		{
+			init(file, iconAnimData);
+		}
+
+		RpPngWriterPrivate(const char *filename, int width, int height, rp_image::Format format)
+			: lastError(0), file(nullptr), imageTag(ImageTag::Invalid)
+			, png_ptr(nullptr), info_ptr(nullptr), IHDR_written(false)
+		{
+			RpFile *const file = (filename ? new RpFile(filename, RpFile::FM_CREATE_WRITE) : nullptr);
+			init(file, width, height, format);
+			UNREF(file);
+		}
+		RpPngWriterPrivate(const char *filename, const rp_image *img)
+			: lastError(0), file(nullptr), imageTag(ImageTag::Invalid)
+			, png_ptr(nullptr), info_ptr(nullptr), IHDR_written(false)
+		{
+			RpFile *const file = (filename ? new RpFile(filename, RpFile::FM_CREATE_WRITE) : nullptr);
+			init(file, img);
+			UNREF(file);
+		}
+		RpPngWriterPrivate(const char *filename, const IconAnimData *iconAnimData)
+			: lastError(0), file(nullptr), imageTag(ImageTag::Invalid)
+			, png_ptr(nullptr), info_ptr(nullptr), IHDR_written(false)
+		{
+			RpFile *const file = (filename ? new RpFile(filename, RpFile::FM_CREATE_WRITE) : nullptr);
+			init(file, iconAnimData);
+			UNREF(file);
+		}
+
 		~RpPngWriterPrivate();
+	private:
+		// Internal constructor functions.
+		void init(IRpFile *file, int width, int height, rp_image::Format format);
+		void init(IRpFile *file, const rp_image *img);
+		void init(IRpFile *file, const IconAnimData *iconAnimData);
 
 	private:
 		RP_DISABLE_COPY(RpPngWriterPrivate)
@@ -131,17 +173,18 @@ class RpPngWriterPrivate
 		// Last error value.
 		int lastError;
 
-		// Open instance of the file.
-		// This is a dup()'d instance from the public class constructor.
+		// Open reference of a file.
+		// Must be unref()'d on close.
 		IRpFile *file;
 
 		// Image and/or animated image data to save.
-		enum {
-			IMGT_INVALID = 0,	// Invalid image.
-			IMGT_RAW,		// Raw image.
-			IMGT_RP_IMAGE,		// rp_image
-			IMGT_ICONANIMDATA,	// iconAnimData
-		} imageTag;
+		enum class ImageTag {
+			Invalid = 0,	// Invalid image.
+			Raw,		// Raw image.
+			RpImage,	// rp_image
+			IconAnimData,	// iconAnimData
+		};
+		ImageTag imageTag;
 		union {
 			const rp_image *img;
 			const IconAnimData *iconAnimData;
@@ -154,39 +197,52 @@ class RpPngWriterPrivate
 			rp_image::Format format;
 
 			// Palette for CI8 images.
-			const uint32_t *palette;
 			int palette_len;
+			const uint32_t *palette;
 
 #ifdef PNG_sBIT_SUPPORTED
 			// sBIT data. If we have sBIT, and alpha == 0,
 			// we'll skip saving the alpha channel.
+			rp_image::sBIT_t sBIT;
 			bool has_sBIT;
 			bool skip_alpha;
-			rp_image::sBIT_t sBIT;
 #endif /* PNG_sBIT_SUPPORTED */
 
 			cache_t()
 				: width(0)
 				, height(0)
-				, format(rp_image::FORMAT_NONE)
-				, palette(nullptr)
+				, format(rp_image::Format::None)
 				, palette_len(0)
+				, palette(nullptr)
 			{
 #ifdef PNG_sBIT_SUPPORTED
+				memset(&sBIT, 0, sizeof(sBIT));
 				has_sBIT = false;
 				skip_alpha = false;
-				memset(&sBIT, 0, sizeof(sBIT));
 #endif /* PNG_sBIT_SUPPORTED */
 			}
 
 			void setFrom(const rp_image *img) {
+				if (!img) {
+					this->width = 0;
+					this->height = 0;
+					this->format = rp_image::Format::None;
+					this->palette_len = 0;
+					this->palette = nullptr;
+#ifdef PNG_sBIT_SUPPORTED
+					this->has_sBIT = false;
+					this->skip_alpha = false;
+#endif /* PNG_sBIT_SUPPORTED */
+					return;
+				}
+
 				this->width = img->width();
 				this->height = img->height();
 				this->format = img->format();
-				if (this->format == rp_image::FORMAT_CI8) {
+				if (this->format == rp_image::Format::CI8) {
 					// Get the palette.
-					this->palette = img->palette();
 					this->palette_len = img->palette_len();
+					this->palette = img->palette();
 				}
 #ifdef PNG_sBIT_SUPPORTED
 				// Get the rp_image's sBIT data.
@@ -298,21 +354,13 @@ class RpPngWriterPrivate
 
 /** RpPngWriterPrivate **/
 
-RpPngWriterPrivate::RpPngWriterPrivate(IRpFile *file, int width, int height, rp_image::Format format)
-	: lastError(0)
-	, file(file)
-	, imageTag(IMGT_INVALID)
-	, png_ptr(nullptr)
-	, info_ptr(nullptr)
-	, IHDR_written(false)
+void RpPngWriterPrivate::init(IRpFile *file, int width, int height, rp_image::Format format)
 {
 	this->img = nullptr;
 	if (!file || width <= 0 || height <= 0 ||
-	    (format != rp_image::FORMAT_CI8 && format != rp_image::FORMAT_ARGB32))
+	    (format != rp_image::Format::CI8 && format != rp_image::Format::ARGB32))
 	{
 		// Invalid parameters.
-		delete this->file;
-		this->file = nullptr;
 		lastError = EINVAL;
 		return;
 	}
@@ -322,21 +370,17 @@ RpPngWriterPrivate::RpPngWriterPrivate(IRpFile *file, int width, int height, rp_
 	// TODO: Only if linked with /DELAYLOAD?
 	if (DelayLoad_test_zlib_and_png() != 0) {
 		// Delay load failed.
-		delete this->file;
-		this->file = nullptr;
 		lastError = ENOTSUP;
 		return;
 	}
 #endif /* defined(_MSC_VER) && (defined(ZLIB_IS_DLL) || defined(PNG_IS_DLL)) */
 
-	if (!file || !file->isOpen()) {
+	if (!file->isOpen()) {
 		// File isn't open.
-		lastError = (file ? file->lastError() : 0);
+		lastError = file->lastError();
 		if (lastError == 0) {
 			lastError = EIO;
 		}
-		delete this->file;
-		this->file = nullptr;
 		return;
 	}
 
@@ -348,8 +392,6 @@ RpPngWriterPrivate::RpPngWriterPrivate(IRpFile *file, int width, int height, rp_
 		if (lastError == 0) {
 			lastError = EIO;
 		}
-		delete this->file;
-		this->file = nullptr;
 		return;
 	}
 
@@ -357,36 +399,30 @@ RpPngWriterPrivate::RpPngWriterPrivate(IRpFile *file, int width, int height, rp_
 	// but let's do it anyway.
 	file->rewind();
 
+	// ref() the file.
+	// This must be done *before* initializing PNG write structs.
+	this->file = file->ref();
+
 	// Initialize the PNG write structs.
 	ret = init_png_write_structs();
 	if (ret != 0) {
 		// FIXME: Unlink the file if necessary.
 		lastError = -ret;
-		delete this->file;
-		this->file = nullptr;
 	}
 
 	// Cache the image parameters.
 	// NOTE: sBIT is specified in write_IHDR().
-	imageTag = IMGT_RAW;
+	imageTag = ImageTag::Raw;
 	cache.width = width;
 	cache.height = height;
 	cache.format = format;
 }
 
-RpPngWriterPrivate::RpPngWriterPrivate(IRpFile *file, const rp_image *img)
-	: lastError(0)
-	, file(file)
-	, imageTag(IMGT_INVALID)
-	, png_ptr(nullptr)
-	, info_ptr(nullptr)
-	, IHDR_written(false)
+void RpPngWriterPrivate::init(IRpFile *file, const rp_image *img)
 {
 	this->img = img;
 	if (!file || !img || !img->isValid()) {
 		// Invalid parameters.
-		delete this->file;
-		this->file = nullptr;
 		lastError = EINVAL;
 		return;
 	}
@@ -396,21 +432,17 @@ RpPngWriterPrivate::RpPngWriterPrivate(IRpFile *file, const rp_image *img)
 	// TODO: Only if linked with /DELAYLOAD?
 	if (DelayLoad_test_zlib_and_png() != 0) {
 		// Delay load failed.
-		delete this->file;
-		this->file = nullptr;
 		lastError = ENOTSUP;
 		return;
 	}
 #endif /* defined(_MSC_VER) && (defined(ZLIB_IS_DLL) || defined(PNG_IS_DLL)) */
 
-	if (!file || !file->isOpen()) {
+	if (!file->isOpen()) {
 		// File isn't open.
-		lastError = (file ? file->lastError() : 0);
+		lastError = file->lastError();
 		if (lastError == 0) {
 			lastError = EIO;
 		}
-		delete this->file;
-		this->file = nullptr;
 		return;
 	}
 
@@ -422,8 +454,6 @@ RpPngWriterPrivate::RpPngWriterPrivate(IRpFile *file, const rp_image *img)
 		if (lastError == 0) {
 			lastError = EIO;
 		}
-		delete this->file;
-		this->file = nullptr;
 		return;
 	}
 
@@ -431,33 +461,27 @@ RpPngWriterPrivate::RpPngWriterPrivate(IRpFile *file, const rp_image *img)
 	// but let's do it anyway.
 	file->rewind();
 
+	// ref() the file.
+	// This must be done *before* initializing PNG write structs.
+	this->file = file->ref();
+
 	// Initialize the PNG write structs.
 	ret = init_png_write_structs();
 	if (ret != 0) {
 		// FIXME: Unlink the file if necessary.
 		lastError = -ret;
-		delete this->file;
-		this->file = nullptr;
 	}
 
 	// Cache the image parameters.
-	imageTag = IMGT_RP_IMAGE;
+	imageTag = ImageTag::RpImage;
 	cache.setFrom(img);
 }
 
-RpPngWriterPrivate::RpPngWriterPrivate(IRpFile *file, const IconAnimData *iconAnimData)
-	: lastError(0)
-	, file(file)
-	, imageTag(IMGT_INVALID)
-	, png_ptr(nullptr)
-	, info_ptr(nullptr)
-	, IHDR_written(false)
+void RpPngWriterPrivate::init(IRpFile *file, const IconAnimData *iconAnimData)
 {
 	this->iconAnimData = nullptr;
 	if (!file || !iconAnimData || iconAnimData->seq_count <= 0) {
 		// Invalid parameters.
-		delete this->file;
-		this->file = nullptr;
 		lastError = EINVAL;
 		return;
 	}
@@ -467,8 +491,6 @@ RpPngWriterPrivate::RpPngWriterPrivate(IRpFile *file, const IconAnimData *iconAn
 	// TODO: Only if linked with /DELAYLOAD?
 	if (DelayLoad_test_zlib_and_png() != 0) {
 		// Delay load failed.
-		delete this->file;
-		this->file = nullptr;
 		lastError = ENOTSUP;
 		return;
 	}
@@ -482,19 +504,17 @@ RpPngWriterPrivate::RpPngWriterPrivate(IRpFile *file, const IconAnimData *iconAn
 			lastError = ENOTSUP;
 			return;
 		}
-		imageTag = IMGT_ICONANIMDATA;
+		imageTag = ImageTag::IconAnimData;
 	} else {
-		imageTag = IMGT_RP_IMAGE;
+		imageTag = ImageTag::RpImage;
 	}
 
-	if (!file || !file->isOpen()) {
+	if (!file->isOpen()) {
 		// File isn't open.
-		lastError = (file ? file->lastError() : 0);
+		lastError = file->lastError();
 		if (lastError == 0) {
 			lastError = EIO;
 		}
-		delete this->file;
-		this->file = nullptr;
 		return;
 	}
 
@@ -506,8 +526,6 @@ RpPngWriterPrivate::RpPngWriterPrivate(IRpFile *file, const IconAnimData *iconAn
 		if (lastError == 0) {
 			lastError = EIO;
 		}
-		delete this->file;
-		this->file = nullptr;
 		return;
 	}
 
@@ -516,17 +534,15 @@ RpPngWriterPrivate::RpPngWriterPrivate(IRpFile *file, const IconAnimData *iconAn
 	file->rewind();
 
 	// Set img or iconAnimData.
-	if (imageTag == IMGT_ICONANIMDATA) {
+	if (imageTag == ImageTag::IconAnimData) {
 		this->iconAnimData = iconAnimData;
 		// Cache the image parameters.
-		const rp_image *img0 = iconAnimData->frames[iconAnimData->seq_index[0]];
+		const rp_image *const img0 = iconAnimData->frames[iconAnimData->seq_index[0]];
 		assert(img0 != nullptr);
 		if (unlikely(!img0)) {
 			// Invalid animated image.
-			delete this->file;
-			this->file = nullptr;
 			lastError = EINVAL;
-			imageTag = IMGT_INVALID;
+			imageTag = ImageTag::Invalid;
 		}
 		cache.setFrom(img0);
 	} else {
@@ -534,13 +550,15 @@ RpPngWriterPrivate::RpPngWriterPrivate(IRpFile *file, const IconAnimData *iconAn
 		cache.setFrom(img);
 	}
 
+	// ref() the file.
+	// This must be done *before* initializing PNG write structs.
+	this->file = file->ref();
+
 	// Initialize the PNG write structs.
 	ret = init_png_write_structs();
 	if (ret != 0) {
 		// FIXME: Unlink the file if necessary.
 		lastError = -ret;
-		delete this->file;
-		this->file = nullptr;
 	}
 }
 
@@ -548,7 +566,7 @@ RpPngWriterPrivate::~RpPngWriterPrivate()
 {
 	this->close();
 
-	if (imageTag == IMGT_ICONANIMDATA) {
+	if (imageTag == ImageTag::IconAnimData) {
 		// Unreference APNG.
 		APNG_unref();
 	}
@@ -604,9 +622,8 @@ void RpPngWriterPrivate::close(void)
 		info_ptr = nullptr;
 	}
 
-	// Close the file.
-	delete this->file;
-	this->file = nullptr;
+	// unref() the file.
+	UNREF_AND_NULL(this->file);
 }
 
 /**
@@ -634,7 +651,7 @@ void PNGCAPI RpPngWriterPrivate::png_io_IRpFile_write(png_structp png_ptr, png_b
 void PNGCAPI RpPngWriterPrivate::png_io_IRpFile_flush(png_structp png_ptr)
 {
 	// Assuming io_ptr is an IRpFile*.
-	IRpFile *file = static_cast<IRpFile*>(png_get_io_ptr(png_ptr));
+	IRpFile *const file = static_cast<IRpFile*>(png_get_io_ptr(png_ptr));
 	if (!file)
 		return;
 
@@ -647,8 +664,8 @@ void PNGCAPI RpPngWriterPrivate::png_io_IRpFile_flush(png_structp png_ptr)
  */
 int RpPngWriterPrivate::write_CI8_palette(void)
 {
-	assert(cache.format == rp_image::FORMAT_CI8);
-	if (unlikely(cache.format != rp_image::FORMAT_CI8)) {
+	assert(cache.format == rp_image::Format::CI8);
+	if (unlikely(cache.format != rp_image::Format::CI8)) {
 		// Not a CI8 image.
 		return -EINVAL;
 	}
@@ -662,14 +679,14 @@ int RpPngWriterPrivate::write_CI8_palette(void)
 		return -EINVAL;
 
 	// Maximum size.
-	png_color png_pal[256];
-	uint8_t png_tRNS[256];
+	array<png_color, 256> png_pal;
+	array<uint8_t, 256> png_tRNS;
 	bool has_tRNS = false;
 
 	// Convert the palette.
 	const argb32_t *p_img_pal = reinterpret_cast<const argb32_t*>(cache.palette);
-	png_color *p_png_pal = png_pal;
-	uint8_t *p_png_tRNS = png_tRNS;
+	png_color *p_png_pal = png_pal.data();
+	uint8_t *p_png_tRNS = png_tRNS.data();
 	for (int i = cache.palette_len; i > 0; i--, p_img_pal++, p_png_pal++, p_png_tRNS++) {
 		// NOTE: Shifting method is actually more
 		// efficient on gcc, but MSVC handles both
@@ -682,13 +699,13 @@ int RpPngWriterPrivate::write_CI8_palette(void)
 	}
 
 	// Write the PLTE and tRNS chunks.
-	png_set_PLTE(png_ptr, info_ptr, png_pal, cache.palette_len);
+	png_set_PLTE(png_ptr, info_ptr, png_pal.data(), cache.palette_len);
 	if (has_tRNS) {
 		// Palette has transparency.
 		// Write the tRNS chunk.
 		// NOTE: Ignoring skip_alpha here, since it doesn't make
 		// sense to skip for paletted images.
-		png_set_tRNS(png_ptr, info_ptr, png_tRNS, cache.palette_len, nullptr);
+		png_set_tRNS(png_ptr, info_ptr, png_tRNS.data(), cache.palette_len, nullptr);
 	}
 	return 0;
 }
@@ -708,9 +725,9 @@ int RpPngWriterPrivate::write_CI8_palette(void)
 int RpPngWriterPrivate::write_IDAT(const png_byte *const *row_pointers, bool is_abgr)
 {
 	assert(file != nullptr);
-	assert(imageTag == IMGT_RAW || imageTag == IMGT_RP_IMAGE);
+	assert(imageTag == ImageTag::Raw || imageTag == ImageTag::RpImage);
 	assert(IHDR_written);
-	if (unlikely(!file || (imageTag != IMGT_RAW && imageTag != IMGT_RP_IMAGE))) {
+	if (unlikely(!file || (imageTag != ImageTag::Raw && imageTag != ImageTag::RpImage))) {
 		// Invalid state.
 		lastError = EIO;
 		return -lastError;
@@ -738,7 +755,7 @@ int RpPngWriterPrivate::write_IDAT(const png_byte *const *row_pointers, bool is_
 		png_set_bgr(png_ptr);
 	}
 
-	if (cache.skip_alpha && cache.format == rp_image::FORMAT_ARGB32) {
+	if (cache.skip_alpha && cache.format == rp_image::Format::ARGB32) {
 		// Need to skip the alpha bytes.
 		// Assuming 'after' on LE, 'before' on BE.
 #if SYS_BYTEORDER == SYS_LIL_ENDIAN
@@ -768,9 +785,9 @@ int RpPngWriterPrivate::write_IDAT(void)
 {
 	assert(file != nullptr);
 	assert(img != nullptr);
-	assert(imageTag == IMGT_RP_IMAGE);
+	assert(imageTag == ImageTag::RpImage);
 	assert(IHDR_written);
-	if (unlikely(!file || !img || imageTag != IMGT_RP_IMAGE)) {
+	if (unlikely(!file || !img || imageTag != ImageTag::RpImage)) {
 		// Invalid state.
 		lastError = EIO;
 		return -lastError;
@@ -816,9 +833,9 @@ int RpPngWriterPrivate::write_IDAT_APNG(void)
 {
 	assert(file != nullptr);
 	assert(img != nullptr);
-	assert(imageTag == IMGT_ICONANIMDATA);
+	assert(imageTag == ImageTag::IconAnimData);
 	assert(IHDR_written);
-	if (unlikely(!file || !img || imageTag != IMGT_ICONANIMDATA)) {
+	if (unlikely(!file || !img || imageTag != ImageTag::IconAnimData)) {
 		// Invalid state.
 		lastError = EIO;
 		return -lastError;
@@ -852,7 +869,8 @@ int RpPngWriterPrivate::write_IDAT_APNG(void)
 	png_set_bgr(png_ptr);
 
 	// Allocate the row pointers.
-	row_pointers = (const png_byte**)png_malloc(png_ptr, sizeof(const png_byte*) * cache.height);
+	row_pointers = static_cast<const png_byte**>(
+		png_malloc(png_ptr, sizeof(const png_byte*) * cache.height));
 	if (!row_pointers) {
 		lastError = ENOMEM;
 		return -lastError;
@@ -860,7 +878,7 @@ int RpPngWriterPrivate::write_IDAT_APNG(void)
 
 	// Write the images.
 	for (int i = 0; i < iconAnimData->seq_count; i++) {
-		const rp_image *img = iconAnimData->frames[iconAnimData->seq_index[i]];
+		const rp_image *const img = iconAnimData->frames[iconAnimData->seq_index[i]];
 		if (!img)
 			break;
 
@@ -891,10 +909,9 @@ int RpPngWriterPrivate::write_IDAT_APNG(void)
 	// Finished writing.
 	png_write_end(png_ptr, info_ptr);
 
-	// Free the PNG structs and close the file.
+	// Free the PNG structs and unref() the file.
 	png_destroy_write_struct(&png_ptr, &info_ptr);
-	delete file;
-	file = nullptr;
+	UNREF_AND_NULL_NOCHK(file);
 	return 0;
 }
 
@@ -916,8 +933,7 @@ int RpPngWriterPrivate::write_IDAT_APNG(void)
  * @param img		[in] rp_image.
  */
 RpPngWriter::RpPngWriter(const char *filename, const rp_image *img)
-	: d_ptr(new RpPngWriterPrivate(
-		(filename ? new RpFile(filename, RpFile::FM_CREATE_WRITE) : nullptr), img))
+	: d_ptr(new RpPngWriterPrivate(filename, img))
 { }
 
 /**
@@ -937,8 +953,7 @@ RpPngWriter::RpPngWriter(const char *filename, const rp_image *img)
  * @param img	[in] rp_image.
  */
 RpPngWriter::RpPngWriter(IRpFile *file, const rp_image *img)
-	: d_ptr(new RpPngWriterPrivate(
-		(file ? file->dup() : nullptr), img))
+	: d_ptr(new RpPngWriterPrivate(file, img))
 { }
 
 /**
@@ -962,8 +977,7 @@ RpPngWriter::RpPngWriter(IRpFile *file, const rp_image *img)
  * @param iconAnimData	[in] Animated image data.
  */
 RpPngWriter::RpPngWriter(const char *filename, const IconAnimData *iconAnimData)
-	: d_ptr(new RpPngWriterPrivate(
-		(filename ? new RpFile(filename, RpFile::FM_CREATE_WRITE) : nullptr), iconAnimData))
+	: d_ptr(new RpPngWriterPrivate(filename, iconAnimData))
 { }
 
 /**
@@ -988,8 +1002,7 @@ RpPngWriter::RpPngWriter(const char *filename, const IconAnimData *iconAnimData)
  * @param iconAnimData	[in] Animated image data.
  */
 RpPngWriter::RpPngWriter(IRpFile *file, const IconAnimData *iconAnimData)
-	: d_ptr(new RpPngWriterPrivate(
-		(file ? file->dup() : nullptr), iconAnimData))
+	: d_ptr(new RpPngWriterPrivate(file, iconAnimData))
 { }
 
 /**
@@ -1010,8 +1023,7 @@ RpPngWriter::RpPngWriter(IRpFile *file, const IconAnimData *iconAnimData)
  * @param format 	[in] Image format.
  */
 RpPngWriter::RpPngWriter(const char *filename, int width, int height, rp_image::Format format)
-	: d_ptr(new RpPngWriterPrivate(
-		(filename ? new RpFile(filename, RpFile::FM_CREATE_WRITE) : nullptr), width, height, format))
+	: d_ptr(new RpPngWriterPrivate(filename, width, height, format))
 { }
 
 /**
@@ -1033,8 +1045,7 @@ RpPngWriter::RpPngWriter(const char *filename, int width, int height, rp_image::
  * @param format 	[in] Image format.
  */
 RpPngWriter::RpPngWriter(IRpFile *file, int width, int height, rp_image::Format format)
-	: d_ptr(new RpPngWriterPrivate(
-		(file ? file->dup() : nullptr), width, height, format))
+	: d_ptr(new RpPngWriterPrivate(file, width, height, format))
 { }
 
 RpPngWriter::~RpPngWriter()
@@ -1112,7 +1123,7 @@ int RpPngWriter::write_IHDR(void)
 
 	// Write the PNG header.
 	switch (d->cache.format) {
-		case rp_image::FORMAT_ARGB32: {
+		case rp_image::Format::ARGB32: {
 			// TODO: Use PNG_COLOR_TYPE_GRAY and/or PNG_COLOR_TYPE_GRAY_ALPHA
 			// if sBIT.gray > 0?
 #ifdef PNG_sBIT_SUPPORTED
@@ -1129,7 +1140,7 @@ int RpPngWriter::write_IHDR(void)
 			break;
 		}
 
-		case rp_image::FORMAT_CI8:
+		case rp_image::Format::CI8:
 			png_set_IHDR(d->png_ptr, d->info_ptr,
 					d->cache.width, d->cache.height, 8,
 					PNG_COLOR_TYPE_PALETTE,
@@ -1157,7 +1168,7 @@ int RpPngWriter::write_IHDR(void)
 			return -d->lastError;
 	}
 
-	if (d->imageTag == RpPngWriterPrivate::IMGT_ICONANIMDATA) {
+	if (d->imageTag == RpPngWriterPrivate::ImageTag::IconAnimData) {
 		// Write an acTL chunk to indicate that this is an APNG image.
 		png_set_acTL(d->png_ptr, d->info_ptr, d->iconAnimData->seq_count, 0);
 	}
@@ -1193,8 +1204,8 @@ int RpPngWriter::write_IHDR(void)
 int RpPngWriter::write_IHDR(const rp_image::sBIT_t *sBIT, const uint32_t *palette, int palette_len)
 {
 	RP_D(RpPngWriter);
-	assert(d->imageTag == RpPngWriterPrivate::IMGT_RAW);
-	if (d->imageTag != RpPngWriterPrivate::IMGT_RAW) {
+	assert(d->imageTag == RpPngWriterPrivate::ImageTag::Raw);
+	if (d->imageTag != RpPngWriterPrivate::ImageTag::Raw) {
 		// Can't be used for this type.
 		return -EINVAL;
 	}
@@ -1309,12 +1320,12 @@ int RpPngWriter::write_tEXt(const kv_vector &kv)
 	// Allocate string pointer arrays for kv_vector.
 	// Since kv_vector is Latin-1, we don't have to
 	// strdup() the strings.
-	// TODO: unique_ptr<>?
-	png_text *text = new png_text[kv.size()];
-	png_text *pTxt = text;
-	for (unsigned int i = 0; i < kv.size(); i++, pTxt++) {
+	unique_ptr<png_text[]> text(new png_text[kv.size()]);
+	png_text *pTxt = text.get();
+	const auto kv_cend = kv.cend();
+	for (auto iter = kv.cbegin(); iter != kv_cend; ++iter, ++pTxt) {
 		// Check if the string is ASCII, Latin-1, or other.
-		const string &value = kv[i].second;
+		const string &value = iter->second;
 		const bool compress = (value.size() >= 40);	// same as Qt
 
 		const int status = u8strIsPngLatin1(value.c_str());
@@ -1322,22 +1333,21 @@ int RpPngWriter::write_tEXt(const kv_vector &kv)
 			case 0:
 				// ASCII. Use it as-is.
 				pTxt->compression = (compress ? PNG_TEXT_COMPRESSION_zTXt : PNG_TEXT_COMPRESSION_NONE);
-				pTxt->key = (png_charp)kv[i].first;
+				pTxt->key = (png_charp)iter->first;
 				pTxt->text = (png_charp)value.c_str();
 				break;
 			case 1: {
 				// Latin-1. Convert it.
-				// TODO: utf8_to_latin1() wrapper that takes std::string?
-				char *const latin1_str = strdup(utf8_to_latin1(value.c_str(), (int)value.size()).c_str());
-				vU8toL1.push_back(latin1_str);
+				char *const latin1_str = strdup(utf8_to_latin1(value).c_str());
+				vU8toL1.emplace_back(latin1_str);
 				pTxt->compression = (compress ? PNG_TEXT_COMPRESSION_zTXt : PNG_TEXT_COMPRESSION_NONE);
-				pTxt->key = (png_charp)kv[i].first;
+				pTxt->key = (png_charp)iter->first;
 				pTxt->text = (png_charp)latin1_str;
 				break;
 			}
 			case 2:
 				// UTF-8. Use iTXt.
-				pTxt->key = (png_charp)kv[i].first;
+				pTxt->key = (png_charp)iter->first;
 				pTxt->text = (png_charp)value.c_str();
 #ifdef PNG_iTXt_SUPPORTED
 				// iTXt is supported at compile time.
@@ -1366,20 +1376,14 @@ int RpPngWriter::write_tEXt(const kv_vector &kv)
 	// WARNING: Do NOT initialize any C++ objects past this point!
 	if (setjmp(png_jmpbuf(d->png_ptr))) {
 		// PNG write failed.
-		delete[] text;
-		for (auto iter = vU8toL1.begin(); iter != vU8toL1.end(); ++iter) {
-			free(*iter);
-		}
+		std::for_each(vU8toL1.begin(), vU8toL1.end(), ::free);
 		d->lastError = EIO;
 		return -d->lastError;
 	}
 #endif /* PNG_SETJMP_SUPPORTED */
 
-	png_set_text(d->png_ptr, d->info_ptr, text, (int)kv.size());
-	delete[] text;
-	for (auto iter = vU8toL1.begin(); iter != vU8toL1.end(); ++iter) {
-		free(*iter);
-	}
+	png_set_text(d->png_ptr, d->info_ptr, text.get(), static_cast<int>(kv.size()));
+	std::for_each(vU8toL1.begin(), vU8toL1.end(), ::free);
 	return 0;
 }
 
@@ -1405,8 +1409,8 @@ int RpPngWriter::write_IDAT(const uint8_t *const *row_pointers, bool is_abgr)
 	}
 
 	RP_D(RpPngWriter);
-	assert(d->imageTag == RpPngWriterPrivate::IMGT_RAW);
-	if (unlikely(d->imageTag != RpPngWriterPrivate::IMGT_RAW)) {
+	assert(d->imageTag == RpPngWriterPrivate::ImageTag::Raw);
+	if (unlikely(d->imageTag != RpPngWriterPrivate::ImageTag::Raw)) {
 		// Can't be used for this type.
 		return -EINVAL;
 	}
@@ -1432,12 +1436,12 @@ int RpPngWriter::write_IDAT(void)
 	RP_D(RpPngWriter);
 	int ret = -1;
 	switch (d->imageTag) {
-		case RpPngWriterPrivate::IMGT_RP_IMAGE:
+		case RpPngWriterPrivate::ImageTag::RpImage:
 			// Write a regular PNG image.
 			ret = d->write_IDAT();
 			break;
 
-		case RpPngWriterPrivate::IMGT_ICONANIMDATA:
+		case RpPngWriterPrivate::ImageTag::IconAnimData:
 			// Write an animated PNG image.
 			// NOTE: d->isAnimated is only set if APNG is loaded,
 			// so we don't have to check it again here.

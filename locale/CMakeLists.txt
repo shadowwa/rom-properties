@@ -1,10 +1,12 @@
 # Localization files.
 PROJECT(locale)
 
-# Find Gettext.
-FIND_PACKAGE(Gettext REQUIRED)
-FIND_PROGRAM(GETTEXT_XGETTEXT_EXECUTABLE xgettext)
-FIND_PROGRAM(GETTEXT_MSGINIT_EXECUTABLE msginit)
+# Find gettext.
+INCLUDE(CheckGettext)
+CHECK_GETTEXT()
+
+# Find standard Unix utilities.
+# On Windows, these are included with git.
 FIND_PROGRAM(FIND find)
 FIND_PROGRAM(SORT sort)
 FIND_PROGRAM(SED sed)
@@ -13,7 +15,7 @@ FIND_PROGRAM(SED sed)
 SET(DOMAIN "rom-properties")
 SET(COPYRIGHT_HOLDER "David Korth")
 SET(MSGID_BUGS_ADDRESS "gerbilsoft@gerbilsoft.com")
-SET(LINGUAS it)
+SET(LINGUAS ru uk pt)
 
 # Installation.
 INCLUDE(DirInstallPaths)
@@ -48,12 +50,17 @@ FOREACH(_lingua ${LINGUAS})
 	# Custom target to update a .po file.
 	# Use this after adding new strings to the source code.
 	# TODO: ${_lingua}@quot
+	IF(WIN32)
+		SET(MV move)
+	ELSE(WIN32)
+		SET(MV mv)
+	ENDIF(WIN32)
 	ADD_CUSTOM_TARGET(update-${_lingua}.po
 		COMMAND ${GETTEXT_MSGMERGE_EXECUTABLE}
 			--lang=${_lingua}
 			${_lingua}.po ${DOMAIN}.pot
 			-o ${_lingua}.new.po
-		COMMAND mv ${_lingua}.new.po ${_lingua}.po
+		COMMAND ${MV} ${_lingua}.new.po ${_lingua}.po
 		DEPENDS ${_lingua}.po
 		WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 		VERBATIM
@@ -114,6 +121,7 @@ ADD_CUSTOM_TARGET(rom-properties.pot
 	COMMAND ${GETTEXT_XGETTEXT_EXECUTABLE}
 		-o ${DOMAIN}.pot
 		--default-domain=${DOMAIN}
+		--from-code=UTF-8
 		--add-comments=tr:
 		--keyword=_ --keyword=C_:1c,2 --keyword=N_:1,2 --keyword=NC_:1c,2,3
 		--keyword=NOP_ --keyword=NOP_C_:1c,2 --keyword=NOP_N_:1,2 --keyword=NOP_NC_:1c,2,3

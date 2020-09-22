@@ -4,49 +4,35 @@
  * This class is a "null" interface that simply passes calls down to       *
  * libc's stdio functions.                                                 *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "DiscReader.hpp"
-#include "file/IRpFile.hpp"
 
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cerrno>
+// librpfile
+using LibRpFile::IRpFile;
 
 namespace LibRpBase {
 
 /**
  * Construct a DiscReader with the specified file.
- * The file is dup()'d, so the original file can be
- * closed afterwards.
+ * The file is ref()'d, so the original file can be
+ * unref()'d afterwards.
  * @param file File to read from.
  */
 DiscReader::DiscReader(IRpFile *file)
-	: m_file(nullptr)
+	: super(file)
 	, m_offset(0)
 	, m_length(0)
 {
-	if (!file) {
+	if (!m_file) {
 		m_lastError = EBADF;
 		return;
 	}
+
 	// TODO: Propagate errors.
-	m_file = file->dup();
 	m_length = file->size();
 	if (m_length < 0) {
 		m_length = 0;
@@ -55,26 +41,25 @@ DiscReader::DiscReader(IRpFile *file)
 
 /**
  * Construct a DiscReader with the specified file.
- * The file is dup()'d, so the original file can be
- * closed afterwards.
+ * The file is ref()'d, so the original file can be
+ * unref()'d afterwards.
  * @param file File to read from.
  * @param offset Starting offset.
  * @param length Disc length. (-1 for "until end of file")
  */
-DiscReader::DiscReader(IRpFile *file, int64_t offset, int64_t length)
-	: m_file(nullptr)
+DiscReader::DiscReader(IRpFile *file, off64_t offset, off64_t length)
+	: super(file)
 	, m_offset(0)
 	, m_length(0)
 {
-	if (!file) {
+	if (!m_file) {
 		m_lastError = EBADF;
 		return;
 	}
-	// TODO: Propagate errors.
-	m_file = file->dup();
 
+	// TODO: Propagate errors.
 	// Validate offset and filesize.
-	const int64_t filesize = file->size();
+	const off64_t filesize = m_file->size();
 	if (offset > filesize) {
 		offset = filesize;
 	}
@@ -84,11 +69,6 @@ DiscReader::DiscReader(IRpFile *file, int64_t offset, int64_t length)
 
 	m_offset = offset;
 	m_length = length;
-}
-
-DiscReader::~DiscReader()
-{
-	delete m_file;
 }
 
 /**
@@ -120,16 +100,6 @@ int DiscReader::isDiscSupported(const uint8_t *pHeader, size_t szHeader) const
 }
 
 /**
- * Is the disc image open?
- * This usually only returns false if an error occurred.
- * @return True if the disc image is open; false if it isn't.
- */
-bool DiscReader::isOpen(void) const
-{
-	return (m_file != nullptr);
-}
-
-/**
  * Read data from the disc image.
  * @param ptr Output data buffer.
  * @param size Amount of data to read, in bytes.
@@ -144,9 +114,9 @@ size_t DiscReader::read(void *ptr, size_t size)
 	}
 
 	// Constrain size based on offset and length.
-	int64_t pos = m_file->tell();
-	if ((int64_t)(pos + size) > m_offset + m_length) {
-		size = (size_t)(m_offset + m_length - pos);
+	off64_t pos = m_file->tell();
+	if (pos + static_cast<off64_t>(size) > m_offset + m_length) {
+		size = static_cast<size_t>(m_offset + m_length - pos);
 	}
 
 	size_t ret = m_file->read(ptr, size);
@@ -159,7 +129,7 @@ size_t DiscReader::read(void *ptr, size_t size)
  * @param pos Disc image position.
  * @return 0 on success; -1 on error.
  */
-int DiscReader::seek(int64_t pos)
+int DiscReader::seek(off64_t pos)
 {
 	assert(m_file != nullptr);
 	if (!m_file) {
@@ -175,27 +145,10 @@ int DiscReader::seek(int64_t pos)
 }
 
 /**
- * Seek to the beginning of the disc image.
- */
-void DiscReader::rewind(void)
-{
-	assert(m_file != nullptr);
-	if (!m_file) {
-		m_lastError = EBADF;
-		return;
-	}
-
-	int ret = m_file->seek(m_offset);
-	if (ret != 0) {
-		m_lastError = m_file->lastError();
-	}
-}
-
-/**
  * Get the disc image position.
  * @return Partition position on success; -1 on error.
  */
-int64_t DiscReader::tell(void)
+off64_t DiscReader::tell(void)
 {
 	assert(m_file != nullptr);
 	if (!m_file) {
@@ -203,7 +156,7 @@ int64_t DiscReader::tell(void)
 		return -1;
 	}
 
-	int64_t ret = m_file->tell();
+	off64_t ret = m_file->tell();
 	if (ret < 0) {
 		m_lastError = m_file->lastError();
 	}
@@ -214,7 +167,7 @@ int64_t DiscReader::tell(void)
  * Get the disc image size.
  * @return Disc image size, or -1 on error.
  */
-int64_t DiscReader::size(void)
+off64_t DiscReader::size(void)
 {
 	assert(m_file != nullptr);
 	if (!m_file) {

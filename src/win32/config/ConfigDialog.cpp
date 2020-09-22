@@ -2,48 +2,44 @@
  * ROM Properties Page shell extension. (Win32)                            *
  * ConfigDialog.cpp: Configuration dialog.                                 *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #include "stdafx.h"
 #include "librpbase/config.librpbase.h"
 #include "ConfigDialog.hpp"
-#include "resource.h"
+#include "res/resource.h"
 
 // librpbase
-#include "librpbase/config/Config.hpp"
-using LibRpBase::Config;
+using namespace LibRpBase;
+
+// libwin32common
+#include "libwin32common/SubclassWindow.h"
 
 // Property sheet icon.
 // Extracted from imageres.dll or shell32.dll.
 #include "PropSheetIcon.hpp"
 
-// C includes.
-#include <stdlib.h>
+// C++ STL classes.
+using std::array;
+using std::tstring;
 
-// C includes. (C++ namespace)
-#include <cassert>
+#include "libi18n/config.libi18n.h"
+#if defined(_MSC_VER) && defined(ENABLE_NLS)
+// MSVC: Exception handling for /DELAYLOAD.
+#include "libwin32common/DelayLoadHelper.h"
+// DelayLoad test implementation.
+DELAYLOAD_TEST_FUNCTION_IMPL1(textdomain, nullptr);
+#endif /* defined(_MSC_VER) && defined(ENABLE_NLS) */
 
 // Property sheet tabs.
 #include "ImageTypesTab.hpp"
-#include "DownloadsTab.hpp"
+#include "SystemsTab.hpp"
+#include "OptionsTab.hpp"
 #include "CacheTab.hpp"
 #ifdef ENABLE_DECRYPTION
-#include "KeyManagerTab.hpp"
+# include "KeyManagerTab.hpp"
 #endif /* ENABLE_DECRYPTION */
 #include "AboutTab.hpp"
 
@@ -57,19 +53,14 @@ class ConfigDialogPrivate
 		RP_DISABLE_COPY(ConfigDialogPrivate)
 
 	public:
-		// Property for "D pointer".
-		// This points to the ConfigDialogPrivate object.
-		static const wchar_t D_PTR_PROP[];
-
-	public:
 		// Property sheet variables.
 #ifdef ENABLE_DECRYPTION
-		static const unsigned int TAB_COUNT = 5;
+		static const unsigned int TAB_COUNT = 6;
 #else
-		static const unsigned int TAB_COUNT = 4;
+		static const unsigned int TAB_COUNT = 5;
 #endif
-		ITab *tabs[TAB_COUNT];
-		HPROPSHEETPAGE hpsp[TAB_COUNT];
+		array<ITab*, TAB_COUNT> tabs;
+		array<HPROPSHEETPAGE, TAB_COUNT> hpsp;
 		PROPSHEETHEADER psh;
 
 		// Property Sheet callback.
@@ -83,10 +74,6 @@ class ConfigDialogPrivate
 };
 
 /** ConfigDialogPrivate **/
-
-// Property for "D pointer".
-// This points to the ConfigDialogPrivate object.
-const wchar_t ConfigDialogPrivate::D_PTR_PROP[] = L"ConfigDialogPrivate";
 
 ConfigDialogPrivate::ConfigDialogPrivate()
 {
@@ -103,31 +90,30 @@ ConfigDialogPrivate::ConfigDialogPrivate()
 	// TODO: Also ICC_STANDARD_CLASSES on XP+?
 	InitCommonControlsEx(&initCommCtrl);
 
-	// Load RICHED20.DLL for RICHEDIT_CLASS.
-	// TODO: What if this fails?
-	HMODULE hRichEd20 = LoadLibrary(L"RICHED20.DLL");
-
 	// Initialize the property sheet tabs.
 
 	// Image type priority.
 	tabs[0] = new ImageTypesTab();
 	hpsp[0] = tabs[0]->getHPropSheetPage();
-	// Download configuration.
-	tabs[1] = new DownloadsTab();
+	// Systems
+	tabs[1] = new SystemsTab();
 	hpsp[1] = tabs[1]->getHPropSheetPage();
-	// Thumbnail cache.
+	// Options
+	tabs[2] = new OptionsTab();
+	hpsp[2] = tabs[2]->getHPropSheetPage();
+	// Thumbnail cache
 	// References:
 	// - http://stackoverflow.com/questions/23677175/clean-windows-thumbnail-cache-programmatically
 	// - https://www.codeproject.com/Articles/2408/Clean-Up-Handler
-	tabs[2] = new CacheTab();
-	hpsp[2] = tabs[2]->getHPropSheetPage();
-#ifdef ENABLE_DECRYPTION
-	// Key Manager.
-	tabs[3] = new KeyManagerTab();
+	tabs[3] = new CacheTab();
 	hpsp[3] = tabs[3]->getHPropSheetPage();
+#ifdef ENABLE_DECRYPTION
+	// Key Manager
+	tabs[4] = new KeyManagerTab();
+	hpsp[4] = tabs[4]->getHPropSheetPage();
 #endif /* ENABLE_DECRYPTION */
 
-	// About.
+	// About
 	tabs[TAB_COUNT-1] = new AboutTab();
 	hpsp[TAB_COUNT-1] = tabs[TAB_COUNT-1]->getHPropSheetPage();
 
@@ -137,10 +123,10 @@ ConfigDialogPrivate::ConfigDialogPrivate()
 	psh.hwndParent = nullptr;
 	psh.hInstance = HINST_THISCOMPONENT;
 	psh.hIcon = PropSheetIcon::getSmallIcon();	// Small icon only!
-	psh.pszCaption = L"ROM Properties Page Configuration";
-	psh.nPages = ARRAY_SIZE(hpsp);
+	psh.pszCaption = nullptr;			// will be set in WM_SHOWWINDOW
+	psh.nPages = static_cast<UINT>(hpsp.size());
 	psh.nStartPage = 0;
-	psh.phpage = hpsp;
+	psh.phpage = hpsp.data();
 	psh.pfnCallback = this->callbackProc;
 	psh.hbmWatermark = nullptr;
 	psh.hplWatermark = nullptr;
@@ -151,9 +137,8 @@ ConfigDialogPrivate::ConfigDialogPrivate()
 
 ConfigDialogPrivate::~ConfigDialogPrivate()
 {
-	for (int i = ARRAY_SIZE(tabs)-1; i >= 0; i--) {
-		delete tabs[i];
-	}
+	// Delete the tabs.
+	std::for_each(tabs.begin(), tabs.end(), [](ITab *pTab) { delete pTab; });
 }
 
 /**
@@ -168,10 +153,21 @@ int CALLBACK ConfigDialogPrivate::callbackProc(HWND hDlg, UINT uMsg, LPARAM lPar
 	switch (uMsg) {
 		case PSCB_INITIALIZED: {
 			// Property sheet has been initialized.
+
 			// Add the system menu and minimize box.
 			LONG style = GetWindowLong(hDlg, GWL_STYLE);
 			style |= WS_MINIMIZEBOX | WS_SYSMENU;
 			SetWindowLong(hDlg, GWL_STYLE, style);
+
+			// Restore the default system menu.
+			// Not only is this needed to restore the default entries,
+			// it's needed to make the Minimize button work on Windows 8.1
+			// and Windows 10 (and possibly Windows 8.0 as well).
+			// References:
+			// - http://ntcoder.com/bab/2008/03/27/making-a-property-sheet-window-resizable/
+			// - https://www.experts-exchange.com/articles/1521/Using-a-Property-Sheet-as-your-Main-Window.html
+			GetSystemMenu(hDlg, false);
+			GetSystemMenu(hDlg, true);
 
 			// Remove the context help box.
 			// NOTE: Setting WS_MINIMIZEBOX does this,
@@ -216,6 +212,32 @@ LRESULT CALLBACK ConfigDialogPrivate::subclassProc(
 {
 	switch (uMsg) {
 		case WM_SHOWWINDOW: {
+			// Check for RTL.
+			// NOTE: Windows Explorer on Windows 7 seems to return 0 from GetProcessDefaultLayout(),
+			// even if an RTL language is in use. We'll check the taskbar layout instead.
+			// References:
+			// - https://stackoverflow.com/questions/10391669/how-to-detect-if-a-windows-installation-is-rtl
+			// - https://stackoverflow.com/a/10393376
+			DWORD dwExStyleRTL = 0;
+			HWND hTaskBar = FindWindow(_T("Shell_TrayWnd"), nullptr);
+			assert(hTaskBar != nullptr);
+			if (hTaskBar) {
+				dwExStyleRTL = static_cast<DWORD>(GetWindowLongPtr(hTaskBar, GWL_EXSTYLE)) & WS_EX_LAYOUTRTL;
+			}
+
+			// Set the dialog to allow automatic right-to-left adjustment
+			// if the system is using an RTL language.
+			if (dwExStyleRTL != 0) {
+				// Set the dialog to allow automatic right-to-left adjustment.
+				LONG_PTR lpExStyle = GetWindowLongPtr(hWnd, GWL_EXSTYLE);
+				lpExStyle |= WS_EX_LAYOUTRTL;
+				SetWindowLongPtr(hWnd, GWL_EXSTYLE, lpExStyle);
+			}
+
+			// tr: Dialog title.
+			const tstring tsTitle = U82T_c(C_("ConfigDialog", "ROM Properties Page Configuration"));
+			SetWindowText(hWnd, tsTitle.c_str());
+
 			// Create the "Reset" and "Defaults" buttons.
 			if (GetDlgItem(hWnd, IDC_RP_RESET) != nullptr) {
 				// "Reset" button is already created.
@@ -229,6 +251,7 @@ LRESULT CALLBACK ConfigDialogPrivate::subclassProc(
 				break;
 			}
 
+			// TODO: Verify RTL positioning.
 			HWND hBtnOK = GetDlgItem(hWnd, IDOK);
 			HWND hBtnCancel = GetDlgItem(hWnd, IDCANCEL);
 			HWND hTabControl = PropSheet_GetTabControl(hWnd);
@@ -253,8 +276,9 @@ LRESULT CALLBACK ConfigDialogPrivate::subclassProc(
 				rect_btnOK.bottom - rect_btnOK.top
 			};
 
-			HWND hBtnReset = CreateWindowEx(0,
-				WC_BUTTON, L"Reset",
+			HWND hBtnReset = CreateWindowEx(0, WC_BUTTON,
+				// tr: "Reset" button.
+				U82T_c(C_("ConfigDialog", "Reset")),
 				WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_GROUP | BS_CENTER,
 				ptBtn.x, ptBtn.y, szBtn.cx, szBtn.cy,
 				hWnd, (HMENU)IDC_RP_RESET, nullptr, nullptr);
@@ -270,8 +294,9 @@ LRESULT CALLBACK ConfigDialogPrivate::subclassProc(
 
 			// Create the "Defaults" button.
 			ptBtn.x += szBtn.cx + (rect_btnCancel.left - rect_btnOK.right);
-			HWND hBtnDefaults = CreateWindowEx(0,
-				WC_BUTTON, L"Defaults",
+			HWND hBtnDefaults = CreateWindowEx(0, WC_BUTTON,
+				// tr: "Defaults" button.
+				U82T_c(C_("ConfigDialog", "Defaults")),
 				WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_GROUP | BS_CENTER,
 				ptBtn.x, ptBtn.y, szBtn.cx, szBtn.cy,
 				hWnd, (HMENU)IDC_RP_DEFAULTS, nullptr, nullptr);
@@ -297,7 +322,7 @@ LRESULT CALLBACK ConfigDialogPrivate::subclassProc(
 				case IDC_RP_RESET: {
 					// "Reset" was clicked.
 					// Reset all of the tabs.
-					for (unsigned int i = 0; i < TAB_COUNT; i++) {
+					for (int i = TAB_COUNT-1; i >= 0; i--) {
 						HWND hwndPropSheet = PropSheet_IndexToHwnd(hWnd, i);
 						if (hwndPropSheet) {
 							SendMessage(hwndPropSheet, WM_RP_PROP_SHEET_RESET, 0, 0);
@@ -327,7 +352,7 @@ LRESULT CALLBACK ConfigDialogPrivate::subclassProc(
 						SendMessage(hwndPropSheet, WM_RP_PROP_SHEET_DEFAULTS, 0, 0);
 					}
 
-					// KDE5 System Settings keeps focus on the "Defaults" button,
+					// KDE Plasma 5's System Settings keeps focus on the "Defaults" button,
 					// so we'll leave the focus as-is.
 
 					// Don't continue processing. Otherwise, weird things
@@ -339,6 +364,17 @@ LRESULT CALLBACK ConfigDialogPrivate::subclassProc(
 					break;
 			}
 
+			break;
+		}
+
+		case WM_DEVICECHANGE: {
+			// Forward WM_DEVICECHANGE to CacheTab.
+			// NOTE: PropSheet_IndexToHwnd() may return nullptr if
+			// CacheTab hasn't been initialized yet.
+			HWND hwndCacheTab = PropSheet_IndexToHwnd(hWnd, 2);
+			if (hwndCacheTab) {
+				SendMessage(hwndCacheTab, uMsg, wParam, lParam);
+			}
 			break;
 		}
 
@@ -401,6 +437,24 @@ int CALLBACK rp_show_config_dialog(
 {
 	// TODO: nCmdShow.
 
+#if defined(_MSC_VER) && defined(ENABLE_NLS)
+	// Delay load verification.
+	// TODO: Only if linked with /DELAYLOAD?
+	if (DelayLoad_test_textdomain() != 0) {
+		// Delay load failed.
+		// TODO: Use a CMake macro for the soversion?
+		MessageBox(hWnd,
+			LIBGNUINTL_DLL _T(" could not be loaded.\n\n")
+			_T("This build of rom-properties has localization enabled,\n")
+			_T("which requires the use of GNU texttext.\n\n")
+			_T("Please redownload rom-properties and copy the\n")
+			LIBGNUINTL_DLL _T(" file to the installation directory."),
+			LIBGNUINTL_DLL _T(" not found"),
+			MB_ICONSTOP);
+		return EXIT_FAILURE;
+	}
+#endif /* defined(_MSC_VER) && defined(ENABLE_NLS) */
+
 	// Make sure COM is initialized.
 	// NOTE: Using apartment threading for OLE compatibility.
 	// TODO: What if COM is already initialized?
@@ -409,6 +463,9 @@ int CALLBACK rp_show_config_dialog(
 		// Failed to initialize COM.
 		return EXIT_FAILURE;
 	}
+
+	// Initialize i18n.
+	rp_i18n_init();
 
 	ConfigDialog *cfg = new ConfigDialog();
 	INT_PTR ret = cfg->exec();

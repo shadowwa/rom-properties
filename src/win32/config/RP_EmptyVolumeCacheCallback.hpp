@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (Win32)                                 *
  * RP_EmptyVolumeCacheCallback.cpp: RP_EmptyVolumeCacheCallback implementation. *
  *                                                                              *
- * Copyright (c) 2016-2017 by David Korth.                                      *
- *                                                                              *
- * This program is free software; you can redistribute it and/or modify it      *
- * under the terms of the GNU General Public License as published by the        *
- * Free Software Foundation; either version 2 of the License, or (at your       *
- * option) any later version.                                                   *
- *                                                                              *
- * This program is distributed in the hope that it will be useful, but          *
- * WITHOUT ANY WARRANTY; without even the implied warranty of                   *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the                *
- * GNU General Public License for more details.                                 *
- *                                                                              *
- * You should have received a copy of the GNU General Public License along      *
- * with this program; if not, write to the Free Software Foundation, Inc.,      *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.                *
+ * Copyright (c) 2016-2020 by David Korth.                                      *
+ * SPDX-License-Identifier: GPL-2.0-or-later                                    *
  ********************************************************************************/
 
 #ifndef __ROMPROPERTIES_WIN32_CONFIG_RP_EMPTYVOLUMECACHECALLBACK_HPP
@@ -30,10 +17,10 @@
  * Therefore, we aren't defining a CLSID.
  */
 
-#include "librpbase/common.h"
+#include "common.h"
 #include "libwin32common/ComBase.hpp"
 
-class RP_EmptyVolumeCacheCallback : public LibWin32Common::ComBase<IEmptyVolumeCacheCallBack>
+class RP_EmptyVolumeCacheCallback final : public LibWin32Common::ComBase<IEmptyVolumeCacheCallBack>
 {
 	public:
 		explicit RP_EmptyVolumeCacheCallback(HWND hProgressBar);
@@ -44,17 +31,23 @@ class RP_EmptyVolumeCacheCallback : public LibWin32Common::ComBase<IEmptyVolumeC
 
 	public:
 		// IUnknown
-		IFACEMETHODIMP QueryInterface(REFIID riid, LPVOID *ppvObj) override final;
+		IFACEMETHODIMP QueryInterface(REFIID riid, LPVOID *ppvObj) final;
 
 	public:
 		// IEmptyVolumeCacheCallBack
-		IFACEMETHODIMP ScanProgress(DWORDLONG dwlSpaceUsed, DWORD dwFlags, LPCWSTR pcwszStatus) override final;
-		IFACEMETHODIMP PurgeProgress(DWORDLONG dwlSpaceFreed, DWORDLONG dwlSpaceToFree, DWORD dwFlags, LPCWSTR pcwszStatus) override final;
+		IFACEMETHODIMP ScanProgress(DWORDLONG dwlSpaceUsed, DWORD dwFlags, LPCWSTR pcwszStatus) final;
+		IFACEMETHODIMP PurgeProgress(DWORDLONG dwlSpaceFreed, DWORDLONG dwlSpaceToFree, DWORD dwFlags, LPCWSTR pcwszStatus) final;
 
 	private:
 		HWND m_hProgressBar;		// Progress bar to update.
 	public:
 		unsigned int m_baseProgress;	// Base progress value.
 };
+
+#ifdef __CRT_UUID_DECL
+// FIXME: MSYS2/MinGW-w64 (gcc-9.2.0-2, MinGW-w64 7.0.0.5524.2346384e-1)
+// doesn't declare the UUID for IEmptyVolumeCacheCallBack for __uuidof() emulation.
+__CRT_UUID_DECL(IEmptyVolumeCacheCallBack, __MSABI_LONG(0x6e793361), 0x73c6, 0x11d0, 0x84,0x69, 0x00, 0xaa, 0x00, 0x44, 0x29, 0x01)
+#endif
 
 #endif /* __ROMPROPERTIES_WIN32_CONFIG_RP_EMPTYVOLUMECACHECALLBACK_HPP */

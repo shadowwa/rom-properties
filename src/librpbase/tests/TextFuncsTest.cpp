@@ -2,38 +2,21 @@
  * ROM Properties Page shell extension. (librpbase/tests)                  *
  * TextFuncsTest.cpp: TextFuncs class test.                                *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 // Google Test
 #include "gtest/gtest.h"
+#include "tcharx.h"
 
 // TextFuncs
 #include "../TextFuncs.hpp"
-#include "../byteorder.h"
-
-#if !defined(RP_UTF8) && !defined(RP_UTF16)
-#error Neither RP_UTF8 nor RP_UTF16 are defined.
-#elif defined(RP_UTF8) && defined(RP_UTF16)
-#error Both RP_UTF8 and RP_UTF16 are defined.
-#endif
+#include "librpcpu/byteorder.h"
 
 // C includes. (C++ namespace)
 #include <cstdio>
+#include <cstring>
 
 // C++ includes.
 #include <string>
@@ -194,6 +177,34 @@ class TextFuncsTest : public ::testing::Test
 		 * https://en.wikipedia.org/wiki/Latin-1_Supplement_(Unicode_block)
 		 */
 		static const char16_t latin1_utf16_data[249+1];
+
+		/** Specialized code page functions. **/
+
+		/**
+		 * Atari ST to UTF-8 test string.
+		 * Contains all Atari ST characters that can be converted to Unicode.
+		 */
+		static const char atariST_data[236+1];
+
+		/**
+		 * Atari ST to UTF-16 test string.
+		 * Contains the expected result from:
+		 * - utf8_to_utf16(atariST_to_utf8(atariST_data, ARRAY_SIZE(atariST_data)))
+		 */
+		static const char16_t atariST_utf16_data[236+1];
+
+		/**
+		 * Atari ATASCII to UTF-8 test string.
+		 * Contains all Atari ATASCII characters that can be converted to Unicode.
+		 */
+		static const char atascii_data[229+1];
+
+		/**
+		 * Atari ATASCII to UTF-16 test string.
+		 * Contains the expected result from:
+		 * - utf8_to_utf16(atascii_to_utf8(atascii_data, ARRAY_SIZE(atascii_data)-1))
+		 */
+		static const char16_t atascii_utf16_data[229+1];
 };
 
 // Test strings are located in TextFuncsTest_data.hpp.
@@ -416,7 +427,6 @@ TEST_F(TextFuncsTest, cp1252_sjis_to_utf16_ascii)
 	// NOTE: Need to manually initialize the char16_t[] array
 	// due to the way _RP() is implemented for versions of
 	// MSVC older than 2015.
-	// TODO: Hex and/or _RP_CHR()?
 	static const char16_t utf16_out[] = {
 		'C',':','\\','W','i','n','d','o',
 		'w','s','\\','S','y','s','t','e',
@@ -677,43 +687,6 @@ TEST_F(TextFuncsTest, latin1_to_utf16)
 }
 
 /**
- * Test latin1_to_rp_string().
- */
-TEST_F(TextFuncsTest, latin1_to_rp_string)
-{
-	// Test with implicit length.
-	rp_string rps = latin1_to_rp_string((const char*)cp1252_data, -1);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(latin1_utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)latin1_utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ(ARRAY_SIZE(latin1_utf16_data)-1, rps.size());
-	EXPECT_EQ(latin1_utf16_data, rps);
-#endif
-
-	// Test with explicit length.
-	rps = latin1_to_rp_string((const char*)cp1252_data, ARRAY_SIZE(cp1252_data)-1);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(latin1_utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)latin1_utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ(ARRAY_SIZE(latin1_utf16_data)-1, rps.size());
-	EXPECT_EQ(latin1_utf16_data, rps);
-#endif
-
-	// Test with explicit length and an extra NULL.
-	// The extra NULL should be trimmed.
-	rps = latin1_to_rp_string((const char*)cp1252_data, ARRAY_SIZE(cp1252_data));
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(latin1_utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)latin1_utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ(ARRAY_SIZE(latin1_utf16_data)-1, rps.size());
-	EXPECT_EQ(latin1_utf16_data, rps);
-#endif
-}
-
-/**
  * Test utf8_to_latin1().
  */
 TEST_F(TextFuncsTest, utf8_to_latin1)
@@ -753,40 +726,6 @@ TEST_F(TextFuncsTest, utf16_to_latin1)
 	// Test with explicit length and an extra NULL.
 	// The extra NULL should be trimmed.
 	str = utf16_to_latin1((const char16_t*)latin1_utf16_data, ARRAY_SIZE(latin1_utf16_data));
-	EXPECT_EQ(ARRAY_SIZE(cp1252_data)-1, str.size());
-	EXPECT_EQ((const char*)cp1252_data, str);
-}
-
-/**
- * Test rp_string_to_latin1().
- */
-TEST_F(TextFuncsTest, rp_string_to_latin1)
-{
-	// Test with implicit length.
-#ifdef RP_UTF8
-	string str = rp_string_to_latin1((const char*)latin1_utf8_data, -1);
-#else /* RP_UTF16 */
-	string str = rp_string_to_latin1((const char16_t*)latin1_utf16_data, -1);
-#endif
-	EXPECT_EQ(ARRAY_SIZE(cp1252_data)-1, str.size());
-	EXPECT_EQ((const char*)cp1252_data, str);
-
-	// Test with explicit length.
-#ifdef RP_UTF8
-	str = rp_string_to_latin1((const char*)latin1_utf8_data, ARRAY_SIZE(latin1_utf8_data)-1);
-#else /* RP_UTF16 */
-	str = rp_string_to_latin1((const char16_t*)latin1_utf16_data, ARRAY_SIZE(latin1_utf16_data)-1);
-#endif
-	EXPECT_EQ(ARRAY_SIZE(cp1252_data)-1, str.size());
-	EXPECT_EQ((const char*)cp1252_data, str);
-
-	// Test with explicit length and an extra NULL.
-	// The extra NULL should be trimmed.
-#ifdef RP_UTF8
-	str = rp_string_to_latin1((const char*)latin1_utf8_data, ARRAY_SIZE(latin1_utf8_data));
-#else /* RP_UTF16 */
-	str = rp_string_to_latin1((const char16_t*)latin1_utf16_data, ARRAY_SIZE(latin1_utf16_data));
-#endif
 	EXPECT_EQ(ARRAY_SIZE(cp1252_data)-1, str.size());
 	EXPECT_EQ((const char*)cp1252_data, str);
 }
@@ -875,9 +814,11 @@ TEST_F(TextFuncsTest, u16_strcmp)
 	// On all other systems, it's a simple implementation.
 
 	// Three test strings.
-	static const char16_t u16_str1[] = {'a','b','c',0};
-	static const char16_t u16_str2[] = {'a','b','d',0};
-	static const char16_t u16_str3[] = {'d','e','f',0};
+	// TODO: Update these strings so they would fail if tested
+	// using u16_strcasecmp().
+	static const char16_t u16_str1[] = {'a','b','c','d','e','f','g',0};
+	static const char16_t u16_str2[] = {'a','b','d','e','f','g','h',0};
+	static const char16_t u16_str3[] = {'d','e','f','g','h','i','j',0};
 
 	// Compare strings to themselves.
 	EXPECT_EQ(0, u16_strcmp(u16_str1, u16_str1));
@@ -893,628 +834,87 @@ TEST_F(TextFuncsTest, u16_strcmp)
 	EXPECT_GT(u16_strcmp(u16_str3, u16_str2), 0);
 }
 
-/** rp_string wrappers. **/
-// These functions depend on the libromdata build type.
-// NOTE: Most of these tests are copied from the above
-// tests, but have been modified to use rp_string.
-
 /**
- * Test cp1252_to_rp_string().
+ * Test u16_strcasecmp().
  */
-TEST_F(TextFuncsTest, cp1252_to_rp_string)
+TEST_F(TextFuncsTest, u16_strcasecmp)
 {
-	// Test with implicit length.
-	rp_string rps = cp1252_to_rp_string((const char*)cp1252_data, -1);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(cp1252_utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)cp1252_utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ(ARRAY_SIZE(cp1252_utf16_data)-1, rps.size());
-	EXPECT_EQ(cp1252_utf16_data, rps);
-#endif
+	// NOTE: u16_strcasecmp() is a wrapper for wcsicmp() on Windows.
+	// On all other systems, it's a simple implementation.
 
-	// Test with explicit length.
-	rps = cp1252_to_rp_string((const char*)cp1252_data, ARRAY_SIZE(cp1252_data)-1);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(cp1252_utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)cp1252_utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ(ARRAY_SIZE(cp1252_utf16_data)-1, rps.size());
-	EXPECT_EQ(cp1252_utf16_data, rps);
-#endif
-
-	// Test with explicit length and an extra NULL.
-	// The extra NULL should be trimmed.
-	rps = cp1252_to_rp_string((const char*)cp1252_data, ARRAY_SIZE(cp1252_data));
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(cp1252_utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)cp1252_utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ(ARRAY_SIZE(cp1252_utf16_data)-1, rps.size());
-	EXPECT_EQ(cp1252_utf16_data, rps);
-#endif
-}
-
-/**
- * Test cp1252_sjis_to_rp_string() fallback functionality.
- * This string should be detected as cp1252 due to
- * Shift-JIS decoding errors.
- */
-TEST_F(TextFuncsTest, cp1252_sjis_to_rp_string_fallback)
-{
-	// Test with implicit length.
-	rp_string rps = cp1252_sjis_to_rp_string((const char*)cp1252_data, -1);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(cp1252_utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)cp1252_utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ(ARRAY_SIZE(cp1252_utf16_data)-1, rps.size());
-	EXPECT_EQ(cp1252_utf16_data, rps);
-#endif
-
-	// Test with explicit length.
-	rps = cp1252_sjis_to_rp_string((const char*)cp1252_data, ARRAY_SIZE(cp1252_data)-1);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(cp1252_utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)cp1252_utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ(ARRAY_SIZE(cp1252_utf16_data)-1, rps.size());
-	EXPECT_EQ(cp1252_utf16_data, rps);
-#endif
-
-	// Test with explicit length and an extra NULL.
-	// The extra NULL should be trimmed.
-	rps = cp1252_sjis_to_rp_string((const char*)cp1252_data, ARRAY_SIZE(cp1252_data));
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(cp1252_utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)cp1252_utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ(ARRAY_SIZE(cp1252_utf16_data)-1, rps.size());
-	EXPECT_EQ(cp1252_utf16_data, rps);
-#endif
-}
-
-/**
- * Test cp1252_sjis_to_rp_string() fallback functionality.
- * This string is incorrectly detected as Shift-JIS because
- * all bytes are valid.
- */
-TEST_F(TextFuncsTest, cp1252_sjis_to_rp_string_copyright)
-{
-	// cp1252 code point 0xA9 is the copyright symbol,
-	// but it's also halfwidth katakana "U" in Shift-JIS.
-
-	// Test with implicit length.
-	rp_string rps = cp1252_sjis_to_rp_string((const char*)sjis_copyright_in, -1);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(sjis_copyright_out_utf8)-1, rps.size());
-	EXPECT_EQ((const char*)sjis_copyright_out_utf8, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ(ARRAY_SIZE(sjis_copyright_out_utf16)-1, rps.size());
-	EXPECT_EQ(sjis_copyright_out_utf16, rps);
-#endif
-
-	// Test with explicit length.
-	rps = cp1252_sjis_to_rp_string((const char*)sjis_copyright_in, ARRAY_SIZE(sjis_copyright_in)-1);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(sjis_copyright_out_utf8)-1, rps.size());
-	EXPECT_EQ((const char*)sjis_copyright_out_utf8, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ(ARRAY_SIZE(sjis_copyright_out_utf16)-1, rps.size());
-	EXPECT_EQ(sjis_copyright_out_utf16, rps);
-#endif
-
-	// Test with explicit length and an extra NULL.
-	// The extra NULL should be trimmed.
-	rps = cp1252_sjis_to_rp_string((const char*)sjis_copyright_in, ARRAY_SIZE(sjis_copyright_in));
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(sjis_copyright_out_utf8)-1, rps.size());
-	EXPECT_EQ((const char*)sjis_copyright_out_utf8, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ(ARRAY_SIZE(sjis_copyright_out_utf16)-1, rps.size());
-	EXPECT_EQ(sjis_copyright_out_utf16, rps);
-#endif
-}
-
-/**
- * Test cp1252_sjis_to_rp_string() with ASCII strings.
- * Note that backslashes will *not* be converted to
- * yen symbols, so this should be a no-op.
- *
- * FIXME: Backslash may be converted to yen symbols
- * on Windows if the system has a Japanese locale.
- */
-TEST_F(TextFuncsTest, cp1252_sjis_to_rp_string_ascii)
-{
-	static const char cp1252_in[] = "C:\\Windows\\System32";
-#ifdef RP_UTF16
-	// NOTE: Need to manually initialize the char16_t[] array
-	// due to the way _RP() is implemented for versions of
-	// MSVC older than 2015.
-	// TODO: Hex and/or _RP_CHR()?
-	static const char16_t utf16_out[] = {
-		'C',':','\\','W','i','n','d','o',
-		'w','s','\\','S','y','s','t','e',
-		'm','3','2',0
-	};
-#endif
-
-	// Test with implicit length.
-	rp_string rps = cp1252_sjis_to_rp_string(cp1252_in, -1);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(cp1252_in)-1, rps.size());
-	EXPECT_EQ(cp1252_in, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ(ARRAY_SIZE(utf16_out)-1, rps.size());
-	EXPECT_EQ(utf16_out, rps);
-#endif
-
-	// Test with explicit length.
-	rps = cp1252_sjis_to_rp_string(cp1252_in, ARRAY_SIZE(cp1252_in)-1);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(cp1252_in)-1, rps.size());
-	EXPECT_EQ(cp1252_in, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ(ARRAY_SIZE(utf16_out)-1, rps.size());
-	EXPECT_EQ(utf16_out, rps);
-#endif
-
-	// Test with explicit length and an extra NULL.
-	// The extra NULL should be trimmed.
-	rps = cp1252_sjis_to_rp_string(cp1252_in, ARRAY_SIZE(cp1252_in));
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(cp1252_in)-1, rps.size());
-	EXPECT_EQ(cp1252_in, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ(ARRAY_SIZE(utf16_out)-1, rps.size());
-	EXPECT_EQ(utf16_out, rps);
-#endif
-}
-
-/**
- * Test cp1252_sjis_to_rp_string() with Japanese text.
- * This includes a wave dash character (8160).
- */
-TEST_F(TextFuncsTest, cp1252_sjis_to_rp_string_japanese)
-{
-	// Test with implicit length.
-	rp_string rps = cp1252_sjis_to_rp_string((const char*)sjis_data, -1);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(sjis_utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)sjis_utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ(ARRAY_SIZE(sjis_utf16_data)-1, rps.size());
-	EXPECT_EQ(sjis_utf16_data, rps);
-#endif
-
-	// Test with explicit length.
-	rps = cp1252_sjis_to_rp_string((const char*)sjis_data, ARRAY_SIZE(sjis_data)-1);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(sjis_utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)sjis_utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ(ARRAY_SIZE(sjis_utf16_data)-1, rps.size());
-	EXPECT_EQ(sjis_utf16_data, rps);
-#endif
-
-	// Test with explicit length and an extra NULL.
-	// The extra NULL should be trimmed.
-	rps = cp1252_sjis_to_rp_string((const char*)sjis_data, ARRAY_SIZE(sjis_data));
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(sjis_utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)sjis_utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ(ARRAY_SIZE(sjis_utf16_data)-1, rps.size());
-	EXPECT_EQ(sjis_utf16_data, rps);
-#endif
-}
-
-/**
- * Test utf8_to_rp_string() with regular text and special characters.
- */
-TEST_F(TextFuncsTest, utf8_to_rp_string)
-{
-	// NOTE: The UTF-16 test strings are stored as
-	// uint8_t arrays in order to prevent byteswapping
-	// by the compiler.
-
-	// Test with implicit length.
-	rp_string rps = utf8_to_rp_string((const char*)utf8_data, -1);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, rps.size());
-	EXPECT_EQ((const char16_t*)utf16_data, rps);
-#endif
-
-	// Test with explicit length.
-	rps = utf8_to_rp_string((const char*)utf8_data, ARRAY_SIZE(utf8_data)-1);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, rps.size());
-	EXPECT_EQ((const char16_t*)utf16_data, rps);
-#endif
-
-	// Test with explicit length and an extra NULL.
-	// The extra NULL should be trimmed.
-	rps = utf8_to_rp_string((const char*)utf8_data, ARRAY_SIZE(utf8_data));
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, rps.size());
-	EXPECT_EQ((const char16_t*)utf16_data, rps);
-#endif
-
-	// utf8_to_rp_string(const std::string &str) test.
-	string str((const char*)utf8_data, ARRAY_SIZE(utf8_data)-1);
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, str.size());
-	rps = utf8_to_rp_string(str);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, rps.size());
-	EXPECT_EQ((const char16_t*)utf16_data, rps);
-#endif
-}
-
-/**
- * Test rp_string_to_utf8() with regular text and special characters.
- */
-TEST_F(TextFuncsTest, rp_string_to_utf8)
-{
-	// NOTE: The UTF-16 test strings are stored as
-	// uint8_t arrays in order to prevent byteswapping
-	// by the compiler.
-
-	// Test with implicit length.
-#ifdef RP_UTF8
-	string str = rp_string_to_utf8((const rp_char*)utf8_data, -1);
-#else
-	string str = rp_string_to_utf8((const rp_char*)utf16_data, -1);
-#endif
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, str.size());
-	EXPECT_EQ((const char*)utf8_data, str);
-
-	// Test with explicit length.
-#ifdef RP_UTF8
-	str = rp_string_to_utf8((const rp_char*)utf8_data, ARRAY_SIZE(utf8_data)-1);
-#else
-	str = rp_string_to_utf8((const rp_char*)utf16_data, (sizeof(utf16_data)/sizeof(char16_t))-1);
-#endif
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, str.size());
-	EXPECT_EQ((const char*)utf8_data, str);
-
-	// Test with explicit length and an extra NULL.
-	// The extra NULL should be trimmed.
-#ifdef RP_UTF8
-	str = rp_string_to_utf8((const rp_char*)utf8_data, ARRAY_SIZE(utf8_data));
-#else
-	str = rp_string_to_utf8((const rp_char*)utf16_data, (sizeof(utf16_data)/sizeof(char16_t)));
-#endif
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, str.size());
-	EXPECT_EQ((const char*)utf8_data, str);
-
-	// rp_string_to_utf8(const rp_string &rps) test.
-#ifdef RP_UTF8
-	rp_string rps((const char*)utf8_data, ARRAY_SIZE(utf8_data)-1);
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, rps.size());
-#else /* RP_UTF16 */
-	rp_string rps((const char16_t*)utf16_data, (sizeof(utf16_data)/sizeof(char16_t))-1);
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, rps.size());
-#endif
-	str = rp_string_to_utf8(rps);
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, str.size());
-	EXPECT_EQ((const char*)utf8_data, str);
-}
-
-/**
- * Test utf16le_to_rp_string() with regular text and special characters.
- */
-TEST_F(TextFuncsTest, utf16le_to_rp_string)
-{
-	// NOTE: The UTF-16 test strings are stored as
-	// uint8_t arrays in order to prevent byteswapping
-	// by the compiler.
-
-	// Test with implicit length.
-	rp_string rps = utf16le_to_rp_string((const char16_t*)utf16le_data, -1);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, rps.size());
-	EXPECT_EQ((const char16_t*)utf16_data, rps);
-#endif
-
-	// Test with explicit length.
-	rps = utf16le_to_rp_string((const char16_t*)utf16le_data, (sizeof(utf16le_data)/sizeof(char16_t))-1);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, rps.size());
-	EXPECT_EQ((const char16_t*)utf16_data, rps);
-#endif
-
-	// Test with explicit length and an extra NULL.
-	// The extra NULL should be trimmed.
-	rps = utf16le_to_rp_string((const char16_t*)utf16le_data, (sizeof(utf16le_data)/sizeof(char16_t)));
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, rps.size());
-	EXPECT_EQ((const char16_t*)utf16_data, rps);
-#endif
-
-	// utf16le_to_rp_string(const std::u16string &str) test.
-	u16string str((const char16_t*)utf16le_data, (sizeof(utf16le_data)/sizeof(char16_t))-1);
-	EXPECT_EQ((sizeof(utf16le_data)/sizeof(char16_t))-1, str.size());
-	rps = utf16le_to_rp_string(str);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, rps.size());
-	EXPECT_EQ((const char16_t*)utf16_data, rps);
-#endif
-}
-
-/**
- * Test utf16be_to_rp_string() with regular text and special characters.
- */
-TEST_F(TextFuncsTest, utf16be_to_rp_string)
-{
-	// NOTE: The UTF-16 test strings are stored as
-	// uint8_t arrays in order to prevent byteswapping
-	// by the compiler.
-
-	// Test with implicit length.
-	rp_string rps = utf16be_to_rp_string((const char16_t*)utf16be_data, -1);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, rps.size());
-	EXPECT_EQ((const char16_t*)utf16_data, rps);
-#endif
-
-	// Test with explicit length.
-	rps = utf16be_to_rp_string((const char16_t*)utf16be_data, (sizeof(utf16be_data)/sizeof(char16_t))-1);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, rps.size());
-	EXPECT_EQ((const char16_t*)utf16_data, rps);
-#endif
-
-	// Test with explicit length and an extra NULL.
-	// The extra NULL should be trimmed.
-	rps = utf16be_to_rp_string((const char16_t*)utf16be_data, (sizeof(utf16be_data)/sizeof(char16_t)));
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, rps.size());
-	EXPECT_EQ((const char16_t*)utf16_data, rps);
-#endif
-
-	// utf16be_to_rp_string(const std::u16string &str) test.
-	u16string str((const char16_t*)utf16be_data, (sizeof(utf16be_data)/sizeof(char16_t))-1);
-	EXPECT_EQ((sizeof(utf16be_data)/sizeof(char16_t))-1, str.size());
-	rps = utf16be_to_rp_string(str);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, rps.size());
-	EXPECT_EQ((const char16_t*)utf16_data, rps);
-#endif
-}
-
-/**
- * Test utf16_to_rp_string() with regular text and special characters.
- * NOTE: This is effectively the same as the utf16le_to_rp_string()
- * or utf16be_to_rp_string() test, depending on system architecture.
- * This test ensures the byteorder macros are working correctly.
- */
-TEST_F(TextFuncsTest, utf16_to_rp_string)
-{
-	// NOTE: The UTF-16 test strings are stored as
-	// uint8_t arrays in order to prevent byteswapping
-	// by the compiler.
-
-	// Test with implicit length.
-	rp_string rps = utf16_to_rp_string((const char16_t*)utf16_data, -1);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, rps.size());
-	EXPECT_EQ((const char16_t*)utf16_data, rps);
-#endif
-
-	// Test with explicit length.
-	rps = utf16_to_rp_string((const char16_t*)utf16_data, (sizeof(utf16_data)/sizeof(char16_t))-1);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, rps.size());
-	EXPECT_EQ((const char16_t*)utf16_data, rps);
-#endif
-
-	// Test with explicit length and an extra NULL.
-	// The extra NULL should be trimmed.
-	rps = utf16_to_rp_string((const char16_t*)utf16_data, (sizeof(utf16_data)/sizeof(char16_t)));
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, rps.size());
-	EXPECT_EQ((const char16_t*)utf16_data, rps);
-#endif
-
-	// utf16_to_rp_string(const std::u16string &str) test.
-	u16string str((const char16_t*)utf16_data, (sizeof(utf16_data)/sizeof(char16_t))-1);
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, str.size());
-	rps = utf16_to_rp_string(str);
-#ifdef RP_UTF8
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, rps.size());
-	EXPECT_EQ((const char*)utf8_data, rps);
-#else /* RP_UTF16 */
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, rps.size());
-	EXPECT_EQ((const char16_t*)utf16_data, rps);
-#endif
-}
-
-/**
- * Test rp_string_to_utf16() with regular text and special characters.
- */
-TEST_F(TextFuncsTest, rp_string_to_utf16)
-{
-	// NOTE: The UTF-16 test strings are stored as
-	// uint8_t arrays in order to prevent byteswapping
-	// by the compiler.
-
-	// Test with implicit length.
-#ifdef RP_UTF8
-	u16string str = rp_string_to_utf16((const rp_char*)utf8_data, -1);
-#else
-	u16string str = rp_string_to_utf16((const rp_char*)utf16_data, -1);
-#endif
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, str.size());
-	EXPECT_EQ((const char16_t*)utf16_data, str);
-
-	// Test with explicit length.
-#ifdef RP_UTF8
-	str = rp_string_to_utf16((const rp_char*)utf8_data, ARRAY_SIZE(utf8_data)-1);
-#else
-	str = rp_string_to_utf16((const rp_char*)utf16_data, (sizeof(utf16_data)/sizeof(char16_t))-1);
-#endif
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, str.size());
-	EXPECT_EQ((const char16_t*)utf16_data, str);
-
-	// Test with explicit length and an extra NULL.
-	// The extra NULL should be trimmed.
-#ifdef RP_UTF8
-	str = rp_string_to_utf16((const rp_char*)utf8_data, ARRAY_SIZE(utf8_data));
-#else
-	str = rp_string_to_utf16((const rp_char*)utf16_data, (sizeof(utf16_data)/sizeof(char16_t)));
-#endif
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, str.size());
-	EXPECT_EQ((const char16_t*)utf16_data, str);
-
-	// rp_string_to_utf16(const rp_string &rps) test.
-#ifdef RP_UTF8
-	rp_string rps((const char*)utf8_data, ARRAY_SIZE(utf8_data)-1);
-	EXPECT_EQ(ARRAY_SIZE(utf8_data)-1, rps.size());
-#else /* RP_UTF16 */
-	rp_string rps((const char16_t*)utf16_data, (sizeof(utf16_data)/sizeof(char16_t))-1);
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, rps.size());
-#endif
-	str = rp_string_to_utf16(rps);
-	EXPECT_EQ((sizeof(utf16_data)/sizeof(char16_t))-1, str.size());
-	EXPECT_EQ((const char16_t*)utf16_data, str);
-}
-
-/**
- * Test rp_strlen().
- */
-TEST_F(TextFuncsTest, rp_strlen)
-{
-	// Compare to 8-bit strlen() with ASCII.
-	static const char ascii_in[] = "abcdefghijklmnopqrstuvwxyz";
-	static const rp_char rpc_in[] = {
-		'a','b','c','d','e','f','g','h','i','j','k','l',
-		'm','n','o','p','q','r','s','t','u','v','w','x',
-		'y','z',0
-	};
-
-	EXPECT_EQ(ARRAY_SIZE(ascii_in)-1, strlen(ascii_in));
-	EXPECT_EQ(ARRAY_SIZE(rpc_in)-1, rp_strlen(rpc_in));
-	EXPECT_EQ(strlen(ascii_in), rp_strlen(rpc_in));
-
-	// SMP test skipped for rp_strlen().
-	// If it worked iwth u16_strlen(), it'll work with
-	// rp_strlen() in RP_UTF16, and in RP_UTF8,
-	// it'll be strlen().
-}
-
-/**
- * Test rp_strdup().
- */
-TEST_F(TextFuncsTest, rp_strdup)
-{
-	// Test string.
-	static const rp_char rpc_str[] = {
-		'T','h','e',' ','q','u','i','c','k',' ','b','r',
-		'o','w','n',' ','f','o','x',' ','j','u','m','p',
-		's',' ','o','v','e','r',' ','t','h','e',' ','l',
-		'a','z','y',' ','d','o','g','.',0
-	};
-
-	rp_char *rpc_dup = rp_strdup(rpc_str);
-	ASSERT_TRUE(rpc_dup != nullptr);
-
-	// Verify the NULL terminator.
-	EXPECT_EQ(0, rpc_str[ARRAY_SIZE(rpc_str)-1]);
-	if (rpc_str[ARRAY_SIZE(rpc_str)-1] != 0) {
-		// NULL terminator not found.
-		// u16_strlen() and u16_strcmp() may crash,
-		// so exit early.
-		// NOTE: We can't use ASSERT_EQ() because we
-		// have to free the u16_strdup()'d string.
-		free(rpc_dup);
-		return;
-	}
-
-	// Verify the string length.
-	EXPECT_EQ(ARRAY_SIZE(rpc_str)-1, rp_strlen(rpc_dup));
-
-	// Verify the string contents.
-	// NOTE: EXPECT_STREQ() supports const wchar_t*,
-	// but not const char16_t*.
-	EXPECT_EQ(0, rp_strcmp(rpc_str, rpc_dup));
-	free(rpc_dup);
-
-	// Test the rp_string overload.
-	rp_string rps(rpc_str, ARRAY_SIZE(rpc_str)-1);
-	EXPECT_EQ(rpc_str, rps);
-	rpc_dup = rp_strdup(rps);
-	ASSERT_TRUE(rpc_dup != nullptr);
-	EXPECT_EQ(rps, rpc_dup);
-	free(rpc_dup);
-}
-
-/**
- * Test u16_strcmp().
- */
-TEST_F(TextFuncsTest, rp_strcmp)
-{
 	// Three test strings.
-	static const rp_char rpc_str1[] = {'a','b','c',0};
-	static const rp_char rpc_str2[] = {'a','b','d',0};
-	static const rp_char rpc_str3[] = {'d','e','f',0};
+	static const char16_t u16_str1[] = {'A','b','C','d','E','f','G',0};
+	static const char16_t u16_str2[] = {'a','B','d','E','f','G','h',0};
+	static const char16_t u16_str3[] = {'D','e','F','g','H','i','J',0};
 
 	// Compare strings to themselves.
-	EXPECT_EQ(0, rp_strcmp(rpc_str1, rpc_str1));
-	EXPECT_EQ(0, rp_strcmp(rpc_str2, rpc_str2));
-	EXPECT_EQ(0, rp_strcmp(rpc_str3, rpc_str3));
+	EXPECT_EQ(0, u16_strcasecmp(u16_str1, u16_str1));
+	EXPECT_EQ(0, u16_strcasecmp(u16_str2, u16_str2));
+	EXPECT_EQ(0, u16_strcasecmp(u16_str3, u16_str3));
 
 	// Compare strings to each other.
-	EXPECT_LT(rp_strcmp(rpc_str1, rpc_str2), 0);
-	EXPECT_LT(rp_strcmp(rpc_str1, rpc_str3), 0);
-	EXPECT_GT(rp_strcmp(rpc_str2, rpc_str1), 0);
-	EXPECT_LT(rp_strcmp(rpc_str2, rpc_str3), 0);
-	EXPECT_GT(rp_strcmp(rpc_str3, rpc_str1), 0);
-	EXPECT_GT(rp_strcmp(rpc_str3, rpc_str2), 0);
+	EXPECT_LT(u16_strcasecmp(u16_str1, u16_str2), 0);
+	EXPECT_LT(u16_strcasecmp(u16_str1, u16_str3), 0);
+	EXPECT_GT(u16_strcasecmp(u16_str2, u16_str1), 0);
+	EXPECT_LT(u16_strcasecmp(u16_str2, u16_str3), 0);
+	EXPECT_GT(u16_strcasecmp(u16_str3, u16_str1), 0);
+	EXPECT_GT(u16_strcasecmp(u16_str3, u16_str2), 0);
+}
+
+/** Specialized code page functions. **/
+
+TEST_F(TextFuncsTest, atariST_to_utf8)
+{
+	// This tests all code points that can be converted from the
+	// Atari ST character set to Unicode.
+	// Reference: https://en.wikipedia.org/wiki/Atari_ST_character_set
+
+	// Test with implicit length.
+	string str = atariST_to_utf8(atariST_data, -1);
+	u16string u16str = utf8_to_utf16(str);
+	EXPECT_EQ(ARRAY_SIZE(atariST_utf16_data)-1, u16str.size());
+	EXPECT_EQ(atariST_utf16_data, u16str);
+
+	// Test with explicit length.
+	str = atariST_to_utf8(atariST_data, ARRAY_SIZE(atariST_data)-1);
+	u16str = utf8_to_utf16(str);
+	EXPECT_EQ(ARRAY_SIZE(atariST_utf16_data)-1, u16str.size());
+	EXPECT_EQ(atariST_utf16_data, u16str);
+
+	// Test with explicit length and an extra NULL.
+	// The extra NULL should be trimmed.
+	str = atariST_to_utf8(atariST_data, ARRAY_SIZE(atariST_data));
+	u16str = utf8_to_utf16(str);
+	EXPECT_EQ(ARRAY_SIZE(atariST_utf16_data)-1, u16str.size());
+	EXPECT_EQ(atariST_utf16_data, u16str);
+}
+
+TEST_F(TextFuncsTest, atascii_to_utf8)
+{
+	// This tests all code points that can be converted from the
+	// Atari ATASCII character set to Unicode.
+	// Reference: https://en.wikipedia.org/wiki/ATASCII
+
+	// Test with implicit length.
+	// NOTE: We have to skip the first character, 0x00, because
+	// implicit length mode would interpret that as an empty string.
+	string str = atascii_to_utf8(&atascii_data[1], -1);
+	u16string u16str = utf8_to_utf16(str);
+	EXPECT_EQ(ARRAY_SIZE(atascii_utf16_data)-2, u16str.size());
+	EXPECT_EQ(&atascii_utf16_data[1], u16str);
+
+	// Test with explicit length.
+	str = atascii_to_utf8(atascii_data, ARRAY_SIZE(atascii_data)-1);
+	u16str = utf8_to_utf16(str);
+	EXPECT_EQ(ARRAY_SIZE(atascii_utf16_data)-1, u16str.size());
+	EXPECT_EQ(atascii_utf16_data, u16str);
+
+	// Test with explicit length and an extra NULL.
+	// The extra NULL should be trimmed.
+	str = atascii_to_utf8((const char*)atascii_data, ARRAY_SIZE(atascii_data));
+	u16str = utf8_to_utf16(str);
+	EXPECT_EQ(ARRAY_SIZE(atascii_utf16_data)-1, u16str.size());
+	EXPECT_EQ(atascii_utf16_data, u16str);
 }
 
 } }
@@ -1522,7 +922,7 @@ TEST_F(TextFuncsTest, rp_strcmp)
 /**
  * Test suite main function.
  */
-extern "C" int gtest_main(int argc, char *argv[])
+extern "C" int gtest_main(int argc, TCHAR *argv[])
 {
 	fprintf(stderr, "LibRpBase test suite: TextFuncs tests.\n\n");
 	fflush(nullptr);

@@ -2,31 +2,15 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * PartitionFile.hpp: IRpFile implementation for IPartition.               *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "PartitionFile.hpp"
 #include "IDiscReader.hpp"
 
-// C includes. (C++ namespace)
-#include <cerrno>
-
-// C++ includes.
-#include <string>
+// C++ STL classes.
 using std::string;
 
 namespace LibRpBase {
@@ -34,18 +18,20 @@ namespace LibRpBase {
 /**
  * Open a file from an IPartition.
  * NOTE: These files are read-only.
- * @param partition IPartition (or IDiscReader) object.
- * @param offset File starting offset.
- * @param size File size.
+ * @param partition	[in] IPartition (or IDiscReader) object.
+ * @param offset	[in] File starting offset.
+ * @param size		[in] File size.
  */
-PartitionFile::PartitionFile(IDiscReader *partition, int64_t offset, int64_t size)
+PartitionFile::PartitionFile(IDiscReader *partition, off64_t offset, off64_t size)
 	: super()
-	, m_partition(partition)
 	, m_offset(offset)
 	, m_size(size)
 	, m_pos(0)
 {
-	if (!partition) {
+	if (partition) {
+		m_partition = partition->ref();
+	} else {
+		m_partition = nullptr;
 		m_lastError = EBADF;
 	}
 
@@ -54,39 +40,7 @@ PartitionFile::PartitionFile(IDiscReader *partition, int64_t offset, int64_t siz
 
 PartitionFile::~PartitionFile()
 {
-	// TODO: Reference counting?
-}
-
-/**
- * Copy constructor.
- * @param other Other instance.
- */
-PartitionFile::PartitionFile(const PartitionFile &other)
-	: super()
-	, m_partition(other.m_partition)
-	, m_offset(other.m_offset)
-	, m_size(other.m_size)
-	, m_pos(0)
-{
-	// TODO: Copy m_pos? (RpMemFile doesn't.)
-	// TODO: Reference counting?
-}
-
-/**
- * Assignment operator.
- * @param other Other instance.
- * @return This instance.
- */
-PartitionFile &PartitionFile::operator=(const PartitionFile &other)
-{
-	// TODO: Reference counting?
-	m_partition = other.m_partition;
-	m_offset = other.m_offset;
-	m_size = other.m_size;
-	m_pos = 0;
-
-	m_lastError = (m_partition ? 0 : EBADF);
-	return *this;
+	UNREF(m_partition);
 }
 
 /**
@@ -100,27 +54,11 @@ bool PartitionFile::isOpen(void) const
 }
 
 /**
- * dup() the file handle.
- *
- * Needed because IRpFile* objects are typically
- * pointers, not actual instances of the object.
- *
- * NOTE: The dup()'d IRpFile* does NOT have a separate
- * file pointer. This is due to how dup() works.
- *
- * @return dup()'d file, or nullptr on error.
- */
-IRpFile *PartitionFile::dup(void)
-{
-	return new PartitionFile(*this);
-}
-
-/**
  * Close the file.
  */
 void PartitionFile::close(void)
 {
-	m_partition = nullptr;
+	UNREF_AND_NULL(m_partition);
 }
 
 /**
@@ -136,18 +74,23 @@ size_t PartitionFile::read(void *ptr, size_t size)
 		return 0;
 	}
 
+	// Check if size is in bounds.
+	if (m_pos > m_size - static_cast<off64_t>(size)) {
+		// Not enough data.
+		// Copy whatever's left in the file.
+		size = static_cast<size_t>(m_size - m_pos);
+		if (size == 0) {
+			// Nothing left.
+			// TODO: Set an error?
+			return 0;
+		}
+	}
+
 	m_partition->clearError();
 	int iRet = m_partition->seek(m_offset + m_pos);
 	if (iRet != 0) {
 		m_lastError = m_partition->lastError();
 		return 0;
-	}
-
-	// Check if size is in bounds.
-	if (m_pos > (int64_t)(m_size - size)) {
-		// Not enough data.
-		// Copy whatever's left in the file.
-		size = (size_t)(m_size - m_pos);
 	}
 
 	size_t ret = 0;
@@ -182,7 +125,7 @@ size_t PartitionFile::write(const void *ptr, size_t size)
  * @param pos File position.
  * @return 0 on success; -1 on error.
  */
-int PartitionFile::seek(int64_t pos)
+int PartitionFile::seek(off64_t pos)
 {
 	if (!m_partition) {
 		m_lastError = EBADF;
@@ -204,7 +147,7 @@ int PartitionFile::seek(int64_t pos)
  * Get the file position.
  * @return File position, or -1 on error.
  */
-int64_t PartitionFile::tell(void)
+off64_t PartitionFile::tell(void)
 {
 	if (!m_partition) {
 		m_lastError = EBADF;
@@ -219,7 +162,7 @@ int64_t PartitionFile::tell(void)
  * @param size New size. (default is 0)
  * @return 0 on success; -1 on error.
  */
-int PartitionFile::truncate(int64_t size)
+int PartitionFile::truncate(off64_t size)
 {
 	// Not supported.
 	RP_UNUSED(size);
@@ -233,7 +176,7 @@ int PartitionFile::truncate(int64_t size)
  * Get the file size.
  * @return File size, or negative on error.
  */
-int64_t PartitionFile::size(void)
+off64_t PartitionFile::size(void)
 {
 	if (!m_partition) {
 		m_lastError = EBADF;

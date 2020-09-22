@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * aligned_malloc.h: Aligned memory allocation compatibility header.       *
  *                                                                         *
- * Copyright (c) 2015-2017 by David Korth                                  *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2015-2020 by David Korth                                  *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBRPBASE_ALIGNED_MALLOC_H__
@@ -30,7 +17,7 @@
 /**
  * TODO: Check if the following functions are present:
  * - _aligned_malloc (MSVC)
- * - aligned_alloc (C11)
+ * - aligned_alloc (C11) (FIXME: Not working properly on Mac OS.)
  * - posix_memalign
  * - memalign
  * If none of these are present, we'll use our own custom
@@ -38,7 +25,7 @@
  */
 
 #include "librpbase/config.librpbase.h"
-#include "librpbase/common.h"
+#include "common.h"
 
 /**
  * This header defines two functions if they aren't present:
@@ -77,7 +64,7 @@ static FORCEINLINE void aligned_free(void *memptr)
 	_aligned_free(memptr);
 }
 
-#elif defined(HAVE_ALIGNED_ALLOC)
+#elif 0 //defined(HAVE_ALIGNED_ALLOC) (FIXME: Not working properly on Mac OS.)
 
 // C11 aligned_alloc()
 #include <stdlib.h>
@@ -132,5 +119,35 @@ static FORCEINLINE void aligned_free(void *memptr)
 #else
 # error Missing aligned malloc() function for this system.
 #endif
+
+#ifdef __cplusplus
+
+// std::unique_ptr<> wrapper for aligned_malloc().
+// Reference: https://embeddedartistry.com/blog/2017/2/23/c-smart-pointers-with-aligned-mallocfree
+#include <memory>
+
+// NOTE: MSVC 2010 doesn't support "template using".
+// TODO: Check 2012; assuming 2013+ for now.
+#if !defined(_MSC_VER) || _MSC_VER >= 1800
+template<class T> using unique_ptr_aligned = std::unique_ptr<T, decltype(&aligned_free)>;
+# define UNIQUE_PTR_ALIGNED_T unique_ptr_aligned<T>
+#else /* _MSC_VER < 1900 */
+# define UNIQUE_PTR_ALIGNED_T std::unique_ptr<T, decltype(&aligned_free)>
+#endif
+
+/**
+ * Aligned unique_ptr() helper.
+ * @param align Alignment, in bytes.
+ * @param size Size, in sizeof(T) units.
+ */
+template<class T>
+static inline UNIQUE_PTR_ALIGNED_T aligned_uptr(size_t align, size_t size)
+{
+	return UNIQUE_PTR_ALIGNED_T(
+		static_cast<T*>(aligned_malloc(align, size * sizeof(T))),
+		&aligned_free);
+}
+
+#endif /* __cplusplus */
 
 #endif /* __ROMPROPERTIES_LIBRPBASE_ALIGNED_MALLOC_H__ */

@@ -70,7 +70,7 @@ void BZ2_bz__AssertH__fail ( int errcode )
       "  points in compression, you may have a flaky memory system.\n"
       "  Try a memory-test program.  I have used Memtest86\n"
       "  (www.memtest86.com).  At the time of writing it is free (GPLd).\n"
-      "  Memtest86 tests memory much more thorougly than your BIOSs\n"
+      "  Memtest86 tests memory much more thoroughly than your BIOSs\n"
       "  power-on test, and may find failures that the BIOS doesn't.\n"
       "\n"
       "* If the error can be repeatably reproduced, this is a bug in\n"
@@ -102,6 +102,7 @@ static
 void* default_bzalloc ( void* opaque, Int32 items, Int32 size )
 {
    void* v = malloc ( items * size );
+   (void)opaque;
    return v;
 }
 
@@ -109,6 +110,7 @@ static
 void default_bzfree ( void* opaque, void* addr )
 {
    if (addr != NULL) free ( addr );
+   (void)opaque;
 }
 
 

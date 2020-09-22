@@ -2,34 +2,13 @@
  * ROM Properties Page shell extension. (KDE)                              *
  * ImageTypesTab.cpp: Image Types tab for rp-config.                       *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "ImageTypesTab.hpp"
 #include "RpQt.hpp"
-
-// Qt includes.
-#include <QComboBox>
-#include <QLabel>
-#include <QSignalMapper>
-
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cerrno>
 
 // TImageTypesConfig is a templated class,
 // so we have to #include the .cpp file here.
@@ -57,25 +36,25 @@ class ImageTypesTabPrivate : public TImageTypesConfig<QComboBox*>
 		/**
 		 * Create the labels in the grid.
 		 */
-		virtual void createGridLabels(void) override final;
+		void createGridLabels(void) final;
 
 		/**
 		 * Create a ComboBox in the grid.
 		 * @param cbid ComboBox ID.
 		 */
-		virtual void createComboBox(unsigned int cbid) override final;
+		void createComboBox(unsigned int cbid) final;
 
 		/**
 		 * Add strings to a ComboBox in the grid.
 		 * @param cbid ComboBox ID.
 		 * @param max_prio Maximum priority value. (minimum is 1)
 		 */
-		virtual void addComboBoxStrings(unsigned int cbid, int max_prio) override final;
+		void addComboBoxStrings(unsigned int cbid, int max_prio) final;
 
 		/**
 		 * Finish adding the ComboBoxes.
 		 */
-		virtual void finishComboBoxes(void) override final;
+		void finishComboBoxes(void) final;
 
 		/**
 		 * Initialize the Save subsystem.
@@ -83,7 +62,7 @@ class ImageTypesTabPrivate : public TImageTypesConfig<QComboBox*>
 		 * must be opened with an appropriate writer class.
 		 * @return 0 on success; negative POSIX error code on error.
 		 */
-		virtual int saveStart(void) override final;
+		int saveStart(void) final;
 
 		/**
 		 * Write an ImageType configuration entry.
@@ -91,7 +70,7 @@ class ImageTypesTabPrivate : public TImageTypesConfig<QComboBox*>
 		 * @param imageTypeList Image type list, comma-separated.
 		 * @return 0 on success; negative POSIX error code on error.
 		 */
-		virtual int saveWriteEntry(const char *sysName, const char *imageTypeList) override final;
+		int saveWriteEntry(const char *sysName, const char *imageTypeList) final;
 
 		/**
 		 * Close the Save subsystem.
@@ -99,7 +78,7 @@ class ImageTypesTabPrivate : public TImageTypesConfig<QComboBox*>
 		 * must be opened with an appropriate writer class.
 		 * @return 0 on success; negative POSIX error code on error.
 		 */
-		virtual int saveFinish(void) override final;
+		int saveFinish(void) final;
 
 	protected:
 		/** TImageTypesConfig functions. (public) **/
@@ -110,7 +89,7 @@ class ImageTypesTabPrivate : public TImageTypesConfig<QComboBox*>
 		 * @param cbid ComboBox ID.
 		 * @param prio New priority value. (0xFF == no)
 		 */
-		virtual void cboImageType_setPriorityValue(unsigned int cbid, unsigned int prio) override final;
+		void cboImageType_setPriorityValue(unsigned int cbid, unsigned int prio) final;
 
 	public:
 		// Last ComboBox added.
@@ -118,12 +97,14 @@ class ImageTypesTabPrivate : public TImageTypesConfig<QComboBox*>
 		// tab order for the credits label.
 		QComboBox *cboImageType_lastAdded;
 
-		// QSignalMapper for the QComboBoxes.
-		QSignalMapper *mapperCboImageType;
-
 		// Temporary QSettings object.
 		// Set and cleared by ImageTypesTab::save();
 		QSettings *pSettings;
+
+#if QT_VERSION < QT_VERSION_CHECK(5,0,0)
+		// QSignalMapper for the QComboBoxes.
+		QSignalMapper *mapperCboImageType;
+#endif /* QT_VERSION < QT_VERSION_CHECK(5,0,0) */
 };
 
 /** ImageTypesTabPrivate **/
@@ -131,12 +112,16 @@ class ImageTypesTabPrivate : public TImageTypesConfig<QComboBox*>
 ImageTypesTabPrivate::ImageTypesTabPrivate(ImageTypesTab* q)
 	: q_ptr(q)
 	, cboImageType_lastAdded(nullptr)
-	, mapperCboImageType(new QSignalMapper(q))
 	, pSettings(nullptr)
+#if QT_VERSION < QT_VERSION_CHECK(5,0,0)
+	, mapperCboImageType(new QSignalMapper(q))
+#endif /* QT_VERSION < QT_VERSION_CHECK(5,0,0) */
 {
+#if QT_VERSION < QT_VERSION_CHECK(5,0,0)
 	// Connect the QSignalMapper to the ImageTypesTab.
 	QObject::connect(mapperCboImageType, SIGNAL(mapped(int)),
 		q, SLOT(cboImageType_currentIndexChanged(int)));
+#endif /* QT_VERSION < QT_VERSION_CHECK(5,0,0) */
 }
 
 ImageTypesTabPrivate::~ImageTypesTabPrivate()
@@ -165,6 +150,12 @@ void ImageTypesTabPrivate::createGridLabels(void)
 	const QString cssImageType = QLatin1String(
 		"QLabel { margin-left: 0.2em; margin-right: 0.2em; margin-bottom: 0.1em; }");
 	for (unsigned int i = 0; i < IMG_TYPE_COUNT; i++) {
+		// TODO: Decrement the column number for >IMG_INT_MEDIA?
+		if (i == RomData::IMG_INT_MEDIA) {
+			// No INT MEDIA boxes, so eliminate the column.
+			continue;
+		}
+
 		QLabel *const lblImageType = new QLabel(U82Q(imageTypeName(i)), q);
 		lblImageType->setAlignment(Qt::AlignTop|Qt::AlignHCenter);
 		lblImageType->setStyleSheet(cssImageType);
@@ -193,16 +184,29 @@ void ImageTypesTabPrivate::createComboBox(unsigned int cbid)
 	if (!validateSysImageType(sys, imageType))
 		return;
 
+	// TODO: Decrement the column number for >IMG_INT_MEDIA?
+	if (imageType == RomData::IMG_INT_MEDIA) {
+		// No INT MEDIA boxes, so eliminate the column.
+		return;
+	}
+
 	// Create the ComboBox.
 	Q_Q(ImageTypesTab);
 	QComboBox *const cbo = new QComboBox(q);
 	ui.gridImageTypes->addWidget(cbo, sys+1, imageType+1);
 	cboImageType[sys][imageType] = cbo;
 
+#if QT_VERSION >= QT_VERSION_CHECK(5,0,0)
+	// Connect the signal to the slot with the appropriate value.
+	QObject::connect(cbo, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+		[q, cbid] { q->cboImageType_currentIndexChanged(cbid); }
+	);
+#else /* QT_VERSION < QT_VERSION_CHECK(5,0,0) */
 	// Connect the signal to the QSignalMapper.
 	QObject::connect(cbo, SIGNAL(currentIndexChanged(int)),
 		mapperCboImageType, SLOT(map()));
 	mapperCboImageType->setMapping(cbo, (int)cbid);
+#endif /* QT_VERSION >= QT_VERSION_CHECK(5,0,0) */
 
 	// Adjust the tab order.
 	if (cboImageType_lastAdded) {
@@ -228,18 +232,12 @@ void ImageTypesTabPrivate::addComboBoxStrings(unsigned int cbid, int max_prio)
 	if (!cbo)
 		return;
 
-	// Dropdown strings.
-	// NOTE: One more string than the total number of image types,
-	// since we have a string for "No".
-	static const char s_values[IMG_TYPE_COUNT+1][4] = {
-		"No", "1", "2", "3", "4", "5", "6", "7", "8", "9"
-	};
-	static_assert(ARRAY_SIZE(s_values) == IMG_TYPE_COUNT+1, "s_values[] is the wrong size.");
-
 	// NOTE: Need to add one more than the total number,
 	// since "No" counts as an entry.
-	for (int i = 0; i <= max_prio; i++) {
-		cbo->addItem(QLatin1String(s_values[i]));
+	assert(max_prio <= IMG_TYPE_COUNT);
+	cbo->addItem(U82Q(C_("ImageTypesTab|Values", "No")));
+	for (int i = 1; i <= max_prio; i++) {
+		cbo->addItem(QString::number(i));
 	}
 	cbo->setCurrentIndex(0);
 }
@@ -333,10 +331,6 @@ void ImageTypesTabPrivate::cboImageType_setPriorityValue(unsigned int cbid, unsi
 		cbo->setCurrentIndex(prio < IMG_TYPE_COUNT ? prio+1 : 0);
 	}
 }
-
-/** Other ImageTypesTabPrivate functions. **/
-
-// TODO
 
 /** ImageTypesTab **/
 

@@ -2,35 +2,18 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * AesCAPI_NG.cpp: AES decryption class using Win32 CryptoAPI NG.          *
  *                                                                         *
- * Copyright (c) 2016 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2019 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "AesCAPI_NG.hpp"
-#include "../common.h"
-
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cerrno>
 
 // libwin32common
 #include "libwin32common/RpWin32_sdk.h"
 
-// Atomic reference counter.
-#include "../threads/Atomics.h"
+// librpthreads
+#include "librpthreads/Atomics.h"
 
 // References:
 // - https://msdn.microsoft.com/en-us/library/windows/desktop/aa376234%28v=vs.85%29.aspx?f=255&MSPPError=-2147217396
@@ -125,7 +108,7 @@ AesCAPI_NG_Private::AesCAPI_NG_Private()
 	, pbKeyObject(nullptr)
 	, cbKeyObject(0)
 	, key_len(0)
-	, chainingMode(IAesCipher::CM_ECB)
+	, chainingMode(IAesCipher::ChainingMode::ECB)
 {
 	// Clear the key and IV.
 	memset(key, 0, sizeof(key));
@@ -149,11 +132,11 @@ AesCAPI_NG_Private::AesCAPI_NG_Private()
 		&hAesAlg, BCRYPT_AES_ALGORITHM, nullptr, 0);
 	if (NT_SUCCESS(status)) {
 		// Default to ECB chaining.
-		NTSTATUS status = pBCryptSetProperty(
-					hAesAlg, 
-					BCRYPT_CHAINING_MODE, 
-					(PBYTE)BCRYPT_CHAIN_MODE_ECB,
-					sizeof(BCRYPT_CHAIN_MODE_ECB), 0);
+		status = pBCryptSetProperty(
+				hAesAlg, 
+				BCRYPT_CHAINING_MODE, 
+				(PBYTE)BCRYPT_CHAIN_MODE_ECB,
+				sizeof(BCRYPT_CHAIN_MODE_ECB), 0);
 		if (NT_SUCCESS(status)) {
 			// Save the algorithm.
 			this->hAesAlg = hAesAlg;
@@ -198,7 +181,7 @@ int AesCAPI_NG_Private::load_bcrypt(void)
 	}
 
 	// Attempt to load bcrypt.dll.
-	hBcryptDll = LoadLibrary(L"bcrypt.dll");
+	hBcryptDll = LoadLibrary(_T("bcrypt.dll"));
 	if (!hBcryptDll) {
 		// bcrypt.dll not found.
 		return -ENOENT;
@@ -272,7 +255,7 @@ bool AesCAPI_NG::isUsable(void)
 	// so assume it works as long as bcrypt.dll is present and
 	// BCryptOpenAlgorithmProvider exists.
 	bool bRet = false;
-	HMODULE hBcryptDll = LoadLibrary(L"bcrypt.dll");
+	HMODULE hBcryptDll = LoadLibrary(_T("bcrypt.dll"));
 	if (hBcryptDll) {
 		bRet = (GetProcAddress(hBcryptDll, "BCryptOpenAlgorithmProvider") != nullptr);
 		FreeLibrary(hBcryptDll);
@@ -302,18 +285,18 @@ bool AesCAPI_NG::isInit(void) const
 
 /**
  * Set the encryption key.
- * @param key Key data.
- * @param len Key length, in bytes.
+ * @param pKey	[in] Key data.
+ * @param size	[in] Size of pKey, in bytes.
  * @return 0 on success; negative POSIX error code on error.
  */
-int AesCAPI_NG::setKey(const uint8_t *RESTRICT key, unsigned int len)
+int AesCAPI_NG::setKey(const uint8_t *RESTRICT pKey, size_t size)
 {
 	// Acceptable key lengths:
 	// - 16 (AES-128)
 	// - 24 (AES-192)
 	// - 32 (AES-256)
 	RP_D(AesCAPI_NG);
-	if (!key) {
+	if (!pKey) {
 		// No key specified.
 		return -EINVAL;
 	} else if (!d->hBcryptDll || !d->hAesAlg) {
@@ -321,7 +304,7 @@ int AesCAPI_NG::setKey(const uint8_t *RESTRICT key, unsigned int len)
 		return -EBADF;
 	}
 
-	if (len != 16 && len != 24 && len != 32) {
+	if (size != 16 && size != 24 && size != 32) {
 		// Invalid key length.
 		return -EINVAL;
 	}
@@ -353,7 +336,7 @@ int AesCAPI_NG::setKey(const uint8_t *RESTRICT key, unsigned int len)
 		d->hAesAlg,
 		&hKey,
 		pbKeyObject, cbKeyObject,
-		(PBYTE)key, len, 0);
+		(PBYTE)pKey, (ULONG)size, 0);
 	if (!NT_SUCCESS(status)) {
 		// Error generating the key.
 		free(pbKeyObject);
@@ -371,16 +354,12 @@ int AesCAPI_NG::setKey(const uint8_t *RESTRICT key, unsigned int len)
 		// Destroy the old key.
 		d->pBCryptDestroyKey(hOldKey);
 	}
-	if (pbOldKeyObject != nullptr) {
-		// Delete the old key blob.
-		free(pbOldKeyObject);
-	}
+	// Delete the old key blob.
+	free(pbOldKeyObject);
 
 	// Save the key data.
-	if (d->key != key) {
-		memcpy(d->key, key, len);
-		d->key_len = len;
-	}
+	memcpy(d->key, pKey, size);
+	d->key_len = static_cast<unsigned int>(size);
 	return 0;
 }
 
@@ -407,12 +386,12 @@ int AesCAPI_NG::setChainingMode(ChainingMode mode)
 	const wchar_t *szMode;
 	ULONG cbMode;
 	switch (mode) {
-		case CM_ECB:
-		case CM_CTR:	// implemented using ECB
+		case ChainingMode::ECB:
+		case ChainingMode::CTR:	// implemented using ECB
 			szMode = BCRYPT_CHAIN_MODE_ECB;
 			cbMode = sizeof(BCRYPT_CHAIN_MODE_ECB);
 			break;
-		case CM_CBC:
+		case ChainingMode::CBC:
 			szMode = BCRYPT_CHAIN_MODE_CBC;
 			cbMode = sizeof(BCRYPT_CHAIN_MODE_CBC);
 			break;
@@ -441,19 +420,19 @@ int AesCAPI_NG::setChainingMode(ChainingMode mode)
 
 /**
  * Set the IV (CBC mode) or counter (CTR mode).
- * @param iv IV/counter data.
- * @param len IV/counter length, in bytes.
+ * @param pIV	[in] IV/counter data.
+ * @param size	[in] Size of pIV, in bytes.
  * @return 0 on success; negative POSIX error code on error.
  */
-int AesCAPI_NG::setIV(const uint8_t *RESTRICT iv, unsigned int len)
+int AesCAPI_NG::setIV(const uint8_t *RESTRICT pIV, size_t size)
 {
 	RP_D(AesCAPI_NG);
-	if (!iv || len != 16) {
+	if (!pIV || size != 16) {
 		return -EINVAL;
 	} else if (!d->hBcryptDll || !d->hAesAlg) {
 		// Algorithm is not available.
 		return -EBADF;
-	} else if (d->chainingMode < CM_CBC || d->chainingMode > CM_CTR) {
+	} else if (d->chainingMode < ChainingMode::CBC || d->chainingMode >= ChainingMode::Max) {
 		// This chaining mode doesn't have an IV or counter.
 		return -EINVAL;
 	}
@@ -479,17 +458,19 @@ int AesCAPI_NG::setIV(const uint8_t *RESTRICT iv, unsigned int len)
 
 	// Set the IV.
 	assert(sizeof(d->iv) == 16);
-	memcpy(d->iv, iv, sizeof(d->iv));
+	memcpy(d->iv, pIV, sizeof(d->iv));
 	return 0;
 }
 
 /**
  * Decrypt a block of data.
- * @param data Data block.
- * @param data_len Length of data block.
+ * Key and IV/counter must be set before calling this function.
+ *
+ * @param pData	[in/out] Data block.
+ * @param size	[in] Length of data block. (Must be a multiple of 16.)
  * @return Number of bytes decrypted on success; 0 on error.
  */
-unsigned int AesCAPI_NG::decrypt(uint8_t *RESTRICT data, unsigned int data_len)
+size_t AesCAPI_NG::decrypt(uint8_t *RESTRICT pData, size_t size)
 {
 	RP_D(AesCAPI_NG);
 	if (!d->hBcryptDll || !d->hAesAlg || !d->hKey) {
@@ -516,34 +497,34 @@ unsigned int AesCAPI_NG::decrypt(uint8_t *RESTRICT data, unsigned int data_len)
 		return 0;
 	}
 
-	// data_len must be a multiple of the block length.
-	assert(data_len % cbBlockLen == 0);
-	if (data_len % cbBlockLen != 0) {
+	// size must be a multiple of the block length.
+	assert(size % cbBlockLen == 0);
+	if (size % cbBlockLen != 0) {
 		// Invalid data length.
 		return 0;
 	}
 
 	ULONG cbResult;
 	switch (d->chainingMode) {
-		case CM_ECB:
+		case ChainingMode::ECB:
 			status = d->pBCryptDecrypt(d->hKey,
-						data, data_len,
+						pData, (ULONG)size,
 						nullptr,
 						nullptr, 0,
-						data, data_len,
+						pData, (ULONG)size,
 						&cbResult, 0);
 			break;
 
-		case CM_CBC:
+		case ChainingMode::CBC:
 			status = d->pBCryptDecrypt(d->hKey,
-						data, data_len,
+						pData, (ULONG)size,
 						nullptr,
-						d->iv, sizeof(d->iv),
-						data, data_len,
+						d->iv, (ULONG)sizeof(d->iv),
+						pData, (ULONG)size,
 						&cbResult, 0);
 			break;
 
-		case CM_CTR: {
+		case ChainingMode::CTR: {
 			// CTR isn't supported by CryptoAPI-NG directly.
 			// Need to decrypt each block manually.
 
@@ -557,10 +538,10 @@ unsigned int AesCAPI_NG::decrypt(uint8_t *RESTRICT data, unsigned int data_len)
 
 			// TODO: Verify data alignment.
 			ctr_block ctr_crypt;
-			ctr_block *ctr_data = reinterpret_cast<ctr_block*>(data);
+			ctr_block *ctr_data = reinterpret_cast<ctr_block*>(pData);
 			ULONG cbTmpResult;
 			cbResult = 0;
-			for (; data_len > 0; data_len -= 16, ctr_data++) {
+			for (; size > 0; size -= 16, ctr_data++) {
 				// Encrypt the current counter.
 				memcpy(ctr_crypt.u8, d->iv, sizeof(ctr_crypt.u8));
 				status = d->pBCryptEncrypt(d->hKey,
@@ -596,35 +577,6 @@ unsigned int AesCAPI_NG::decrypt(uint8_t *RESTRICT data, unsigned int data_len)
 	}
 	
 	return (NT_SUCCESS(status) ? cbResult : 0);
-}
-
-/**
- * Decrypt a block of data using the specified IV (CBC mode) or counter (CTR mode).
- * @param data Data block.
- * @param data_len Length of data block.
- * @param iv IV/counter for the data block.
- * @param iv_len Length of the IV/counter.
- * @return Number of bytes decrypted on success; 0 on error.
- */
-unsigned int AesCAPI_NG::decrypt(uint8_t *RESTRICT data, unsigned int data_len,
-	const uint8_t *RESTRICT iv, unsigned int iv_len)
-{
-	RP_D(AesCAPI_NG);
-	if (!d->hBcryptDll || !d->hAesAlg || !d->hKey) {
-		// Algorithm is not available,
-		// or the key hasn't been set.
-		return 0;
-	} else if (!iv || iv_len != 16) {
-		// Invalid IV.
-		return 0;
-	}
-
-	// Set the IV.
-	assert(sizeof(d->iv) == 16);
-	memcpy(d->iv, iv, sizeof(d->iv));
-
-	// Use the regular decrypt() function.
-	return decrypt(data, data_len);
 }
 
 }

@@ -2,26 +2,14 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * KeyManager.hpp: Encryption key manager.                                 *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2018 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBRPBASE_CRYPTO_KEYMANAGER_HPP__
 #define __ROMPROPERTIES_LIBRPBASE_CRYPTO_KEYMANAGER_HPP__
 
+#include "librpbase/config.librpbase.h"
 #include "../config/ConfReader.hpp"
 
 // C includes.
@@ -51,20 +39,20 @@ class KeyManager : public ConfReader
 		/**
 		 * Key verification result.
 		 */
-		enum VerifyResult {
-			VERIFY_UNKNOWN			= -1,	// Unknown status.
-			VERIFY_OK			= 0,	// Key obtained/verified.
-			VERIFY_INVALID_PARAMS		= 1,	// Parameters are invalid.
-			VERIFY_NO_SUPPORT		= 2,	// Decryption is not supported.
-			VERIFY_KEY_DB_NOT_LOADED	= 3,	// Key database is not loaded.
-			VERIFY_KEY_DB_ERROR		= 4,	// Something's wrong with the key database.
-			VERIFY_KEY_NOT_FOUND		= 5,	// Key was not found.
-			VERIFY_KEY_INVALID		= 6,	// Key is not valid for this operation.
-			VERFIY_IAESCIPHER_INIT_ERR	= 7,	// IAesCipher could not be created.
-			VERIFY_IAESCIPHER_DECRYPT_ERR	= 8,	// IAesCipher::decrypt() failed.
-			VERIFY_WRONG_KEY		= 9,	// The key did not decrypt the test string correctly.
+		enum class VerifyResult {
+			Unknown			= -1,	// Unknown status.
+			OK			= 0,	// Key obtained/verified.
+			InvalidParams		= 1,	// Parameters are invalid.
+			NoSupport		= 2,	// Decryption is not supported.
+			KeyDBNotLoaded		= 3,	// Key database is not loaded.
+			KeyDBError		= 4,	// Something's wrong with the key database.
+			KeyNotFound		= 5,	// Key was not found.
+			KeyInvalid		= 6,	// Key is not valid for this operation.
+			IAesCipherInitErr	= 7,	// IAesCipher could not be created.
+			IAesCipherDecryptErr	= 8,	// IAesCipher::decrypt() failed.
+			WrongKey		= 9,	// The key did not decrypt the test string correctly.
 
-			VERIFY_MAX
+			Max
 		};
 
 		/**
@@ -113,6 +101,7 @@ class KeyManager : public ConfReader
 		 * @param verifyLen	[in] Length of pVerifyData. (Must be 16.)
 		 * @return VerifyResult.
 		 */
+		ATTR_ACCESS_SIZE(read_only, 4, 5)
 		VerifyResult getAndVerify(const char *keyName, KeyData_t *pKeyData,
 			const uint8_t *pVerifyData, unsigned int verifyLen) const;
 
@@ -128,6 +117,7 @@ class KeyManager : public ConfReader
 		 * @return 0 on success; non-zero on error.
 		 */
 		template<typename Char>
+		ATTR_ACCESS_SIZE(write_only, 2, 3)
 		static int hexStringToBytes(const Char *str, uint8_t *buf, unsigned int len);
 #endif /* ENABLE_DECRYPTION */
 };

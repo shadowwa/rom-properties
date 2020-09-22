@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * AesCAPI_NG.hpp: AES decryption class using Win32 CryptoAPI NG.          *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2018 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBRPBASE_CRYPTO_AESCAPI_NG_HPP__
@@ -56,21 +43,22 @@ class AesCAPI_NG : public IAesCipher
 		 * Get the name of the AesCipher implementation.
 		 * @return Name.
 		 */
-		virtual const char *name(void) const override final;
+		const char *name(void) const final;
 
 		/**
 		 * Has the cipher been initialized properly?
 		 * @return True if initialized; false if not.
 		 */
-		virtual bool isInit(void) const override final;
+		bool isInit(void) const final;
 
 		/**
 		 * Set the encryption key.
-		 * @param key Key data.
-		 * @param len Key length, in bytes.
+		 * @param pKey	[in] Key data.
+		 * @param size	[in] Size of pKey, in bytes.
 		 * @return 0 on success; negative POSIX error code on error.
 		 */
-		virtual int setKey(const uint8_t *RESTRICT key, unsigned int len) override final;
+		ATTR_ACCESS_SIZE(read_only, 2, 3)
+		int setKey(const uint8_t *RESTRICT pKey, size_t size) final;
 
 		/**
 		 * Set the cipher chaining mode.
@@ -81,34 +69,27 @@ class AesCAPI_NG : public IAesCipher
 		 * @param mode Cipher chaining mode.
 		 * @return 0 on success; negative POSIX error code on error.
 		 */
-		virtual int setChainingMode(ChainingMode mode) override final;
+		int setChainingMode(ChainingMode mode) final;
 
 		/**
 		 * Set the IV (CBC mode) or counter (CTR mode).
-		 * @param iv IV/counter data.
-		 * @param len IV/counter length, in bytes.
+		 * @param pIV	[in] IV/counter data.
+		 * @param size	[in] Size of pIV, in bytes.
 		 * @return 0 on success; negative POSIX error code on error.
 		 */
-		virtual int setIV(const uint8_t *RESTRICT iv, unsigned int len) override final;
+		ATTR_ACCESS_SIZE(read_only, 2, 3)
+		int setIV(const uint8_t *RESTRICT pIV, size_t size) final;
 
 		/**
 		 * Decrypt a block of data.
-		 * @param data Data block.
-		 * @param data_len Length of data block.
+		 * Key and IV/counter must be set before calling this function.
+		 *
+		 * @param pData	[in/out] Data block.
+		 * @param size	[in] Length of data block. (Must be a multiple of 16.)
 		 * @return Number of bytes decrypted on success; 0 on error.
 		 */
-		virtual unsigned int decrypt(uint8_t *RESTRICT data, unsigned int data_len) override final;
-
-		/**
-		 * Decrypt a block of data using the specified IV.
-		 * @param data Data block.
-		 * @param data_len Length of data block.
-		 * @param iv IV/counter for the data block.
-		 * @param iv_len Length of the IV/counter.
-		 * @return Number of bytes decrypted on success; 0 on error.
-		 */
-		virtual unsigned int decrypt(uint8_t *RESTRICT data, unsigned int data_len,
-			const uint8_t *RESTRICT iv, unsigned int iv_len) override final;
+		ATTR_ACCESS_SIZE(read_write, 2, 3)
+		size_t decrypt(uint8_t *RESTRICT pData, size_t size) final;
 };
 
 }

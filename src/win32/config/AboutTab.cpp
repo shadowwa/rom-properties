@@ -2,53 +2,35 @@
  * ROM Properties Page shell extension. (Win32)                            *
  * AboutTab.cpp: About tab for rp-config.                                  *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License       *
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.   *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #include "stdafx.h"
 #include "config.librpbase.h"
 
 #include "AboutTab.hpp"
-#include "resource.h"
-
-// libwin32common
-#include "libwin32common/WinUI.hpp"
+#include "res/resource.h"
 
 // librpbase
-#include "librpbase/TextFuncs.hpp"
-#include "librpbase/TextFuncs_utf8.hpp"
 #include "librpbase/config/AboutTabText.hpp"
 using namespace LibRpBase;
 
-// libi18n
-#include "libi18n/i18n.h"
+// libwin32common
+#include "libwin32common/SubclassWindow.h"
 
 // Property sheet icon.
 // Extracted from imageres.dll or shell32.dll.
 #include "PropSheetIcon.hpp"
 
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cstring>
-
-// C++ includes.
-#include <string>
+// C++ STL classes.
 using std::string;
 using std::wstring;
 using std::u16string;
+
+// Maximum number of tabs.
+// NOTE: Must be adjusted if more tabs are added!
+#define MAX_TABS 3
 
 // Windows: RichEdit control.
 #include <richedit.h>
@@ -61,6 +43,10 @@ using std::u16string;
 #ifndef AURL_ENABLEEMAILADDR
 # define AURL_ENABLEEMAILADDR 2
 #endif
+// Uncomment to enable use of RichEdit 4.1 if available.
+// FIXME: Friendly links aren't underlined or blue on WinXP or Win7...
+// Reference: https://blogs.msdn.microsoft.com/murrays/2015/03/27/richedit-colors/
+//#define MSFTEDIT_USE_41 1
 
 // Other libraries.
 #ifdef HAVE_ZLIB
@@ -88,11 +74,6 @@ class AboutTabPrivate
 
 	private:
 		RP_DISABLE_COPY(AboutTabPrivate)
-
-	public:
-		// Property for "D pointer".
-		// This points to the AboutTabPrivate object.
-		static const wchar_t D_PTR_PROP[];
 
 	public:
 		/**
@@ -126,6 +107,13 @@ class AboutTabPrivate
 		 */
 		void initBoldFont(HFONT hFont);
 
+		// RichEdit DLLs.
+		HMODULE hRichEd20_dll;
+#ifdef MSFTEDIT_USE_41
+		HMODULE hMsftEdit_dll;
+#endif /* MSFTEDIT_USE_41 */
+		bool bUseFriendlyLinks;
+
 	protected:
 		// Current RichText streaming context.
 		struct RTF_CTX {
@@ -152,11 +140,23 @@ class AboutTabPrivate
 		 */
 		static string rtfEscape(const char *str);
 
+		/**
+		 * Create an RTF "friendly link" if supported.
+		 * If not supported, returns the escaped link title.
+		 * @param link	[in] Link address.
+		 * @param title	[in] Link title.
+		 * @return RTF "friendly link", or title only.
+		 */
+		string rtfFriendlyLink(const char *link, const char *title);
+
 	protected:
 		// Tab text. (RichText format)
 		string sCredits;
 		string sLibraries;
 		string sSupport;
+
+		// RichEdit control.
+		HWND hRichEdit;
 
 		/**
 		 * Initialize the program title text.
@@ -197,9 +197,18 @@ class AboutTabPrivate
 AboutTabPrivate::AboutTabPrivate()
 	: hPropSheetPage(nullptr)
 	, hWndPropSheet(nullptr)
+	, bUseFriendlyLinks(false)
 	, hFontBold(nullptr)
+	, hRichEdit(nullptr)
 {
 	memset(&rtfCtx, 0, sizeof(rtfCtx));
+
+	// Load the RichEdit DLLs.
+	// TODO: What if this fails?
+	hRichEd20_dll = LoadLibrary(_T("RICHED20.DLL"));
+#ifdef MSFTEDIT_USE_41
+	hMsftEdit_dll = LoadLibrary(_T("MSFTEDIT.DLL"));
+#endif /* MSFTEDIT_USE_41 */
 }
 
 AboutTabPrivate::~AboutTabPrivate()
@@ -207,11 +216,15 @@ AboutTabPrivate::~AboutTabPrivate()
 	if (hFontBold) {
 		DeleteFont(hFontBold);
 	}
+#ifdef MSFTEDIT_USE_41
+	if (hMsftEdit_dll) {
+		FreeLibrary(hMsftEdit_dll);
+	}
+#endif /* MSFTEDIT_USE_41 */
+	if (hRichEd20_dll) {
+		FreeLibrary(hRichEd20_dll);
+	}
 }
-
-// Property for "D pointer".
-// This points to the AboutTabPrivate object.
-const wchar_t AboutTabPrivate::D_PTR_PROP[] = L"AboutTabPrivate";
 
 /**
  * Dialog procedure.
@@ -239,24 +252,15 @@ INT_PTR CALLBACK AboutTabPrivate::dlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, L
 			d->hWndPropSheet = hDlg;
 
 			// Store the D object pointer with this particular page dialog.
-			SetProp(hDlg, D_PTR_PROP, reinterpret_cast<HANDLE>(d));
+			SetWindowLongPtr(hDlg, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(d));
 
 			// Initialize the dialog.
 			d->init();
 			return TRUE;
 		}
 
-		case WM_DESTROY: {
-			// Remove the D_PTR_PROP property from the page. 
-			// The D_PTR_PROP property stored the pointer to the 
-			// AboutTabPrivate object.
-			RemoveProp(hDlg, D_PTR_PROP);
-			return TRUE;
-		}
-
 		case WM_NOTIFY: {
-			AboutTabPrivate *const d = static_cast<AboutTabPrivate*>(
-				GetProp(hDlg, D_PTR_PROP));
+			auto *const d = reinterpret_cast<AboutTabPrivate*>(GetWindowLongPtr(hDlg, GWLP_USERDATA));
 			if (!d) {
 				// No AboutTabPrivate. Can't do anything...
 				return FALSE;
@@ -271,8 +275,8 @@ INT_PTR CALLBACK AboutTabPrivate::dlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, L
 
 					ENLINK *pENLink = reinterpret_cast<ENLINK*>(pHdr);
 					if (pENLink->msg == WM_LBUTTONUP) {
-						wchar_t urlbuf[256];
-						if ((pENLink->chrg.cpMax - pENLink->chrg.cpMin) >= ARRAY_SIZE(urlbuf)) {
+						TCHAR urlbuf[256];
+						if ((pENLink->chrg.cpMax - pENLink->chrg.cpMin) >= _countof(urlbuf)) {
 							// URL is too big.
 							break;
 						}
@@ -280,8 +284,8 @@ INT_PTR CALLBACK AboutTabPrivate::dlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, L
 						range.chrg = pENLink->chrg;
 						range.lpstrText = urlbuf;
 						LRESULT lResult = SendMessage(pHdr->hwndFrom, EM_GETTEXTRANGE, 0, (LPARAM)&range);
-						if (lResult > 0 && lResult < ARRAY_SIZE(urlbuf)) {
-							ShellExecute(nullptr, L"open", urlbuf, nullptr, nullptr, SW_SHOW);
+						if (lResult > 0 && lResult < _countof(urlbuf)) {
+							ShellExecute(nullptr, _T("open"), urlbuf, nullptr, nullptr, SW_SHOW);
 						}
 					}
 				}
@@ -425,7 +429,7 @@ string AboutTabPrivate::rtfEscape(const char *str)
 		return string();
 	}
 
-	// Convert the string to RP_UTF16 first.
+	// Convert the string to UTF-16 first.
 	const u16string u16str = utf8_to_utf16(str, -1);
 	const char16_t *wcs = u16str.c_str();
 
@@ -447,6 +451,29 @@ string AboutTabPrivate::rtfEscape(const char *str)
 	}
 
 	return ret;
+}
+
+/**
+ * Create an RTF "friendly link" if supported.
+ * If not supported, returns the escaped link title.
+ * @param link	[in] Link address.
+ * @param title	[in] Link title.
+ * @return RTF "friendly link", or title only.
+ */
+string AboutTabPrivate::rtfFriendlyLink(const char *link, const char *title)
+{
+	assert(link != nullptr);
+	assert(title != nullptr);
+
+	if (bUseFriendlyLinks) {
+		// Friendly links are available.
+		// Reference: https://blogs.msdn.microsoft.com/murrays/2009/09/24/richedit-friendly-name-hyperlinks/
+		return rp_sprintf("{\\field{\\*\\fldinst{HYPERLINK \"%s\"}}{\\fldrslt{%s}}}",
+			rtfEscape(link).c_str(), rtfEscape(title).c_str());
+	} else {
+		// No friendly links.
+		return rtfEscape(title);
+	}
 }
 
 /**
@@ -490,7 +517,22 @@ void AboutTabPrivate::initProgramTitleText(void)
 			s_version += AboutTabText::git_describe;
 		}
 	}
-	SetWindowText(hStaticVersion, RP2W_s(s_version));
+	const tstring st_version = U82T_s(s_version);
+	SetWindowText(hStaticVersion, st_version.c_str());
+
+	// Reduce the vertical size of hStaticVersion to fit the text.
+	// High DPI (e.g. 150% on 1920x1080) can cause the label to
+	// overlap the tab control.
+	// FIXME: If we have too many lines of text, this might still cause problems.
+	SIZE sz_hStaticVersion;
+	int ret = LibWin32Common::measureTextSize(hWndPropSheet, hFontDlg, st_version.c_str(), &sz_hStaticVersion);
+	if (ret == 0) {
+		RECT rectStaticVersion;
+		GetWindowRect(hStaticVersion, &rectStaticVersion);
+		SetWindowPos(hStaticVersion, 0, 0, 0,
+			rectStaticVersion.right - rectStaticVersion.left, sz_hStaticVersion.cy,
+			SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOMOVE);
+	}
 
 	// Set the icon.
 	HICON hIcon = PropSheetIcon::get96Icon();
@@ -557,17 +599,25 @@ void AboutTabPrivate::initCreditsTab(void)
 	sCredits = RTF_START;
 	// FIXME: Figure out how to get links to work without
 	// resorting to manually adding CFE_LINK data...
-	sCredits += C_("AboutTab|Credits", "Copyright (c) 2016-2017 by David Korth.");
+	// NOTE: Copyright is NOT localized.
+	sCredits += "Copyright (c) 2016-2020 by David Korth." RTF_BR;
 	sCredits += RTF_BR;
-	sCredits += C_("AboutTab|Credits", "This program is licensed under the GNU GPL v2 or later.");
-	sCredits += RTF_BR;
-	sCredits += "https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html";
+	sCredits += rp_sprintf(
+		// tr: %s is the name of the license.
+		rtfEscape(C_("AboutTab|Credits", "This program is licensed under the %s or later.")).c_str(),
+			rtfFriendlyLink(
+				"https://www.gnu.org/licenses/gpl-2.0.html",
+				C_("AboutTabl|Credits", "GNU GPL v2")).c_str());
+	if (!bUseFriendlyLinks) {
+		sCredits += RTF_BR;
+		sCredits += "https://www.gnu.org/licenses/gpl-2.0.html";
+	}
 
-	AboutTabText::CreditType_t lastCreditType = AboutTabText::CT_CONTINUE;
+	AboutTabText::CreditType lastCreditType = AboutTabText::CreditType::Continue;
 	for (const AboutTabText::CreditsData_t *creditsData = &AboutTabText::CreditsData[0];
-	     creditsData->type < AboutTabText::CT_MAX; creditsData++)
+	     creditsData->type < AboutTabText::CreditType::Max; creditsData++)
 	{
-		if (creditsData->type != AboutTabText::CT_CONTINUE &&
+		if (creditsData->type != AboutTabText::CreditType::Continue &&
 		    creditsData->type != lastCreditType)
 		{
 			// New credit type.
@@ -575,18 +625,18 @@ void AboutTabPrivate::initCreditsTab(void)
 			sCredits += "\\b ";
 
 			switch (creditsData->type) {
-				case AboutTabText::CT_DEVELOPER:
-					sCredits += C_("AboutTab|Credits", "Developers:");
+				case AboutTabText::CreditType::Developer:
+					sCredits += rtfEscape(C_("AboutTab|Credits", "Developers:"));
 					break;
-				case AboutTabText::CT_CONTRIBUTOR:
-					sCredits += C_("AboutTab|Credits", "Contributors:");
+				case AboutTabText::CreditType::Contributor:
+					sCredits += rtfEscape(C_("AboutTab|Credits", "Contributors:"));
 					break;
-				case AboutTabText::CT_TRANSLATOR:
-					sCredits += C_("AboutTab|Credits", "Translators:");
+				case AboutTabText::CreditType::Translator:
+					sCredits += rtfEscape(C_("AboutTab|Credits", "Translators:"));
 					break;
 
-				case AboutTabText::CT_CONTINUE:
-				case AboutTabText::CT_MAX:
+				case AboutTabText::CreditType::Continue:
+				case AboutTabText::CreditType::Max:
 				default:
 					assert(!"Invalid credit type.");
 					break;
@@ -601,23 +651,27 @@ void AboutTabPrivate::initCreditsTab(void)
 		if (creditsData->url) {
 			// FIXME: Figure out how to get hyperlinks working.
 			sCredits += " <";
-			sCredits += rtfEscape(creditsData->linkText);
+			if (creditsData->linkText) {
+				sCredits += rtfFriendlyLink(creditsData->url, creditsData->linkText);
+			} else {
+				sCredits += rtfFriendlyLink(creditsData->url, creditsData->url);
+			}
 			sCredits += '>';
 		}
 		if (creditsData->sub) {
 			// Sub-credit.
-			sCredits += rp_sprintf(C_("AboutTab|Credits", " (%s)"),
-				rtfEscape(creditsData->sub));
+			sCredits += rp_sprintf(rtfEscape(C_("AboutTab|Credits", " (%s)")).c_str(),
+				rtfEscape(creditsData->sub).c_str());
 		}
 	}
 
 	sCredits += '}';
 
 	// Add the "Credits" tab.
-	const wstring wsTabTitle = RP2W_c(C_("AboutTab", "Credits"));
+	const tstring tsTabTitle = U82T_c(C_("AboutTab", "Credits"));
 	TCITEM tcItem;
 	tcItem.mask = TCIF_TEXT;
-	tcItem.pszText = const_cast<LPWSTR>(wsTabTitle.c_str());
+	tcItem.pszText = const_cast<LPTSTR>(tsTabTitle.c_str());
 	TabCtrl_InsertItem(GetDlgItem(hWndPropSheet, IDC_ABOUT_TABCONTROL), 0, &tcItem);
 }
 
@@ -626,61 +680,106 @@ void AboutTabPrivate::initCreditsTab(void)
  */
 void AboutTabPrivate::initLibrariesTab(void)
 {
+	char sVerBuf[64];
+
 	sLibraries.clear();
-	sLibraries.reserve(4096);
+	sLibraries.reserve(8192);
 
 	// RTF starting sequence.
 	sLibraries = RTF_START;
+
+	// NOTE: These strings can NOT be static.
+	// Otherwise, they won't be retranslated if the UI language
+	// is changed at runtime.
+
+	// tr: Using an internal copy of a library.
+	const char *const sIntCopyOf = C_("AboutTab|Libraries", "Internal copy of %s.");
+	// tr: Compiled with a specific version of an external library.
+	const char *const sCompiledWith = C_("AboutTab|Libraries", "Compiled with %s.");
+	// tr: Using an external library, e.g. libpcre.so
+	const char *const sUsingDll = C_("AboutTab|Libraries", "Using %s.");
+	// tr: License: (libraries with only a single license)
+	const char *const sLicense = C_("AboutTab|Libraries", "License: %s");
+	// tr: Licenses: (libraries with multiple licenses)
+	const char *const sLicenses = C_("AboutTab|Libraries", "Licenses: %s");
 
 	// NOTE: We're only showing the "compiled with" version here,
 	// since the DLLs are delay-loaded and might not be available.
 
 	/** zlib **/
 #ifdef HAVE_ZLIB
-	sLibraries += "Compiled with zlib " ZLIB_VERSION "." RTF_BR
+	sLibraries += rp_sprintf(sCompiledWith, "zlib " ZLIB_VERSION) + RTF_BR
 		"Copyright (C) 1995-2017 Jean-loup Gailly and Mark Adler." RTF_BR
-		"https://zlib.net/" RTF_BR
-		"License: zlib license";
+		"https://zlib.net/" RTF_BR;
+	sLibraries += rp_sprintf(sLicense, "zlib license");
 #endif /* HAVE_ZLIB */
 
 	/** libpng **/
 	// FIXME: Use png_get_copyright().
+	// FIXME: Check for APNG.
 #ifdef HAVE_PNG
-	sLibraries += RTF_BR RTF_BR
-		"Compiled with libpng " PNG_LIBPNG_VER_STRING "." RTF_BR
-		"libpng version 1.6.34 - September 29, 2017" RTF_BR
-		"Copyright (c) 1998-2002,2004,2006-2017 Glenn Randers-Pehrson" RTF_BR
+	sLibraries += RTF_BR RTF_BR;
+	sLibraries += rp_sprintf(sCompiledWith, "libpng " PNG_LIBPNG_VER_STRING) + RTF_BR
+		"libpng version 1.6.37 - April 14, 2019" RTF_BR
+		"Copyright (c) 2018-2019 Cosmin Truta" RTF_BR
+		"Copyright (c) 1998-2002,2004,2006-2018 Glenn Randers-Pehrson" RTF_BR
 		"Copyright (c) 1996-1997 Andreas Dilger" RTF_BR
 		"Copyright (c) 1995-1996 Guy Eric Schalnat, Group 42, Inc." RTF_BR
-		"http://www.libpng.org/pub/png/libpng.html" RTF_BR
-		"License: libpng license";
+		"http://www.libpng.org/pub/png/libpng.html" RTF_BR;
+	sLibraries += rp_sprintf(sLicense, "libpng license");
 #endif /* HAVE_PNG */
 
 	/** TinyXML2 **/
 #ifdef ENABLE_XML
-	char sXmlVersion[24];
-	snprintf(sXmlVersion, sizeof(sXmlVersion), "TinyXML2 %u.%u.%u",
+	snprintf(sVerBuf, sizeof(sVerBuf), "TinyXML2 %u.%u.%u",
 		TIXML2_MAJOR_VERSION,
 		TIXML2_MINOR_VERSION,
 		TIXML2_PATCH_VERSION);
 
 	// FIXME: Runtime version?
-	sLibraries += RTF_BR RTF_BR "Compiled with ";
-	sLibraries += sXmlVersion;
-	sLibraries += '.';
-	sLibraries += RTF_BR
-		"Copyright (C) 2000-2017 Lee Thomason" RTF_BR
-		"http://www.grinninglizard.com/" RTF_BR
-		"License: zlib license";
+	sLibraries += RTF_BR RTF_BR;
+	sLibraries += rp_sprintf(sCompiledWith, sVerBuf);
+	sLibraries += "." RTF_BR
+		"Copyright (C) 2000-2019 Lee Thomason" RTF_BR
+		"http://www.grinninglizard.com/" RTF_BR;
+	sLibraries += rp_sprintf(sLicense, "zlib license");
 #endif /* ENABLE_XML */
+
+	/** GNU gettext **/
+	// NOTE: glibc's libintl.h doesn't have the version information,
+	// so we're only printing this if we're using GNU gettext's version.
+#if defined(HAVE_GETTEXT) && defined(LIBINTL_VERSION)
+	if (LIBINTL_VERSION & 0xFF) {
+		snprintf(sVerBuf, sizeof(sVerBuf), "GNU gettext %u.%u.%u",
+			LIBINTL_VERSION >> 16,
+			(LIBINTL_VERSION >> 8) & 0xFF,
+			LIBINTL_VERSION & 0xFF);
+	} else {
+		snprintf(sVerBuf, sizeof(sVerBuf), "GNU gettext %u.%u",
+			LIBINTL_VERSION >> 16,
+			(LIBINTL_VERSION >> 8) & 0xFF);
+	}
+
+	sLibraries += RTF_BR RTF_BR;
+#  ifdef _WIN32
+	sLibraries += rp_sprintf(sIntCopyOf, sVerBuf);
+#  else /* _WIN32 */
+	// FIXME: Runtime version?
+	sLibraries += rp_sprintf(sCompiledWith, sVerBuf);
+#  endif /* _WIN32 */
+	sLibraries += RTF_BR
+		"Copyright (C) 1995-1997, 2000-2016, 2018-2020 Free Software Foundation, Inc." RTF_BR
+		"https://www.gnu.org/software/gettext/" RTF_BR;
+	sLibraries += rp_sprintf(sLicense, "GNU LGPL v2.1+");
+#endif /* HAVE_GETTEXT && LIBINTL_VERSION */
 
 	sLibraries += "}";
 
 	// Add the "Libraries" tab.
-	const wstring wsTabTitle = RP2W_c(C_("AboutTab", "Libraries"));
+	const tstring tsTabTitle = U82T_c(C_("AboutTab", "Libraries"));
 	TCITEM tcItem;
 	tcItem.mask = TCIF_TEXT;
-	tcItem.pszText = const_cast<LPWSTR>(wsTabTitle.c_str());
+	tcItem.pszText = const_cast<LPTSTR>(tsTabTitle.c_str());
 	TabCtrl_InsertItem(GetDlgItem(hWndPropSheet, IDC_ABOUT_TABCONTROL), 1, &tcItem);
 }
 
@@ -695,8 +794,8 @@ void AboutTabPrivate::initSupportTab(void)
 	// RTF starting sequence.
 	sSupport = RTF_START;
 
-	sSupport += C_("AboutTab|Support",
-		"For technical support, you can visit the following websites:");
+	sSupport += rtfEscape(C_("AboutTab|Support",
+		"For technical support, you can visit the following websites:"));
 	sSupport += RTF_BR;
 
 	for (const AboutTabText::SupportSite_t *supportSite = &AboutTabText::SupportSites[0];
@@ -712,16 +811,17 @@ void AboutTabPrivate::initSupportTab(void)
 
 	// Email the author.
 	sSupport += RTF_BR;
-	sSupport += C_("AboutTab|Support",
-		"You can also email the developer directly:");
-	sSupport += RTF_BR RTF_TAB RTF_BULLET " David Korth <gerbilsoft@gerbilsoft.com>";
-	sSupport += '}';
+	sSupport += rtfEscape(C_("AboutTab|Support",
+		"You can also email the developer directly:"));
+	sSupport += RTF_BR RTF_TAB RTF_BULLET " David Korth <";
+	sSupport += rtfFriendlyLink("mailto:gerbilsoft@gerbilsoft.com", "gerbilsoft@gerbilsoft.com");
+	sSupport += ">}";
 
 	// Add the "Support" tab.
-	const wstring wsTabTitle = RP2W_c(C_("AboutTab", "Support"));
+	const tstring tsTabTitle = U82T_c(C_("AboutTab", "Support"));
 	TCITEM tcItem;
 	tcItem.mask = TCIF_TEXT;
-	tcItem.pszText = const_cast<LPWSTR>(wsTabTitle.c_str());
+	tcItem.pszText = const_cast<LPTSTR>(tsTabTitle.c_str());
 	TabCtrl_InsertItem(GetDlgItem(hWndPropSheet, IDC_ABOUT_TABCONTROL), 2, &tcItem);
 }
 
@@ -732,11 +832,10 @@ void AboutTabPrivate::initSupportTab(void)
 void AboutTabPrivate::setTabContents(int index)
 {
 	assert(index >= 0);
-	assert(index <= 2);
-	if (unlikely(index < 0 || index > 2))
+	assert(index < MAX_TABS);
+	if (unlikely(index < 0 || index >= MAX_TABS))
 		return;
 
-	HWND hRichEdit = GetDlgItem(hWndPropSheet, IDC_ABOUT_RICHEDIT);
 	assert(hRichEdit != nullptr);
 	if (unlikely(!hRichEdit)) {
 		// Something went wrong...
@@ -774,10 +873,20 @@ void AboutTabPrivate::setTabContents(int index)
  */
 void AboutTabPrivate::init(void)
 {
+	// Initialize the program title text.
 	initProgramTitleText();
-	initCreditsTab();
-	initLibrariesTab();
-	initSupportTab();
+
+	// Insert a dummy tab for proper sizing for now.
+	HWND hTabControl = GetDlgItem(hWndPropSheet, IDC_ABOUT_TABCONTROL);
+	assert(hTabControl != nullptr);
+	if (unlikely(!hTabControl)) {
+		// Something went wrong...
+		return;
+	}
+	TCITEM tcItem;
+	tcItem.mask = TCIF_TEXT;
+	tcItem.pszText = _T("DUMMY");
+	TabCtrl_InsertItem(hTabControl, MAX_TABS, &tcItem);
 
 	// Adjust the RichEdit position.
 	assert(hWndPropSheet != nullptr);
@@ -786,11 +895,11 @@ void AboutTabPrivate::init(void)
 		return;
 	}
 
-	HWND hTabControl = GetDlgItem(hWndPropSheet, IDC_ABOUT_TABCONTROL);
-	HWND hRichEdit = GetDlgItem(hWndPropSheet, IDC_ABOUT_RICHEDIT);
-	assert(hTabControl != nullptr);
+	// NOTE: We can't seem to set the dialog ID correctly
+	// when using CreateWindowEx(), so we'll save hRichEdit here.
+	hRichEdit = GetDlgItem(hWndPropSheet, IDC_ABOUT_RICHEDIT);
 	assert(hRichEdit != nullptr);
-	if (unlikely(!hTabControl || !hRichEdit)) {
+	if (unlikely(!hRichEdit)) {
 		// Something went wrong...
 		return;
 	}
@@ -804,6 +913,26 @@ void AboutTabPrivate::init(void)
 	// Dialog margins.
 	RECT dlgMargin = {7, 7, 8, 8};
 	MapDialogRect(hWndPropSheet, &dlgMargin);
+
+	// Attempt to switch to RichEdit 4.1 if it's available.
+#ifdef MSFTEDIT_USE_41
+	if (hMsftEdit_dll) {
+		HWND hRichEdit41 = CreateWindowEx(
+			WS_EX_NOPARENTNOTIFY | WS_EX_TRANSPARENT | WS_EX_LEFT | WS_EX_CLIENTEDGE,
+			MSFTEDIT_CLASS, _T(""),
+			WS_TABSTOP | ES_MULTILINE | ES_READONLY | WS_VSCROLL | ES_AUTOVSCROLL | WS_VISIBLE | WS_CHILD,
+			0, 0, 0, 0,
+			hWndPropSheet, nullptr, nullptr, nullptr);
+		if (hRichEdit41) {
+			DestroyWindow(hRichEdit);
+			SetWindowFont(hRichEdit41, GetWindowFont(hWndPropSheet), FALSE);
+			hRichEdit = hRichEdit41;
+			// FIXME: Not working...
+			SetWindowLong(hRichEdit, GWL_ID, IDC_ABOUT_RICHEDIT);
+			bUseFriendlyLinks = true;
+		}
+	}
+#endif /* MSFTEDIT_USE_41 */
 
 	// Set the RichEdit's position.
 	SetWindowPos(hRichEdit, 0,
@@ -820,6 +949,11 @@ void AboutTabPrivate::init(void)
 	// NOTE: Might only work on Win8+.
 	SendMessage(hRichEdit, EM_AUTOURLDETECT, AURL_ENABLEEMAILADDR, 0);
 
+	// Initialize the tab text.
+	initCreditsTab();
+	initLibrariesTab();
+	initSupportTab();
+
 	// Subclass the control.
 	// TODO: Error handling?
 	SetWindowSubclass(hRichEdit,
@@ -827,6 +961,9 @@ void AboutTabPrivate::init(void)
 		IDC_ABOUT_RICHEDIT,
 		reinterpret_cast<DWORD_PTR>(GetParent(hWndPropSheet)));
 
+	// Remove the dummy tab.
+	TabCtrl_DeleteItem(hTabControl, MAX_TABS);
+	TabCtrl_SetCurSel(hTabControl, 0);
 	// Set tab contents to Credits.
 	setTabContents(0);
 }
@@ -860,15 +997,15 @@ HPROPSHEETPAGE AboutTab::getHPropSheetPage(void)
 	}
 
 	// tr: Tab title.
-	const wstring wsTabTitle = RP2W_c(C_("AboutTab", "About"));
+	const tstring tsTabTitle = U82T_c(C_("AboutTab", "About"));
 
 	PROPSHEETPAGE psp;
 	psp.dwSize = sizeof(psp);	
-	psp.dwFlags = PSP_USECALLBACK | PSP_USETITLE;
+	psp.dwFlags = PSP_USECALLBACK | PSP_USETITLE | PSP_DLGINDIRECT;
 	psp.hInstance = HINST_THISCOMPONENT;
-	psp.pszTemplate = MAKEINTRESOURCE(IDD_CONFIG_ABOUT);
+	psp.pResource = LoadDialog_i18n(IDD_CONFIG_ABOUT);
 	psp.pszIcon = nullptr;
-	psp.pszTitle = wsTabTitle.c_str();
+	psp.pszTitle = tsTabTitle.c_str();
 	psp.pfnDlgProc = AboutTabPrivate::dlgProc;
 	psp.lParam = reinterpret_cast<LPARAM>(d);
 	psp.pcRefParent = nullptr;

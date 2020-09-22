@@ -1,28 +1,15 @@
 /***************************************************************************
  * c99-compat.msvcrt.h: C99 compatibility header. (MSVC)                   *
  *                                                                         *
- * Copyright (c) 2011-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2011-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __C99_COMPAT_MSVCRT_H__
 #define __C99_COMPAT_MSVCRT_H__
 
 #ifndef _WIN32
-# error c99-compat.msvcrt.h should only be included in Win32 builds.
+#  error c99-compat.msvcrt.h should only be included in Win32 builds.
 #endif
 
 /**
@@ -33,17 +20,15 @@
  * the number of characters (minus NULL terminator) required.
  */
 
-/** snprintf(), vsnprintf() **/
+/** snprintf() **/
 #ifdef _MSC_VER
-# if _MSC_VER < 1400
+#  if _MSC_VER < 1400
 /* MSVC 2003 and older. Don't use variadic macros. */
-#  define snprintf  _snprintf
-#  define vsnprintf _vsnprintf
-# elif _MSC_VER < 1900
+#    define snprintf  _snprintf
+#  elif _MSC_VER < 1900
 /* MSVC 2005 through MSVC 2013. Use variadic macros. */
-#  define snprintf(str, size, format, ...)  _snprintf(str, size, format, __VA_ARGS__)
-#  define vsnprintf(str, size, format, ...) _vsnprintf(str, size, format, __VA_ARGS__)
-# endif
+#    define snprintf(str, size, format, ...)  _snprintf(str, size, format, __VA_ARGS__)
+#  endif
 #endif /* _MSC_VER */
 
 /**
@@ -52,9 +37,9 @@
  * but they do support '__inline' in both C and C++.
  */
 #if defined(_MSC_VER) && _MSC_VER < 1900
-# if !defined(__cplusplus)
-#  define inline __inline
-# endif /* !defined(__cplusplus) */
+#  if !defined(__cplusplus)
+#    define inline __inline
+#  endif /* !defined(__cplusplus) */
 #endif /* defined(_MSC_VER) && _MSC_VER < 1900 */
 
 /** fseeko(), ftello() **/
@@ -66,11 +51,11 @@
 //  ftello64(), and it uses the FILE_OFFSET_BITS macro. LFS appears
 //  to be required on both 32-bit and 64-bit Windows, unlike on Linux
 //  where it's only required on 32-bit.)
-// TODO: Use _fseeki64() and _ftelli64() on MinGW-w64 to avoid
-// use of wrapper functions?
+// (NOTE 2: MinGW-w64 redirects to _fseeki64() and _ftelli64() when
+//  building with MSVCRT 14.0 [2015] or later.)
 #ifdef _MSC_VER
-# define fseeko(stream, offset, origin) _fseeki64(stream, offset, origin)
-# define ftello(stream) _ftelli64(stream)
+#  define fseeko(stream, offset, origin) _fseeki64(stream, offset, origin)
+#  define ftello(stream) _ftelli64(stream)
 #endif /* _MSC_VER */
 
 /** C99 **/
@@ -92,10 +77,10 @@
  * the equivalent functions _strtoi64() and _strtoui64().
  */
 #if defined(_MSC_VER) && _MSC_VER < 1800
-# define strtoll(nptr, endptr, base)  _strtoi64(nptr, endptr, base)
-# define strtoull(nptr, endptr, base) _strtoui64(nptr, endptr, base)
-# define wcstoll(nptr, endptr, base)  _wcstoi64(nptr, endptr, base)
-# define wcstoull(nptr, endptr, base) _wcstoui64(nptr, endptr, base)
+#  define strtoll(nptr, endptr, base)  _strtoi64(nptr, endptr, base)
+#  define strtoull(nptr, endptr, base) _strtoui64(nptr, endptr, base)
+#  define wcstoll(nptr, endptr, base)  _wcstoi64(nptr, endptr, base)
+#  define wcstoull(nptr, endptr, base) _wcstoui64(nptr, endptr, base)
 #endif /* defined(_MSC_VER) && _MSC_VER < 1800 */
 
 /** strcasecmp() and related **/
@@ -105,32 +90,25 @@
  * MinGW-w64 has the ANSI versions, but not the Unicode versions.
  */
 #ifdef _MSC_VER
-# ifndef strcasecmp
-#  define strcasecmp(s1, s2)     _stricmp(s1, s2)
-# endif
-# ifndef strncasecmp
-#  define strncasecmp(s1, s2, n) _strnicmp(s1, s2, n)
-# endif
+#  ifndef strcasecmp
+#    define strcasecmp(s1, s2)     _stricmp(s1, s2)
+#  endif
+#  ifndef strncasecmp
+#    define strncasecmp(s1, s2, n) _strnicmp(s1, s2, n)
+#  endif
 #endif /* _MSC_VER */
 #ifndef wcscasecmp
-# define wcscasecmp(s1, s2)     _wcsicmp(s1, s2)
+#  define wcscasecmp(s1, s2)     _wcsicmp(s1, s2)
 #endif
 #ifndef wcsncasecmp
-# define wcsncasecmp(s1, s2, n) _wcsnicmp(s1, s2, n)
+#  define wcsncasecmp(s1, s2, n) _wcsnicmp(s1, s2, n)
 #endif
 
-/** timegm() **/
+/** strtok_r() **/
 
-/**
- * Linux, Mac OS X, and other Unix-like operating systems have a
- * function timegm() that converts `struct tm` to `time_t`.
- *
- * MSVCRT's equivalent function is _mkgmtime().
- *
- * NOTE: timegm() is NOT part of *any* standard!
- */
-#ifndef timegm
-# define timegm(tm)	_mkgmtime(tm)
+// MSVC has strtok_s(), which is basically the same as strtok_r().
+#ifdef _MSC_VER
+#  define strtok_r(str, delim, saveptr) strtok_s(str, delim, saveptr)
 #endif
 
 #endif /* __C99_COMPAT_MSVCRT_H__ */

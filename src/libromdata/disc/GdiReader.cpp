@@ -2,53 +2,26 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * GdiReader.hpp: GD-ROM reader for Dreamcast GDI images.                  *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License       *
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.   *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "GdiReader.hpp"
 #include "librpbase/disc/SparseDiscReader_p.hpp"
 
 #include "../cdrom_structs.h"
 #include "IsoPartition.hpp"
 
-// librpbase
-#include "librpbase/byteswap.h"
-#include "librpbase/TextFuncs.hpp"
-#include "librpbase/file/IRpFile.hpp"
-#include "librpbase/file/RelatedFile.hpp"
+// librpbase, librpfile
+#include "librpfile/RelatedFile.hpp"
 using namespace LibRpBase;
+using namespace LibRpFile;
 
-// C includes.
-#include <stdlib.h>
+// Other RomData subclasses
+#include "Other/ISO.hpp"
 
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cerrno>
-#include <cstring>
-#include <cctype>
-
-// FIXME: Put this in a compatibility header.
-#ifdef _MSC_VER
-# define strtok_r(str, delim, saveptr) strtok_s(str, delim, saveptr)
-#endif
-
-// C++ includes.
-#include <memory>
-#include <string>
-#include <vector>
+// C++ STL classes.
 using std::string;
 using std::unique_ptr;
 using std::vector;
@@ -57,7 +30,7 @@ namespace LibRomData {
 
 class GdiReaderPrivate : public SparseDiscReaderPrivate {
 	public:
-		GdiReaderPrivate(GdiReader *q, IRpFile *file);
+		GdiReaderPrivate(GdiReader *q);
 		virtual ~GdiReaderPrivate();
 
 	private:
@@ -77,10 +50,9 @@ class GdiReaderPrivate : public SparseDiscReaderPrivate {
 		struct BlockRange {
 			unsigned int blockStart;	// First LBA.
 			unsigned int blockEnd;		// Last LBA. (inclusive) (0 if the file hasn't been opened yet)
-			uint16_t sectorSize;		// 2048 or 2352
+			uint16_t sectorSize;		// 2048 or 2352 (TODO: Make this a bool?)
 			uint8_t trackNumber;		// 01 through 99
 			uint8_t reserved;
-			// TODO: Mode1/Mode2 designation?
 			// TODO: Data vs. audio?
 			string filename;		// Relative to the .gdi file. Cleared on error.
 			IRpFile *file;
@@ -115,102 +87,10 @@ class GdiReaderPrivate : public SparseDiscReaderPrivate {
 
 /** GdiReaderPrivate **/
 
-GdiReaderPrivate::GdiReaderPrivate(GdiReader *q, IRpFile *file)
-	: super(q, file)
+GdiReaderPrivate::GdiReaderPrivate(GdiReader *q)
+	: super(q)
 	, blockCount(0)
-{
-	if (!this->file) {
-		// File could not be dup()'d.
-		return;
-	}
-
-	// Save the filename for later.
-	filename = this->file->filename();
-
-	// GDI file should be 4k or less.
-	int64_t fileSize = file->size();
-	if (fileSize <= 0 || fileSize > 4096) {
-		// Invalid GDI file size.
-		delete this->file;
-		this->file = nullptr;
-		q->m_lastError = EIO;
-		return;
-	}
-
-	// Read the GDI and parse the track information.
-	unsigned int gdisize = (unsigned int)fileSize;
-	unique_ptr<char[]> gdibuf(new char[gdisize+1]);
-	file->rewind();
-	size_t size = file->read(gdibuf.get(), gdisize);
-	if (size != gdisize) {
-		// Read error.
-		delete this->file;
-		this->file = nullptr;
-		q->m_lastError = EIO;
-		return;
-	}
-
-	// Make sure the string is NULL-terminated.
-	gdibuf[gdisize] = 0;
-
-	// Parse the GDI file.
-	int ret = parseGdiFile(gdibuf.get());
-	if (ret != 0) {
-		// Error parsing the GDI file.
-		close();
-		q->m_lastError = EIO;
-		return;
-	}
-
-	// Open track 03 (primary data track) and the last data track.
-	if (trackMappings.size() >= 3) {
-		ret = openTrack(3);
-		if (ret != 0) {
-			// Error opening track 03.
-			close();
-			q->m_lastError = -ret;
-			return;
-		}
-	}
-
-	// Find the last data track.
-	int lastDataTrack = 0;	// 1-based; 0 is invalid.
-	for (int i = (int)trackMappings.size()-1; i >= 0; i--) {
-		const BlockRange *blockRange = trackMappings[i];
-		if (blockRange) {
-			if ((int)blockRange->trackNumber > lastDataTrack) {
-				lastDataTrack = blockRange->trackNumber;
-			}
-		}
-	}
-
-	if (lastDataTrack > 0 && lastDataTrack != 3) {
-		ret = openTrack(lastDataTrack);
-		if (ret != 0) {
-			// Error opening the last data track.
-			close();
-			q->m_lastError = -ret;
-			return;
-		}
-	}
-
-	const BlockRange *const lastBlockRange = trackMappings[lastDataTrack-1];
-	if (!lastBlockRange) {
-		// Should not get here...
-		close();
-		q->m_lastError = EIO;
-		return;
-	}
-
-	// Disc parameters.
-	// A full Dreamcast disc has 549,150 sectors.
-	block_size = 2048;
-	blockCount = lastBlockRange->blockEnd + 1;
-	disc_size = blockCount * 2048;
-
-	// Reset the disc position.
-	pos = 0;
-}
+{ }
 
 GdiReaderPrivate::~GdiReaderPrivate()
 {
@@ -222,15 +102,17 @@ GdiReaderPrivate::~GdiReaderPrivate()
  */
 void GdiReaderPrivate::close(void)
 {
-	for (auto iter = blockRanges.begin(); iter != blockRanges.end(); ++iter) {
-		delete iter->file;
-	}
+	std::for_each(blockRanges.begin(), blockRanges.end(),
+		[](BlockRange &blockRange) {
+			UNREF(blockRange.file);
+		}
+	);
 	blockRanges.clear();
 	trackMappings.clear();
 
 	// GDI file.
-	delete this->file;
-	this->file = nullptr;
+	RP_Q(GdiReader);
+	UNREF_AND_NULL(q->m_file);
 }
 
 /**
@@ -249,21 +131,21 @@ int GdiReaderPrivate::parseGdiFile(char *gdibuf)
 	}
 
 	// First line should contain the number of tracks.
-	char *linesaveptr;
+	char *linesaveptr = nullptr;
 	const char *linetoken = strtok_r(gdibuf, "\n", &linesaveptr);
 	if (!linetoken || linetoken[0] == 0) {
 		return -EIO;
 	}
 
-	char *endptr;
+	char *endptr = nullptr;
 	int trackCount = strtol(linetoken, &endptr, 10);
 	if (trackCount <= 0 || trackCount > 99 || (*endptr != 0 && *endptr != '\r')) {
 		// Track count is invalid.
 		return -EIO;
 	}
 
-	blockRanges.reserve((size_t)trackCount);
-	trackMappings.resize((size_t)trackCount);
+	blockRanges.reserve(static_cast<size_t>(trackCount));
+	trackMappings.resize(static_cast<size_t>(trackCount));
 
 	// Remainder of file is the track list.
 	// Format: Track# LBA Type SectorSize Filename ???
@@ -323,13 +205,13 @@ int GdiReaderPrivate::parseGdiFile(char *gdibuf)
 		}
 
 		// Save the track information.
-		int idx = (int)blockRanges.size();
+		size_t idx = blockRanges.size();
 		blockRanges.resize(idx+1);
 		BlockRange &blockRange = blockRanges[idx];
-		blockRange.blockStart = (unsigned int)blockStart;
+		blockRange.blockStart = static_cast<unsigned int>(blockStart);
 		blockRange.blockEnd = 0;	// will be filled in when loaded
-		blockRange.sectorSize = (uint16_t)sectorSize;
-		blockRange.trackNumber = (uint8_t)trackNumber;
+		blockRange.sectorSize = static_cast<uint16_t>(sectorSize);
+		blockRange.trackNumber = static_cast<uint8_t>(trackNumber);
 		blockRange.reserved = 0;
 		// FIXME: UTF-8 or Latin-1?
 		filename[sizeof(filename)-1] = 0;
@@ -360,7 +242,7 @@ int GdiReaderPrivate::openTrack(int trackNumber)
 
 	// Check if this track exists.
 	// NOTE: trackNumber starts at 1, not 0.
-	if (trackNumber > (int)trackMappings.size()) {
+	if (trackNumber > static_cast<int>(trackMappings.size())) {
 		// Track number is out of range.
 		return -ENOENT;
 	}
@@ -390,7 +272,7 @@ int GdiReaderPrivate::openTrack(int trackNumber)
 	}
 
 	// Open the related file.
-	IRpFile *file = FileSystem::openRelatedFile(filename.c_str(), basename.c_str(), ext.c_str());
+	IRpFile *const file = FileSystem::openRelatedFile(filename.c_str(), basename.c_str(), ext.c_str());
 	if (!file) {
 		// Unable to open the file.
 		// TODO: Return the actual error.
@@ -398,22 +280,22 @@ int GdiReaderPrivate::openTrack(int trackNumber)
 	}
 
 	// File opened. Get its size and calculate the end block.
-	int64_t fileSize = file->size();
+	const off64_t fileSize = file->size();
 	if (fileSize <= 0) {
-		// Empty or invalid flie...
-		delete file;
+		// Empty or invalid file...
+		file->unref();
 		return -EIO;
 	}
 
 	// Is the file a multiple of the sector size?
 	if (fileSize % blockRange->sectorSize != 0) {
 		// Not a multiple of the sector size.
-		delete file;
+		file->unref();
 		return -EIO;
 	}
 
 	// File opened.
-	blockRange->blockEnd = blockRange->blockStart + (unsigned int)(fileSize / blockRange->sectorSize) - 1;
+	blockRange->blockEnd = blockRange->blockStart + static_cast<unsigned int>(fileSize / blockRange->sectorSize) - 1;
 	blockRange->file = file;
 	return 0;
 }
@@ -421,8 +303,101 @@ int GdiReaderPrivate::openTrack(int trackNumber)
 /** GdiReader **/
 
 GdiReader::GdiReader(IRpFile *file)
-	: super(new GdiReaderPrivate(this, file))
-{ }
+	: super(new GdiReaderPrivate(this), file)
+{
+	if (!m_file) {
+		// File could not be ref()'d.
+		return;
+	}
+
+	// Save the filename for later.
+	RP_D(GdiReader);
+	d->filename = m_file->filename();
+
+	// GDI file should be 4k or less.
+	const off64_t fileSize = m_file->size();
+	if (fileSize <= 0 || fileSize > 4096) {
+		// Invalid GDI file size.
+		UNREF_AND_NULL_NOCHK(m_file);
+		m_lastError = EIO;
+		return;
+	}
+
+	// Read the GDI and parse the track information.
+	const unsigned int gdisize = static_cast<unsigned int>(fileSize);
+	unique_ptr<char[]> gdibuf(new char[gdisize+1]);
+	m_file->rewind();
+	size_t size = m_file->read(gdibuf.get(), gdisize);
+	if (size != gdisize) {
+		// Read error.
+		UNREF_AND_NULL_NOCHK(m_file);
+		m_lastError = EIO;
+		return;
+	}
+
+	// Make sure the string is NULL-terminated.
+	gdibuf[gdisize] = 0;
+
+	// Parse the GDI file.
+	int ret = d->parseGdiFile(gdibuf.get());
+	if (ret != 0) {
+		// Error parsing the GDI file.
+		d->close();
+		m_lastError = EIO;
+		return;
+	}
+
+	// Open track 03 (primary data track) and the last data track.
+	if (d->trackMappings.size() >= 3) {
+		ret = d->openTrack(3);
+		if (ret != 0) {
+			// Error opening track 03.
+			d->close();
+			m_lastError = -ret;
+			return;
+		}
+	}
+
+	// Find the last data track.
+	// NOTE: Searching in reverse order.
+	int lastDataTrack = 0;	// 1-based; 0 is invalid.
+	std::for_each(d->trackMappings.crbegin(), d->trackMappings.crend(),
+		[&lastDataTrack](const GdiReaderPrivate::BlockRange *blockRange) {
+			if (blockRange) {
+				if (static_cast<int>(blockRange->trackNumber) > lastDataTrack) {
+					lastDataTrack = blockRange->trackNumber;
+				}
+			}
+		}
+	);
+
+	if (lastDataTrack > 0 && lastDataTrack != 3) {
+		ret = d->openTrack(lastDataTrack);
+		if (ret != 0) {
+			// Error opening the last data track.
+			d->close();
+			m_lastError = -ret;
+			return;
+		}
+	}
+
+	const GdiReaderPrivate::BlockRange *const lastBlockRange = d->trackMappings[lastDataTrack-1];
+	if (!lastBlockRange) {
+		// Should not get here...
+		d->close();
+		m_lastError = EIO;
+		return;
+	}
+
+	// Disc parameters.
+	// A full Dreamcast disc has 549,150 sectors.
+	d->block_size = 2048;
+	d->blockCount = lastBlockRange->blockEnd + 1;
+	d->disc_size = d->blockCount * 2048;
+
+	// Reset the disc position.
+	d->pos = 0;
+}
 
 /**
  * Is a disc image supported by this class?
@@ -444,7 +419,7 @@ int GdiReader::isDiscSupported_static(const uint8_t *pHeader, size_t szHeader)
 		if (pHeader[i] == '\r' || pHeader[i] == '\n') {
 			// End of line.
 			break;
-		} else if (isdigit(pHeader[i])) {
+		} else if (ISDIGIT(pHeader[i])) {
 			// Digit.
 			trackCount *= 10;
 			trackCount += (pHeader[i] & 0xF);
@@ -478,18 +453,33 @@ int GdiReader::isDiscSupported(const uint8_t *pHeader, size_t szHeader) const
 /** SparseDiscReader functions. **/
 
 /**
+ * Get the physical address of the specified logical block index.
+ *
+ * NOTE: Not implemented in this subclass.
+ *
+ * @param blockIdx	[in] Block index.
+ * @return Physical block address. (-1 due to not being implemented)
+ */
+off64_t GdiReader::getPhysBlockAddr(uint32_t blockIdx) const
+{
+	RP_UNUSED(blockIdx);
+	assert(!"GdiReader::getPhysBlockAddr() is not implemented.");
+	return -1;
+}
+
+/**
  * Read the specified block.
  *
  * This can read either a full block or a partial block.
  * For a full block, set pos = 0 and size = block_size.
  *
  * @param blockIdx	[in] Block index.
- * @param ptr		[out] Output data buffer.
  * @param pos		[in] Starting position. (Must be >= 0 and <= the block size!)
+ * @param ptr		[out] Output data buffer.
  * @param size		[in] Amount of data to read, in bytes. (Must be <= the block size!)
  * @return Number of bytes read, or -1 if the block index is invalid.
  */
-int GdiReader::readBlock(uint32_t blockIdx, void *ptr, int pos, size_t size)
+int GdiReader::readBlock(uint32_t blockIdx, int pos, void *ptr, size_t size)
 {
 	// Read 'size' bytes of block 'blockIdx', starting at 'pos'.
 	// NOTE: This can only be called by SparseDiscReader,
@@ -499,9 +489,10 @@ int GdiReader::readBlock(uint32_t blockIdx, void *ptr, int pos, size_t size)
 	assert(size <= d->block_size);
 	assert(blockIdx < d->blockCount);
 	// TODO: Make sure overflow doesn't occur.
-	assert((int64_t)(pos + size) <= (int64_t)d->block_size);
-	if (pos < 0 || pos >= (int)d->block_size || size > d->block_size ||
-	    (int64_t)(pos + size) > (int64_t)d->block_size ||
+	assert((off64_t)(pos + size) <= (off64_t)d->block_size);
+	if (pos < 0 || pos >= static_cast<int>(d->block_size) ||
+		size > d->block_size ||
+		static_cast<off64_t>(pos + size) > static_cast<off64_t>(d->block_size) ||
 	    blockIdx >= d->blockCount)
 	{
 		// pos+size is out of range.
@@ -516,7 +507,8 @@ int GdiReader::readBlock(uint32_t blockIdx, void *ptr, int pos, size_t size)
 	// Find the block.
 	// TODO: Cache this lookup somewhere or something.
 	const GdiReaderPrivate::BlockRange *blockRange = nullptr;
-	for (auto iter = d->blockRanges.cbegin(); iter != d->blockRanges.cend(); ++iter) {
+	const auto blockRanges_cend = d->blockRanges.cend();
+	for (auto iter = d->blockRanges.cbegin(); iter != blockRanges_cend; ++iter) {
 		// NOTE: Using volatile because it can change in d->openTrack().
 		const volatile GdiReaderPrivate::BlockRange *const vbr = &(*iter);
 		if (blockIdx < vbr->blockStart) {
@@ -554,12 +546,27 @@ int GdiReader::readBlock(uint32_t blockIdx, void *ptr, int pos, size_t size)
 		return 0;
 	}
 
-	// Go to the block.
-	// FIXME: Read the whole block so we can determine if this is Mode1 or Mode2.
-	// Mode1 data starts at byte 16; Mode2 data starts at byte 24.
-	const int64_t phys_pos = ((int64_t)(blockIdx - blockRange->blockStart) * blockRange->sectorSize) + 16 + pos;
+	// Read the full block.
+	off64_t phys_pos = (static_cast<off64_t>(blockIdx - blockRange->blockStart) * blockRange->sectorSize);
+	if (blockRange->sectorSize == 2352) {
+		// 2352-byte sectors.
+		// TODO: Handle audio tracks properly?
+		CDROM_2352_Sector_t sector;
+		size_t sz_read = blockRange->file->seekAndRead(phys_pos, &sector, sizeof(sector));
+		m_lastError = blockRange->file->lastError();
+		if (sz_read != sizeof(sector)) {
+			// Read error.
+			return -1;
+		}
+
+		// NOTE: Sector user data area position depends on the sector mode.
+		const uint8_t *const data = cdromSectorDataPtr(&sector);
+		memcpy(ptr, &data[pos], size);
+		return size;
+	}
+
+	// 2048-byte sectors.
 	size_t sz_read = blockRange->file->seekAndRead(phys_pos, ptr, size);
-	m_lastError = blockRange->file->lastError();
 	return (sz_read > 0 ? (int)sz_read : -1);
 }
 
@@ -572,8 +579,8 @@ int GdiReader::readBlock(uint32_t blockIdx, void *ptr, int pos, size_t size)
  */
 int GdiReader::trackCount(void) const
 {
-	RP_D(GdiReader);
-	return (int)d->trackMappings.size();
+	RP_D(const GdiReader);
+	return static_cast<int>(d->trackMappings.size());
 }
 
 /**
@@ -587,14 +594,14 @@ int GdiReader::startingLBA(int trackNumber) const
 	assert(trackNumber <= 99);
 
 	RP_D(GdiReader);
-	if (trackNumber <= 0 || trackNumber > (int)d->trackMappings.size())
+	if (trackNumber <= 0 || trackNumber > static_cast<int>(d->trackMappings.size()))
 		return -1;
 
 	const GdiReaderPrivate::BlockRange *blockRange = d->trackMappings[trackNumber-1];
 	if (!blockRange)
 		return -1;
 
-	return (int)blockRange->blockStart;
+	return static_cast<int>(blockRange->blockStart);
 }
 
 /**
@@ -611,6 +618,47 @@ IsoPartition *GdiReader::openIsoPartition(int trackNumber)
 	// Logical block size is 2048.
 	// ISO starting offset is the LBA.
 	return new IsoPartition(this, lba * 2048, lba);
+}
+
+/**
+ * Create an ISO RomData object for a given track number.
+ * @param trackNumber Track number. (1-based)
+ * @return ISO object, or nullptr on error.
+ */
+ISO *GdiReader::openIsoRomData(int trackNumber)
+{
+	// Make sure the track is open.
+	RP_D(GdiReader);
+	if (d->openTrack(trackNumber) != 0) {
+		// Cannot open the track.
+		return nullptr;
+	}
+
+	if (d->trackMappings.size() < static_cast<size_t>(trackNumber)) {
+		// Invalid track number.
+		return nullptr;
+	}
+	GdiReaderPrivate::BlockRange *const blockRange = d->trackMappings[trackNumber-1];
+
+	// Calculate the track length.
+	const int lba_start = blockRange->blockStart;
+	const int lba_size = blockRange->blockEnd - lba_start + 1;
+
+	// ISO object for ISO-9660 PVD
+	ISO *isoData = nullptr;
+
+	PartitionFile *const isoFile = new PartitionFile(this,
+		static_cast<off64_t>(lba_start) * 2048,
+		static_cast<off64_t>(lba_size) * 2048);
+	if (isoFile->isOpen()) {
+		isoData = new ISO(isoFile);
+		if (!isoData->isOpen()) {
+			// Unable to open ISO object.
+			UNREF_AND_NULL_NOCHK(isoData);
+		}
+	}
+	isoFile->unref();
+	return isoData;
 }
 
 }

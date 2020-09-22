@@ -2,53 +2,29 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * DMG.hpp: Virtual Boy ROM reader.                                        *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- * Copyright (c) 2016 by Egor.                                             *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * Copyright (c) 2016-2018 by Egor.                                        *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "VirtualBoy.hpp"
-#include "librpbase/RomData_p.hpp"
-
 #include "data/NintendoPublishers.hpp"
 #include "vb_structs.h"
 
-// librpbase
-#include "librpbase/common.h"
-#include "librpbase/byteswap.h"
-#include "librpbase/TextFuncs.hpp"
-#include "librpbase/file/IRpFile.hpp"
-#include "libi18n/i18n.h"
+// librpbase, librpfile
 using namespace LibRpBase;
+using LibRpFile::IRpFile;
 
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cctype>
-#include <cerrno>
-#include <cstring>
-
-// C++ includes.
-#include <string>
-#include <vector>
+// C++ STL classes.
 using std::string;
 using std::vector;
 
 namespace LibRomData {
 
-class VirtualBoyPrivate : public RomDataPrivate
+ROMDATA_IMPL(VirtualBoy)
+
+class VirtualBoyPrivate final : public RomDataPrivate
 {
 	public:
 		VirtualBoyPrivate(VirtualBoy *q, IRpFile *file);
@@ -111,7 +87,7 @@ bool inline VirtualBoyPrivate::isPublisherID(char c){
 	// Valid characters:
 	// - Uppercase letters
 	// - Digits
-	return (isupper(c) || isdigit(c));
+	return (ISUPPER(c) || ISDIGIT(c));
 }
 
 /**
@@ -125,7 +101,7 @@ bool inline VirtualBoyPrivate::isGameID(char c){
 	// - Digits
 	// - Space (' ')
 	// - Hyphen ('-')
-	return (isupper(c) || isdigit(c) || c == ' ' || c == '-');
+	return (ISUPPER(c) || ISDIGIT(c) || c == ' ' || c == '-');
 }
 
 /** VirtualBoy **/
@@ -134,7 +110,7 @@ bool inline VirtualBoyPrivate::isGameID(char c){
  * Read a Virtual Boy ROM image.
  *
  * A ROM file must be opened by the caller. The file handle
- * will be dup()'d and must be kept open in order to load
+ * will be ref()'d and must be kept open in order to load
  * data from the ROM.
  *
  * To close the file, either delete this object or call close().
@@ -148,27 +124,31 @@ VirtualBoy::VirtualBoy(IRpFile *file)
 {
 	RP_D(VirtualBoy);
 	d->className = "VirtualBoy";
+	d->mimeType = "application/x-virtual-boy-rom";	// unofficial
 
 	if (!d->file) {
-		// Could not dup() the file handle.
+		// Could not ref() the file handle.
 		return;
 	}
 
 	// Seek to the beginning of the header.
-	const int64_t filesize = d->file->size();
+	const off64_t filesize = d->file->size();
 	// File must be at least 0x220 bytes,
 	// and cannot be larger than 16 MB.
 	if (filesize < 0x220 || filesize > (16*1024*1024)) {
 		// File size is out of range.
+		UNREF_AND_NULL_NOCHK(d->file);
 		return;
 	}
 
 	// Read the ROM header.
-	const unsigned int header_addr = (unsigned int)(filesize - 0x220);
+	const unsigned int header_addr = static_cast<unsigned int>(filesize - 0x220);
 	d->file->seek(header_addr);
 	size_t size = d->file->read(&d->romHeader, sizeof(d->romHeader));
-	if (size != sizeof(d->romHeader))
+	if (size != sizeof(d->romHeader)) {
+		UNREF_AND_NULL_NOCHK(d->file);
 		return;
+	}
 
 	// Make sure this is actually a Virtual Boy ROM.
 	DetectInfo info;
@@ -178,6 +158,10 @@ VirtualBoy::VirtualBoy(IRpFile *file)
 	info.ext = nullptr;	// Not needed for Virtual Boy.
 	info.szFile = filesize;
 	d->isValid = (isRomSupported(&info) >= 0);
+
+	if (!d->isValid) {
+		UNREF_AND_NULL_NOCHK(d->file);
+	}
 }
 
 /** ROM detection functions. **/
@@ -213,7 +197,7 @@ int VirtualBoy::isRomSupported_static(const DetectInfo *info)
 	// 0x220 before the end of the file.
 	if (info->szFile < 0x220)
 		return -1;
-	const uint32_t header_addr_expected = (uint32_t)(info->szFile - 0x220);
+	const uint32_t header_addr_expected = static_cast<uint32_t>(info->szFile - 0x220);
 	if (info->header.addr > header_addr_expected)
 		return -1;
 	else if (info->header.addr + info->header.size < header_addr_expected + 0x20)
@@ -272,16 +256,6 @@ int VirtualBoy::isRomSupported_static(const DetectInfo *info)
 }
 
 /**
- * Is a ROM image supported by this object?
- * @param info DetectInfo containing ROM detection information.
- * @return Class-specific system ID (>= 0) if supported; -1 if not.
- */
-int VirtualBoy::isRomSupported(const DetectInfo *info) const
-{
-	return isRomSupported_static(info);
-}
-
-/**
  * Get the name of the system the loaded ROM is designed for.
  * @return System name, or nullptr if not supported.
  */
@@ -291,6 +265,8 @@ const char *VirtualBoy::systemName(unsigned int type) const
 	if (!d->isValid || !isSystemNameTypeValid(type))
 		return nullptr;
 
+	// VirtualBoy has the same name worldwide, so we can
+	// ignore the region selection.
 	static_assert(SYSNAME_TYPE_MASK == 3,
 		"VirtualBoy::systemName() array index optimization needs to be updated.");
 	
@@ -327,21 +303,24 @@ const char *const *VirtualBoy::supportedFileExtensions_static(void)
 }
 
 /**
- * Get a list of all supported file extensions.
- * This is to be used for file type registration;
- * subclasses don't explicitly check the extension.
+ * Get a list of all supported MIME types.
+ * This is to be used for metadata extractors that
+ * must indicate which MIME types they support.
  *
- * NOTE: The extensions include the leading dot,
- * e.g. ".bin" instead of "bin".
- *
- * NOTE 2: The array and the strings in the array should
+ * NOTE: The array and the strings in the array should
  * *not* be freed by the caller.
  *
  * @return NULL-terminated array of all supported file extensions, or nullptr on error.
  */
-const char *const *VirtualBoy::supportedFileExtensions(void) const
+const char *const *VirtualBoy::supportedMimeTypes_static(void)
 {
-	return supportedFileExtensions_static();
+	static const char *const mimeTypes[] = {
+		// Unofficial MIME types from FreeDesktop.org.
+		"application/x-virtual-boy-rom",
+
+		nullptr
+	};
+	return mimeTypes;
 }
 
 /**
@@ -352,7 +331,7 @@ const char *const *VirtualBoy::supportedFileExtensions(void) const
 int VirtualBoy::loadFieldData(void)
 {
 	RP_D(VirtualBoy);
-	if (d->fields->isDataLoaded()) {
+	if (!d->fields->empty()) {
 		// Field data *has* been loaded...
 		return 0;
 	} else if (!d->file || !d->file->isOpen()) {
@@ -368,40 +347,59 @@ int VirtualBoy::loadFieldData(void)
 	d->fields->reserve(5);	// Maximum of 5 fields.
 
 	// Title
-	d->fields->addField_string(C_("VirtualBoy", "Title"),
+	d->fields->addField_string(C_("RomData", "Title"),
 		cp1252_sjis_to_utf8(romHeader->title, sizeof(romHeader->title)));
 
 	// Game ID and publisher.
 	string id6(romHeader->gameid, sizeof(romHeader->gameid));
 	id6.append(romHeader->publisher, sizeof(romHeader->publisher));
-	d->fields->addField_string(C_("VirtualBoy", "Game ID"),
-		latin1_to_utf8(id6.data(), (int)id6.size()));
+	d->fields->addField_string(C_("RomData", "Game ID"), latin1_to_utf8(id6));
 
 	// Look up the publisher.
-	const char *publisher = NintendoPublishers::lookup(romHeader->publisher);
-	d->fields->addField_string(C_("VirtualBoy", "Publisher"),
-		publisher ? publisher : C_("VirtualBoy", "Unknown"));
+	const char *const publisher = NintendoPublishers::lookup(romHeader->publisher);
+	string s_publisher;
+	if (publisher) {
+		s_publisher = publisher;
+	} else {
+		if (ISALNUM(romHeader->publisher[0]) &&
+		    ISALNUM(romHeader->publisher[1]))
+		{
+			s_publisher = rp_sprintf(C_("RomData", "Unknown (%.2s)"),
+				romHeader->publisher);
+		} else {
+			s_publisher = rp_sprintf(C_("RomData", "Unknown (%02X %02X)"),
+				static_cast<uint8_t>(romHeader->publisher[0]),
+				static_cast<uint8_t>(romHeader->publisher[1]));
+		}
+	}
+	d->fields->addField_string(C_("RomData", "Publisher"), s_publisher);
 
 	// Revision
-	d->fields->addField_string_numeric(C_("VirtualBoy", "Revision"),
-		romHeader->version, RomFields::FB_DEC, 2);
+	d->fields->addField_string_numeric(C_("RomData", "Revision"),
+		romHeader->version, RomFields::Base::Dec, 2);
 
 	// Region
-	const char *region;
+	const char *s_region;
 	switch (romHeader->gameid[3]) {
 		case 'J':
-			region = C_("Region", "Japan");
+			s_region = C_("Region", "Japan");
 			break;
 		case 'E':
-			region = C_("Region", "USA");
+			s_region = C_("Region", "USA");
 			break;
 		default:
-			region = C_("VirtualBoy", "Unknown");
+			s_region = nullptr;
 			break;
 	}
-	d->fields->addField_string(C_("VirtualBoy", "Region"), region);
+	if (s_region) {
+		d->fields->addField_string(C_("RomData", "Region Code"), s_region);
+	} else {
+		d->fields->addField_string(C_("RomData", "Region Code"),
+			rp_sprintf(C_("RomData", "Unknown (0x%02X)"),
+				static_cast<uint8_t>(romHeader->gameid[3])));
+	}
 
-	return (int)d->fields->count();
+	return static_cast<int>(d->fields->count());
 }
 
 }

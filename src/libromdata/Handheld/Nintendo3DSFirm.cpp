@@ -2,47 +2,23 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * Nintendo3DSFirm.hpp: Nintendo 3DS firmware reader.                      *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
-#include "librpbase/config.librpbase.h"
-
+#include "stdafx.h"
 #include "Nintendo3DSFirm.hpp"
-#include "librpbase/RomData_p.hpp"
-
 #include "n3ds_firm_structs.h"
 #include "data/Nintendo3DSFirmData.hpp"
 
-#include "librpbase/common.h"
-#include "librpbase/byteswap.h"
-#include "librpbase/TextFuncs.hpp"
-#include "librpbase/file/IRpFile.hpp"
-#include "libi18n/i18n.h"
+// librpbase, librpfile
 using namespace LibRpBase;
+using LibRpFile::IRpFile;
 
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cerrno>
-#include <cstring>
+// for memmem() if it's not available in <string.h>
+#include "librpbase/TextFuncs_libc.h"
 
-// C++ includes.
-#include <memory>
-#include <string>
-#include <vector>
+// C++ STL classes.
 using std::string;
 using std::unique_ptr;
 using std::vector;
@@ -52,7 +28,9 @@ using std::vector;
 
 namespace LibRomData {
 
-class Nintendo3DSFirmPrivate : public RomDataPrivate
+ROMDATA_IMPL(Nintendo3DSFirm)
+
+class Nintendo3DSFirmPrivate final : public RomDataPrivate
 {
 	public:
 		Nintendo3DSFirmPrivate(Nintendo3DSFirm *q, IRpFile *file);
@@ -82,7 +60,7 @@ Nintendo3DSFirmPrivate::Nintendo3DSFirmPrivate(Nintendo3DSFirm *q, IRpFile *file
  * Read a Nintendo 3DS firmware binary.
  *
  * A ROM image must be opened by the caller. The file handle
- * will be dup()'d and must be kept open in order to load
+ * will be ref()'d and must be kept open in order to load
  * data from the ROM image.
  *
  * To close the file, either delete this object or call close().
@@ -96,18 +74,21 @@ Nintendo3DSFirm::Nintendo3DSFirm(IRpFile *file)
 {
 	RP_D(Nintendo3DSFirm);
 	d->className = "Nintendo3DSFirm";
-	d->fileType = FTYPE_FIRMWARE_BINARY;
+	d->mimeType = "application/x-nintendo-3ds-firm";	// unofficial, not on fd.o
+	d->fileType = FileType::FirmwareBinary;
 
 	if (!d->file) {
-		// Could not dup() the file handle.
+		// Could not ref() the file handle.
 		return;
 	}
 
 	// Read the firmware header.
 	d->file->rewind();
 	size_t size = d->file->read(&d->firmHeader, sizeof(d->firmHeader));
-	if (size != sizeof(d->firmHeader))
+	if (size != sizeof(d->firmHeader)) {
+		UNREF_AND_NULL_NOCHK(d->file);
 		return;
+	}
 
 	// Check if this firmware binary is supported.
 	DetectInfo info;
@@ -117,6 +98,10 @@ Nintendo3DSFirm::Nintendo3DSFirm(IRpFile *file)
 	info.ext = nullptr;	// Not needed for N3DS FIRM.
 	info.szFile = 0;	// Not needed for N3DS FIRM.
 	d->isValid = (isRomSupported_static(&info) >= 0);
+
+	if (!d->isValid) {
+		UNREF_AND_NULL_NOCHK(d->file);
+	}
 }
 
 /**
@@ -142,23 +127,13 @@ int Nintendo3DSFirm::isRomSupported_static(const DetectInfo *info)
 	// TODO: Other checks?
 	const N3DS_FIRM_Header_t *const firmHeader =
 		reinterpret_cast<const N3DS_FIRM_Header_t*>(info->header.pData);
-	if (!memcmp(firmHeader->magic, N3DS_FIRM_MAGIC, sizeof(firmHeader->magic))) {
+	if (firmHeader->magic == cpu_to_be32(N3DS_FIRM_MAGIC)) {
 		// This is a FIRM binary.
 		return 0;
 	}
 
 	// Not supported.
 	return -1;
-}
-
-/**
- * Is a ROM image supported by this object?
- * @param info DetectInfo containing ROM detection information.
- * @return Class-specific system ID (>= 0) if supported; -1 if not.
- */
-int Nintendo3DSFirm::isRomSupported(const DetectInfo *info) const
-{
-	return isRomSupported_static(info);
 }
 
 /**
@@ -172,8 +147,13 @@ const char *Nintendo3DSFirm::systemName(unsigned int type) const
 	if (!d->isValid || !isSystemNameTypeValid(type))
 		return nullptr;
 
-	// Bits 0-1: Type. (short, long, abbreviation)
-	// TODO: *New* Nintendo 3DS for N3DS-exclusive titles.
+	// Nintendo 3DS has the same name worldwide, so we can
+	// ignore the region selection.
+	static_assert(SYSNAME_TYPE_MASK == 3,
+		"Nintendo3DSFirm::systemName() array index optimization needs to be updated.");
+
+	// Bits 0-1: Type. (long, short, abbreviation)
+	// TODO: *New* Nintendo 3DS for N3DS-exclusive titles; iQue for China.
 	static const char *const sysNames[4] = {
 		"Nintendo 3DS", "Nintendo 3DS", "3DS", nullptr
 	};
@@ -206,21 +186,25 @@ const char *const *Nintendo3DSFirm::supportedFileExtensions_static(void)
 }
 
 /**
- * Get a list of all supported file extensions.
- * This is to be used for file type registration;
- * subclasses don't explicitly check the extension.
+ * Get a list of all supported MIME types.
+ * This is to be used for metadata extractors that
+ * must indicate which MIME types they support.
  *
- * NOTE: The extensions include the leading dot,
- * e.g. ".bin" instead of "bin".
- *
- * NOTE 2: The array and the strings in the array should
+ * NOTE: The array and the strings in the array should
  * *not* be freed by the caller.
  *
  * @return NULL-terminated array of all supported file extensions, or nullptr on error.
  */
-const char *const *Nintendo3DSFirm::supportedFileExtensions(void) const
+const char *const *Nintendo3DSFirm::supportedMimeTypes_static(void)
 {
-	return supportedFileExtensions_static();
+	static const char *const mimeTypes[] = {
+		// Unofficial MIME types.
+		// TODO: Get these upstreamed on FreeDesktop.org.
+		"application/x-nintendo-3ds-firm",
+
+		nullptr
+	};
+	return mimeTypes;
 }
 
 /**
@@ -231,7 +215,7 @@ const char *const *Nintendo3DSFirm::supportedFileExtensions(void) const
 int Nintendo3DSFirm::loadFieldData(void)
 {
 	RP_D(Nintendo3DSFirm);
-	if (d->fields->isDataLoaded()) {
+	if (!d->fields->empty()) {
 		// Field data *has* been loaded...
 		return 0;
 	} else if (!d->file) {
@@ -244,14 +228,14 @@ int Nintendo3DSFirm::loadFieldData(void)
 
 	// Nintendo 3DS firmware binary header.
 	const N3DS_FIRM_Header_t *const firmHeader = &d->firmHeader;
-	d->fields->reserve(5);	// Maximum of 5 fields.
+	d->fields->reserve(6);	// Maximum of 6 fields.
 
 	// Read the firmware binary.
 	unique_ptr<uint8_t[]> firmBuf;
 	unsigned int szFile = 0;
 	if (d->file->size() <= 4*1024*1024) {
 		// Firmware binary is 4 MB or less.
-		szFile = (unsigned int)d->file->size();
+		szFile = static_cast<unsigned int>(d->file->size());
 		firmBuf.reset(new uint8_t[szFile]);
 		d->file->rewind();
 		size_t size = d->file->read(firmBuf.get(), szFile);
@@ -272,7 +256,7 @@ int Nintendo3DSFirm::loadFieldData(void)
 	if (arm11_entrypoint != 0 && arm9_entrypoint != 0) {
 		// Calculate the CRC32 and look it up.
 		if (firmBuf) {
-			const uint32_t crc = crc32(0, firmBuf.get(), (unsigned int)szFile);
+			const uint32_t crc = crc32(0, firmBuf.get(), static_cast<unsigned int>(szFile));
 			firmBin = Nintendo3DSFirmData::lookup_firmBin(crc);
 			if (firmBin != nullptr) {
 				// Official firmware binary.
@@ -280,6 +264,10 @@ int Nintendo3DSFirm::loadFieldData(void)
 			} else {
 				// Check for a custom FIRM.
 				checkCustomFIRM = true;
+
+				// NOTE: Luma3DS v9.1 has an ARM11 entry point set,
+				// so we should check for ARM9 homebrew as well.
+				checkARM9 = true;
 			}
 		}
 	} else if (arm11_entrypoint == 0 && arm9_entrypoint != 0) {
@@ -309,11 +297,11 @@ int Nintendo3DSFirm::loadFieldData(void)
 		}
 	}
 
-	d->fields->addField_string(C_("Nintendo3DSFirm", "Type"),
-		(firmBinDesc ? firmBinDesc : C_("Nintendo3DSFirm", "Unknown")));
-
-	// Official firmware binary fields.
 	if (firmBin) {
+		// Official firmware binary fields.
+		d->fields->addField_string(C_("Nintendo3DSFirm", "Type"),
+			(firmBinDesc ? firmBinDesc : C_("RomData", "Unknown")));
+
 		// FIRM version.
 		d->fields->addField_string(C_("Nintendo3DSFirm", "FIRM Version"),
 			rp_sprintf("%u.%u.%u", firmBin->kernel.major,
@@ -322,10 +310,9 @@ int Nintendo3DSFirm::loadFieldData(void)
 		// System version.
 		d->fields->addField_string(C_("Nintendo3DSFirm", "System Version"),
 			rp_sprintf("%u.%u", firmBin->sys.major, firmBin->sys.minor));
-	}
+	} else if (checkARM9) {
+		// Check for ARM9 homebrew.
 
-	// Check for ARM9 homebrew.
-	if (checkARM9) {
 		// Version strings.
 		struct Arm9VerStr_t {
 			const char *title;	// Application title.
@@ -333,53 +320,120 @@ int Nintendo3DSFirm::loadFieldData(void)
 			unsigned int searchlen;	// Search string length, without the NULL terminator.
 		};
 		static const Arm9VerStr_t arm9VerStr[] = {
-			{"Luma3DS", "Luma3DS v", 9},
-			{"GodMode9", "GodMode9 Explorer v", 19},
-			{"Decrypt9WIP", "Decrypt9WIP (", 13},
-			{"Hourglass9", "Hourglass9 v", 12},
+			{"Luma3DS",		"Luma3DS v", 9},
+			{"GodMode9",		"GodMode9 Explorer v", 19},	// Older versions
+			{"GodMode9",		"GodMode9 v", 10},		// Newer versions (v1.9.1; TODO check for first one?)
+			{"Decrypt9WIP",		"Decrypt9WIP (", 13},
+			{"Hourglass9",		"Hourglass9 v", 12},
+			{"ntrboot_flasher",	"ntrboot_flasher: %s", 19},	// version info isn't hard-coded
+			{"SafeB9SInstaller",	"SafeB9SInstaller v", 18},
+			{"OpenFirmInstaller",	"OpenFirmInstaller v", 19},
+			{"fastboot3DS",		"fastboot3DS v", 13},
+
+			{nullptr, nullptr, 0}
 		};
 
-		for (unsigned int i = 0; i < ARRAY_SIZE(arm9VerStr); i++) {
-			const char *verstr = (const char*)memmem(firmBuf.get(), szFile,
-				arm9VerStr[i].searchstr, arm9VerStr[i].searchlen);
+		const char *arm9VerStr_title = nullptr;
+		string s_verstr;
+		for (const Arm9VerStr_t *p = arm9VerStr; p->title != nullptr; p++) {
+			const char *verstr = static_cast<const char*>(memmem(
+				firmBuf.get(), szFile, p->searchstr, p->searchlen));
 			if (!verstr)
 				continue;
 
-			d->fields->addField_string(C_("Nintendo3DSFirm", "Title"), arm9VerStr[i].title);
+			arm9VerStr_title = p->title;
 
 			// Version does NOT include the 'v' character.
-			verstr += arm9VerStr[i].searchlen;
+			verstr += p->searchlen;
 			const char *end = (const char*)firmBuf.get() + szFile;
 			int count = 0;
-			while (verstr < end && verstr[count] != 0 &&
-			       !isspace(verstr[count]) && verstr[count] != ')' &&
-			       count < 32)
+			while (verstr < end && count < 32 && verstr[count] != 0 &&
+			       !ISSPACE(verstr[count]) && verstr[count] != ')')
 			{
 				count++;
 			}
 			if (count > 0) {
+				// Make sure this is labeled as ARM9 homebrew.
+				firmBinDesc = C_("Nintendo3DSFirm", "ARM9 Homebrew");
+
 				// NOTE: Most ARM9 homebrew uses UTF-8 strings.
-				d->fields->addField_string(C_("Nintendo3DSFirm", "Version"),
-					string(verstr, count));
+				s_verstr.assign(verstr, count);
 			}
 
 			// We're done here.
 			break;
 		}
+
+		// Sighax status.
+		// TODO: If it's SPI, we need to decrypt the FIRM contents.
+		// Reference: https://github.com/TuxSH/firmtool/blob/master/firmtool/__main__.py
+		const uint32_t first4 = be32_to_cpu(*(reinterpret_cast<const uint32_t*>(firmHeader->signature)));
+		struct SighaxStatus_t {
+			uint32_t first4;
+			const char *status;
+		};
+		static const SighaxStatus_t sighaxStatus[] = {
+			{0xB6724531,	"NAND retail"},		// SciresM
+			{0x6EFF209C,	"NAND retail"},		// sighax.com
+			{0x88697CDC,	"NAND devkit"},		// SciresM
+
+			{0x6CF52F89,	"NCSD retail"},
+			{0x53CB0E4E,	"NCSD devkit"},
+
+			{0x37E96B10,	"SPI retail"},
+			{0x18722BC7,	"SPI devkit"},
+
+			{0, nullptr}
+		};
+
+		const char *s_sighax_status = nullptr;
+		for (const SighaxStatus_t *p = sighaxStatus; p->first4 != 0; p++) {
+			if (p->first4 == first4) {
+				s_sighax_status = p->status;
+				break;
+			}
+		}
+
+		if (s_sighax_status) {
+			// Sighaxed. Assume it's ARM9 homebrew.
+			firmBinDesc = C_("Nintendo3DSFirm", "ARM9 Homebrew");
+		} else {
+			// Not sighaxed.
+			s_sighax_status = C_("Nintendo3DSFirm", "Not sighaxed");
+		}
+
+		// Add the firmware type field.
+		d->fields->addField_string(C_("Nintendo3DSFirm", "Type"),
+			(firmBinDesc ? firmBinDesc : C_("RomData", "Unknown")));
+
+		if (arm9VerStr_title) {
+			d->fields->addField_string(C_("RomData", "Title"), arm9VerStr_title);
+		}
+
+		// If the version was found, add it.
+		if (!s_verstr.empty()) {
+			d->fields->addField_string(C_("RomData", "Version"), s_verstr);
+		}
+
+		d->fields->addField_string(C_("Nintendo3DSFirm", "Sighax Status"), s_sighax_status);
+	} else {
+		// Add the firmware type field.
+		d->fields->addField_string(C_("Nintendo3DSFirm", "Type"),
+			(firmBinDesc ? firmBinDesc : C_("RomData", "Unknown")));
 	}
 
 	// Entry Points
 	if (arm11_entrypoint != 0) {
 		d->fields->addField_string_numeric(C_("Nintendo3DSFirm", "ARM11 Entry Point"),
-			arm11_entrypoint, RomFields::FB_HEX, 8, RomFields::STRF_MONOSPACE);
+			arm11_entrypoint, RomFields::Base::Hex, 8, RomFields::STRF_MONOSPACE);
 	}
 	if (arm9_entrypoint != 0) {
 		d->fields->addField_string_numeric(C_("Nintendo3DSFirm", "ARM9 Entry Point"),
-			arm9_entrypoint, RomFields::FB_HEX, 8, RomFields::STRF_MONOSPACE);
+			arm9_entrypoint, RomFields::Base::Hex, 8, RomFields::STRF_MONOSPACE);
 	}
 
 	// Finished reading the field data.
-	return (int)d->fields->count();
+	return static_cast<int>(d->fields->count());
 }
 
 }

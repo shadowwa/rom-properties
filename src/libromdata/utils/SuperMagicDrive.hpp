@@ -2,37 +2,25 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * SuperMagicDrive.cpp: Super Magic Drive deinterleaving function.         *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBROMDATA_UTILS_SUPERMAGICDRIVE_HPP__
 #define __ROMPROPERTIES_LIBROMDATA_UTILS_SUPERMAGICDRIVE_HPP__
 
-#include "librpbase/common.h"
-#include "cpu_dispatch.h"
+#include "common.h"
+#include "librpcpu/cpu_dispatch.h"
 
 #include <stdint.h>
 
 #if defined(RP_CPU_I386) || defined(RP_CPU_AMD64)
-# include "librpbase/cpuflags_x86.h"
+# include "librpcpu/cpuflags_x86.h"
 /* MSVC does not support MMX intrinsics in 64-bit builds. */
 /* Reference: https://msdn.microsoft.com/en-us/library/08x3t697(v=vs.110).aspx */
-/* TODO: Disable MMX on all 64-bit builds? */
-# if !defined(_MSC_VER) || (defined(_M_IX86) && !defined(_M_X64))
+/* In addition, amd64 CPUs all support SSE2 as a minimum, */
+/* so there's no point in building MMX code for 64-bit. */
+# if (defined(_M_IX86) || defined(__i386__)) && !defined(_M_X64) && !defined(__amd64__)
 #  define SMD_HAS_MMX 1
 # endif
 # define SMD_HAS_SSE2 1

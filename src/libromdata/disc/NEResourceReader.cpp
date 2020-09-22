@@ -2,57 +2,29 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * NEResourceReader.cpp: New Executable resource reader.                   *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "NEResourceReader.hpp"
 
-// librpbase
-#include "librpbase/common.h"
-#include "librpbase/byteswap.h"
-#include "librpbase/TextFuncs.hpp"
-#include "librpbase/file/IRpFile.hpp"
-#include "librpbase/disc/PartitionFile.hpp"
+// librpbase, librpfile
 using namespace LibRpBase;
+using namespace LibRpFile;
 
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cerrno>
-
-// C++ includes.
-#include <memory>
-#include <string>
-#include <unordered_map>
-#include <vector>
+// C++ STL classes.
 using std::string;
 using std::unique_ptr;
 using std::unordered_map;
 using std::vector;
-
-// Uninitialized vector class.
-// Reference: http://andreoffringa.org/?q=uvector
-#include "uvector.h"
 
 namespace LibRomData {
 
 class NEResourceReaderPrivate
 {
 	public:
-		NEResourceReaderPrivate(NEResourceReader *q, IRpFile *file,
+		NEResourceReaderPrivate(NEResourceReader *q,
 			uint32_t rsrc_tbl_addr, uint32_t rsrc_tbl_size);
 
 	private:
@@ -61,9 +33,6 @@ class NEResourceReaderPrivate
 		NEResourceReader *const q_ptr;
 
 	public:
-		// EXE file.
-		IRpFile *file;
-
 		// Resource segment table.
 		uint32_t rsrc_tbl_addr;
 		uint32_t rsrc_tbl_size;
@@ -99,13 +68,6 @@ class NEResourceReaderPrivate
 		static int load_VS_VERSION_INFO_header(IRpFile *file, const char *key, uint16_t *pLen, uint16_t *pValueLen);
 
 		/**
-		 * DWORD alignment function.
-		 * @param file	[in] File to DWORD align.
-		 * @return 0 on success; non-zero on error.
-		 */
-		static inline int alignFileDWORD(IRpFile *file);
-
-		/**
 		 * Load a string table.
 		 * @param file		[in] PE version resource.
 		 * @param st		[out] String Table.
@@ -118,27 +80,25 @@ class NEResourceReaderPrivate
 /** NEResourceReaderPrivate **/
 
 NEResourceReaderPrivate::NEResourceReaderPrivate(
-		NEResourceReader *q, IRpFile *file,
+		NEResourceReader *q,
 		uint32_t rsrc_tbl_addr,
 		uint32_t rsrc_tbl_size)
 	: q_ptr(q)
-	, file(file)
 	, rsrc_tbl_addr(rsrc_tbl_addr)
 	, rsrc_tbl_size(rsrc_tbl_size)
 {
-	if (!file) {
-		this->file = nullptr;
+	if (!q->m_file) {
 		q->m_lastError = -EBADF;
 		return;
 	} else if (rsrc_tbl_addr == 0) {
-		this->file = nullptr;
+		UNREF_AND_NULL_NOCHK(q->m_file);
 		q->m_lastError = -EIO;
 		return;
 	} else if (rsrc_tbl_size < 6 || rsrc_tbl_size >= 65536) {
 		// 64 KB is the segment size, so this shouldn't be possible.
 		// Also, it should be at least 6 bytes.
 		// (TODO: Larger minimum size?)
-		this->file = nullptr;
+		UNREF_AND_NULL_NOCHK(q->m_file);
 		q->m_lastError = -EIO;
 		return;
 	}
@@ -146,17 +106,25 @@ NEResourceReaderPrivate::NEResourceReaderPrivate(
 	// NOTE: Win16 executables don't have a separate
 	// .rsrc section, so we have to use the entire
 	// size of the file as the resource size.
+	static const uint32_t fileSize_MAX = 16U*1024*1024;
 
 	// Validate the starting address and size.
-	const int64_t fileSize = file->size();
-	if ((int64_t)rsrc_tbl_addr >= fileSize) {
-		// Starting address is past the end of the file.
-		this->file = nullptr;
+	const off64_t fileSize_o64 = q->m_file->size();
+	if (fileSize_o64 > fileSize_MAX) {
+		// A Win16 executable larger than 16 MB doesn't make any sense.
+		UNREF_AND_NULL_NOCHK(q->m_file);
 		q->m_lastError = -EIO;
 		return;
-	} else if (((int64_t)rsrc_tbl_addr + (int64_t)rsrc_tbl_size) > fileSize) {
-		// Resource ends past the end of the file.
-		this->file = nullptr;
+	}
+
+	const uint32_t fileSize = static_cast<uint32_t>(fileSize_o64);
+	if (rsrc_tbl_addr >= fileSize ||
+	    rsrc_tbl_size >= fileSize_MAX ||
+	    ((rsrc_tbl_addr + rsrc_tbl_size) > fileSize))
+	{
+		// Starting address is past the end of the file,
+		// or resource ends past the end of the file.
+		UNREF_AND_NULL_NOCHK(q->m_file);
 		q->m_lastError = -EIO;
 		return;
 	}
@@ -165,7 +133,7 @@ NEResourceReaderPrivate::NEResourceReaderPrivate(
 	int ret = loadResTbl();
 	if (ret != 0) {
 		// No resources, or an error occurred.
-		this->file = nullptr;
+		UNREF_AND_NULL_NOCHK(q->m_file);
 	}
 }
 
@@ -195,10 +163,10 @@ int NEResourceReaderPrivate::loadResTbl(void)
 
 	// Load the resource table.
 	unique_ptr<uint8_t[]> rsrcTblData(new uint8_t[rsrc_tbl_size]);
-	size_t size = file->seekAndRead(rsrc_tbl_addr, rsrcTblData.get(), rsrc_tbl_size);
+	size_t size = q->m_file->seekAndRead(rsrc_tbl_addr, rsrcTblData.get(), rsrc_tbl_size);
 	if (size != rsrc_tbl_size) {
 		// Seek and/or read error.
-		q->m_lastError = file->lastError();
+		q->m_lastError = q->m_file->lastError();
 		return q->m_lastError;
 	}
 
@@ -322,11 +290,11 @@ int NEResourceReaderPrivate::load_VS_VERSION_INFO_header(IRpFile *file, const ch
 
 	// Check the key name.
 	// NOTE: NE uses SBCS/MBCS/DBCS, so the length is in bytes.
-	const unsigned int key_len = (unsigned int)strlen(key);
+	const unsigned int key_len = static_cast<unsigned int>(strlen(key));
 	// DWORD alignment: Make sure we end on a multiple of 4 bytes.
 	// NOTE: sizeof(fields) == 4, so it's already WORD-aligned.
 	unsigned int keyData_len = key_len + 1;
-	keyData_len = ALIGN(4, keyData_len);
+	keyData_len = ALIGN_BYTES(4, keyData_len);
 	unique_ptr<char[]> keyData(new char[keyData_len]);
 	size = file->read(keyData.get(), keyData_len);
 	if (size != keyData_len) {
@@ -351,22 +319,6 @@ int NEResourceReaderPrivate::load_VS_VERSION_INFO_header(IRpFile *file, const ch
 }
 
 /**
- * DWORD alignment function.
- * @param file	[in] File to DWORD align.
- * @return 0 on success; non-zero on error.
- */
-inline int NEResourceReaderPrivate::alignFileDWORD(IRpFile *file)
-{
-	int ret = 0;
-	int64_t pos = file->tell();
-	if (pos % 4 != 0) {
-		pos = ALIGN(4, pos);
-		ret = file->seek(pos);
-	}
-	return ret;
-}
-
-/**
  * Load a string table.
  * @param file		[in] PE version resource.
  * @param st		[out] String Table.
@@ -384,7 +336,7 @@ int NEResourceReaderPrivate::load_StringTable(IRpFile *file, IResourceReader::St
 	// Reference: https://blogs.msdn.microsoft.com/oldnewthing/20061220-15/?p=28653
 
 	// Read fields.
-	const int64_t pos_start = file->tell();
+	const off64_t pos_start = file->tell();
 	uint16_t fields[2];	// wLength, wValueLength
 	size_t size = file->read(fields, sizeof(fields));
 	if (size != sizeof(fields)) {
@@ -400,6 +352,9 @@ int NEResourceReaderPrivate::load_StringTable(IRpFile *file, IResourceReader::St
 	}
 
 	// Read the 8-character language ID.
+	// Format: 040904E4
+	// - 0409: Language (US English)
+	// - 04E4: Code page (1252)
 	char s_langID[9];
 	size = file->read(s_langID, sizeof(s_langID));
 	if (size != sizeof(s_langID) || s_langID[8] != 0) {
@@ -409,19 +364,27 @@ int NEResourceReaderPrivate::load_StringTable(IRpFile *file, IResourceReader::St
 
 	// Parse using strtoul().
 	char *endptr;
-	*langID = (unsigned int)strtoul(s_langID, &endptr, 16);
+	*langID = static_cast<unsigned int>(strtoul(s_langID, &endptr, 16));
 	if (*langID == 0 || endptr != &s_langID[8]) {
 		// Not valid.
 		// TODO: Better error code?
 		return -EIO;
 	}
 
+	// Get the code page from the language ID.
+	uint16_t codepage = (*langID & 0xFFFF);
+	assert(codepage != 0);
+	if (codepage == 0) {
+		// TODO: More extensive code page validation?
+		codepage = 1252;
+	}
+
 	// DWORD alignment.
-	alignFileDWORD(file);
+	IResourceReader::alignFileDWORD(file);
 
 	// Total string table size (in bytes) is wLength - (pos_strings - pos_start).
-	const int64_t pos_strings = file->tell();
-	int strTblData_len = (int)fields[0] - (int)(pos_strings - pos_start);
+	const off64_t pos_strings = file->tell();
+	int strTblData_len = static_cast<int>(fields[0]) - static_cast<int>(pos_strings - pos_start);
 	if (strTblData_len <= 0) {
 		// Error...
 		return -EIO;
@@ -430,7 +393,7 @@ int NEResourceReaderPrivate::load_StringTable(IRpFile *file, IResourceReader::St
 	// Read the string table.
 	unique_ptr<uint8_t[]> strTblData(new uint8_t[strTblData_len]);
 	size = file->read(strTblData.get(), strTblData_len);
-	if (size != (size_t)strTblData_len) {
+	if (size != static_cast<size_t>(strTblData_len)) {
 		// Read error.
 		return -EIO;
 	}
@@ -443,7 +406,6 @@ int NEResourceReaderPrivate::load_StringTable(IRpFile *file, IResourceReader::St
 		// wLength, wValueLength
 		memcpy(fields, &strTblData[tblPos], sizeof(fields));
 
-		// TODO: Use fields[] directly?
 		const uint16_t wLength = le16_to_cpu(fields[0]);
 		if (wLength < sizeof(fields)) {
 			// Invalid length.
@@ -471,7 +433,7 @@ int NEResourceReaderPrivate::load_StringTable(IRpFile *file, IResourceReader::St
 
 		// DWORD alignment is required here.
 		tblPos += (key_len + 1);
-		tblPos  = ALIGN(4, tblPos);
+		tblPos  = ALIGN_BYTES(4, tblPos);
 
 		// Value must be NULL-terminated.
 		const char *value = reinterpret_cast<const char*>(&strTblData[tblPos]);
@@ -485,14 +447,32 @@ int NEResourceReaderPrivate::load_StringTable(IRpFile *file, IResourceReader::St
 			return -EIO;
 		}
 
-		// FIXME: Proper codepage conversion.
-		st.push_back(std::pair<string, string>(
-			latin1_to_utf8(key, key_len),
-			latin1_to_utf8(value, value_len)));
+		string key_utf8 = cpN_to_utf8(codepage, key, key_len);
+		assert(!key_utf8.empty());
+		if (key_utf8.empty()) {
+			// Code page conversion failed.
+			// Default to 1252.
+			key_utf8 = cp1252_to_utf8(key, key_len);
+		}
+
+		string value_utf8;
+		if (value_len > 0) {
+			value_utf8 = cpN_to_utf8(codepage, value, value_len);
+			assert(!value_utf8.empty());
+			if (value_utf8.empty()) {
+				// Code page conversion failed.
+				// Default to 1252.
+				value_utf8 = cp1252_to_utf8(value, value_len);
+			}
+		}
+
+		// NOTE: Only converting the value from DOS to UNIX line endings.
+		// The key shouldn't have newlines.
+		st.emplace_back(std::pair<string, string>(key_utf8, dos2unix(value_utf8)));
 
 		// DWORD alignment is required here.
 		tblPos += wValueLength;
-		tblPos  = ALIGN(4, tblPos);
+		tblPos  = ALIGN_BYTES(4, tblPos);
 	}
 
 	// String table loaded successfully.
@@ -512,7 +492,8 @@ int NEResourceReaderPrivate::load_StringTable(IRpFile *file, IResourceReader::St
  * @param rsrc_tbl_size Resource table size.
  */
 NEResourceReader::NEResourceReader(IRpFile *file, uint32_t rsrc_tbl_addr, uint32_t rsrc_tbl_size)
-	: d_ptr(new NEResourceReaderPrivate(this, file, rsrc_tbl_addr, rsrc_tbl_size))
+	: super(file)
+	, d_ptr(new NEResourceReaderPrivate(this, rsrc_tbl_addr, rsrc_tbl_size))
 { }
 
 NEResourceReader::~NEResourceReader()
@@ -523,17 +504,6 @@ NEResourceReader::~NEResourceReader()
 /** IDiscReader **/
 
 /**
- * Is the partition open?
- * This usually only returns false if an error occurred.
- * @return True if the partition is open; false if it isn't.
- */
-bool NEResourceReader::isOpen(void) const
-{
-	RP_D(NEResourceReader);
-	return (d->file && d->file->isOpen());
-}
-
-/**
  * Read data from the file.
  * @param ptr Output data buffer.
  * @param size Amount of data to read, in bytes.
@@ -541,10 +511,9 @@ bool NEResourceReader::isOpen(void) const
  */
 size_t NEResourceReader::read(void *ptr, size_t size)
 {
-	RP_D(NEResourceReader);
-	assert(d->file != nullptr);
-	assert(d->file->isOpen());
-	if (!d->file || !d->file->isOpen()) {
+	assert(m_file != nullptr);
+	assert(m_file->isOpen());
+	if (!m_file || !m_file->isOpen()) {
 		m_lastError = EBADF;
 		return 0;
 	}
@@ -552,7 +521,7 @@ size_t NEResourceReader::read(void *ptr, size_t size)
 	// There isn't a separate resource "section" in
 	// NE executables, so forward all read requests
 	// to the underlying file.
-	return d->file->read(ptr, size);
+	return m_file->read(ptr, size);
 }
 
 /**
@@ -560,12 +529,11 @@ size_t NEResourceReader::read(void *ptr, size_t size)
  * @param pos Partition position.
  * @return 0 on success; -1 on error.
  */
-int NEResourceReader::seek(int64_t pos)
+int NEResourceReader::seek(off64_t pos)
 {
-	RP_D(NEResourceReader);
-	assert(d->file != nullptr);
-	assert(d->file->isOpen());
-	if (!d->file || !d->file->isOpen()) {
+	assert(m_file != nullptr);
+	assert(m_file->isOpen());
+	if (!m_file || !m_file->isOpen()) {
 		m_lastError = EBADF;
 		return -1;
 	}
@@ -573,27 +541,18 @@ int NEResourceReader::seek(int64_t pos)
 	// There isn't a separate resource "section" in
 	// NE executables, so forward all read requests
 	// to the underlying file.
-	return d->file->seek(pos);
-}
-
-/**
- * Seek to the beginning of the partition.
- */
-void NEResourceReader::rewind(void)
-{
-	seek(0);
+	return m_file->seek(pos);
 }
 
 /**
  * Get the partition position.
  * @return Partition position on success; -1 on error.
  */
-int64_t NEResourceReader::tell(void)
+off64_t NEResourceReader::tell(void)
 {
-	RP_D(NEResourceReader);
-	assert(d->file != nullptr);
-	assert(d->file->isOpen());
-	if (!d->file || !d->file->isOpen()) {
+	assert(m_file != nullptr);
+	assert(m_file->isOpen());
+	if (!m_file || !m_file->isOpen()) {
 		m_lastError = EBADF;
 		return -1;
 	}
@@ -601,7 +560,7 @@ int64_t NEResourceReader::tell(void)
 	// There isn't a separate resource "section" in
 	// NE executables, so forward all read requests
 	// to the underlying file.
-	return d->file->tell();
+	return m_file->tell();
 }
 
 /**
@@ -610,13 +569,12 @@ int64_t NEResourceReader::tell(void)
  * and it's adjusted to exclude hashes.
  * @return Data size, or -1 on error.
  */
-int64_t NEResourceReader::size(void)
+off64_t NEResourceReader::size(void)
 {
 	// TODO: Errors?
-	RP_D(NEResourceReader);
-	assert(d->file != nullptr);
-	assert(d->file->isOpen());
-	if (!d->file || !d->file->isOpen()) {
+	assert(m_file != nullptr);
+	assert(m_file->isOpen());
+	if (!m_file || !m_file->isOpen()) {
 		m_lastError = EBADF;
 		return -1;
 	}
@@ -624,7 +582,7 @@ int64_t NEResourceReader::size(void)
 	// There isn't a separate resource "section" in
 	// NE executables, so forward all read requests
 	// to the underlying file.
-	return (int64_t)d->file->size();
+	return static_cast<off64_t>(m_file->size());
 }
 
 /** IPartition **/
@@ -634,15 +592,14 @@ int64_t NEResourceReader::size(void)
  * This size includes the partition header and hashes.
  * @return Partition size, or -1 on error.
  */
-int64_t NEResourceReader::partition_size(void) const
+off64_t NEResourceReader::partition_size(void) const
 {
 	// TODO: Errors?
-	RP_D(const NEResourceReader);
 
 	// There isn't a separate resource "section" in
 	// NE executables, so forward all read requests
 	// to the underlying file.
-	return (int64_t)d->file->size();
+	return static_cast<off64_t>(m_file->size());
 }
 
 /**
@@ -651,15 +608,14 @@ int64_t NEResourceReader::partition_size(void) const
  * but does not include "empty" sectors.
  * @return Used partition size, or -1 on error.
  */
-int64_t NEResourceReader::partition_size_used(void) const
+off64_t NEResourceReader::partition_size_used(void) const
 {
 	// TODO: Errors?
-	RP_D(const NEResourceReader);
 
 	// There isn't a separate resource "section" in
 	// NE executables, so forward all read requests
 	// to the underlying file.
-	return (int64_t)d->file->size();
+	return static_cast<off64_t>(m_file->size());
 }
 
 /** Resource access functions. **/
@@ -691,22 +647,21 @@ IRpFile *NEResourceReader::open(uint16_t type, int id, int lang)
 	if (dir.empty())
 		return nullptr;
 	
-	NEResourceReaderPrivate::ResTblEntry *entry = nullptr;
+	const NEResourceReaderPrivate::ResTblEntry *entry = nullptr;
 	if (id == -1) {
 		// Get the first ID for this type.
 		entry = &dir[0];
 	} else {
 		// Search for the ID.
 		// TODO: unordered_map?
-		for (unsigned int i = 0; i < (unsigned int)dir.size(); i++) {
-			if (dir[i].id == (uint16_t)id) {
-				// Found the ID.
-				entry = &dir[i];
-				break;
+		auto iter = std::find_if(dir.cbegin(), dir.cend(),
+			[id](const NEResourceReaderPrivate::ResTblEntry &entry) -> bool {
+				return (entry.id == static_cast<uint16_t>(id));
 			}
-		}
-
-		if (!entry) {
+		);
+		if (iter != dir.cend()) {
+			entry = &(*iter);
+		} else {
 			// ID not found.
 			return nullptr;
 		}
@@ -722,6 +677,7 @@ IRpFile *NEResourceReader::open(uint16_t type, int id, int lang)
 
 /**
  * Load a VS_VERSION_INFO resource.
+ * Data will be byteswapped to host-endian if necessary.
  * @param id		[in] Resource ID. (-1 for "first entry")
  * @param lang		[in] Language ID. (-1 for "first entry")
  * @param pVsFfi	[out] VS_FIXEDFILEINFO (host-endian)
@@ -738,7 +694,7 @@ int NEResourceReader::load_VS_VERSION_INFO(int id, int lang, VS_FIXEDFILEINFO *p
 	}
 
 	// Open the VS_VERSION_INFO resource.
-	unique_ptr<IRpFile> f_ver(this->open(RT_VERSION, id, lang));
+	unique_RefBase<IRpFile> f_ver(this->open(RT_VERSION, id, lang));
 	if (!f_ver) {
 		// Not found.
 		return -ENOENT;
@@ -794,7 +750,7 @@ int NEResourceReader::load_VS_VERSION_INFO(int id, int lang, VS_FIXEDFILEINFO *p
 #endif /* SYS_BYTEORDER == SYS_BIG_ENDIAN */
 
 	// DWORD alignment, if necessary.
-	NEResourceReaderPrivate::alignFileDWORD(f_ver.get());
+	alignFileDWORD(f_ver.get());
 
 	// Read the StringFileInfo section header.
 	static const char vssfi[] = "StringFileInfo";
@@ -813,8 +769,7 @@ int NEResourceReader::load_VS_VERSION_INFO(int id, int lang, VS_FIXEDFILEINFO *p
 	ret = NEResourceReaderPrivate::load_StringTable(f_ver.get(), st, &langID);
 	if (ret == 0) {
 		// String table read successfully.
-		// TODO: Reduce copying?
-		pVsSfi->insert(std::make_pair(langID, st));
+		pVsSfi->insert(std::make_pair(langID, std::move(st)));
 	}
 
 	// Version information read successfully.

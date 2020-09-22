@@ -3,30 +3,17 @@
  * config.version.h.in: Version information. (source file)                 *
  *                                                                         *
  * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_CONFIG_VERSION_H__
 #define __ROMPROPERTIES_CONFIG_VERSION_H__
 
 /* Program version. */
-#define RP_VERSION_MAJOR @VERSION_MAJOR@
-#define RP_VERSION_MINOR @VERSION_MINOR@
-#define RP_VERSION_PATCH @VERSION_PATCH@
-#define RP_VERSION_DEVEL @VERSION_DEVEL@
+#define RP_VERSION_MAJOR @CMAKE_PROJECT_VERSION_MAJOR@
+#define RP_VERSION_MINOR @CMAKE_PROJECT_VERSION_MINOR@
+#define RP_VERSION_PATCH @CMAKE_PROJECT_VERSION_PATCH@
+#define RP_VERSION_DEVEL @CMAKE_PROJECT_VERSION_TWEAK@
 #define RP_VERSION_STRING "@VERSION_STRING@"
 
 /* Package dscription. */

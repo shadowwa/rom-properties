@@ -1,34 +1,52 @@
-PROJECT(rom-properties-kde4)
+# KDE 4.x UI frontend
+CMAKE_MINIMUM_REQUIRED(VERSION 3.0)
+CMAKE_POLICY(SET CMP0048 NEW)
+IF(POLICY CMP0063)
+	# CMake 3.3: Enable symbol visibility presets for all
+	# target types, including static libraries and executables.
+	CMAKE_POLICY(SET CMP0063 NEW)
+ENDIF(POLICY CMP0063)
+PROJECT(rom-properties-kde4 LANGUAGES CXX)
 
 # Find Qt4.
+SET(ENV{QT_SELECT} qt4)
 SET(QT4_NO_LINK_QTMAIN 1)
-FIND_PACKAGE(Qt4 4.6.0 COMPONENTS QtCore QtGui)
+FIND_PACKAGE(Qt4 4.6.0 ${REQUIRE_KDE4} COMPONENTS QtCore QtGui)
 IF(QT4_FOUND)
 	# Make sure KDE4's CMake files don't create an uninstall rule.
 	SET(_kde4_uninstall_rule_created TRUE)
 
-	# Find KDE4. (TODO: Version?)
-	FIND_PACKAGE(KDE4)
+	# Find KDE4.
+	# - 4.7.0: KMessageWidget
+	FIND_PACKAGE(KDE4 4.7.0 ${REQUIRE_KDE4})
 	IF(NOT KDE4_FOUND)
 		# KDE4 not found.
-		SET(BUILD_KDE4 OFF CACHE "" INTERNAL FORCE)
+		SET(BUILD_KDE4 OFF CACHE INTERNAL "Build the KDE4 plugin." FORCE)
 	ENDIF(NOT KDE4_FOUND)
 
 	# Get rid of the explicit C90 setting.
 	STRING(REPLACE "-std=iso9899:1990" "" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
 ELSE(QT4_FOUND)
 	# Qt4 not found.
-	SET(BUILD_KDE4 OFF CACHE "" INTERNAL FORCE)
+	SET(BUILD_KDE4 OFF CACHE INTERNAL "Build the KDE4 plugin." FORCE)
 ENDIF(QT4_FOUND)
 
 # Sources and headers. (common)
 STRING(REGEX REPLACE "([^;]+)" "../\\1" rom-properties-kde4_SRCS "${rom-properties-kde_SRCS}")
 STRING(REGEX REPLACE "([^;]+)" "../\\1" rom-properties-kde4_H "${rom-properties-kde_H}")
 STRING(REGEX REPLACE "([^;]+)" "../\\1" rom-properties-kde4_UIS "${rom-properties-kde_UIS}")
+STRING(REGEX REPLACE "([^;]+)" "../\\1" rom-properties-kde4_RCC_SRCS "${rom-properties-kde_RCC_SRCS}")
 
 # Sources and headers. (KDE4-specific)
+IF(QT4_FOUND)
+	QT4_ADD_RESOURCES(
+		rom-properties-kde4_RCC_O ${rom-properties-kde4_RCC_SRCS}
+		OPTIONS -no-compress
+		)
+ENDIF(QT4_FOUND)
 SET(rom-properties-kde4_SRCS
 	${rom-properties-kde4_SRCS}
+	${rom-properties-kde4_RCC_O}
 	RomPropertiesDialogPluginFactoryKDE4.cpp
 	)
 
@@ -38,16 +56,30 @@ IF(COMMAND QT4_WRAP_UI)
 	ADD_CUSTOM_TARGET(kde4_generate_ui_h DEPENDS ${rom-properties-kde4_UIS_H})
 ENDIF(COMMAND QT4_WRAP_UI)
 
+IF(ENABLE_PCH)
+	# Precompiled headers.
+	INCLUDE(PrecompiledHeader)
+	SET(rom-properties-kde4_PCH_CXX ../stdafx.cpp)
+	SET(rom-properties-kde4_PCH_SRC ${rom-properties-kde4_PCH_CXX})
+	SET(rom-properties-kde4_PCH_H ../stdafx.h)
+ENDIF(ENABLE_PCH)
+
 #####################
 # Build the plugin. #
 #####################
 
 IF(BUILD_KDE4)
 	KDE4_ADD_PLUGIN(rom-properties-kde4
+		${rom-properties-kde4_PCH_SRC} ${rom-properties-kde4_PCH_H}
 		${rom-properties-kde4_SRCS}
 		${rom-properties-kde4_H}
 		${rom-properties-kde4_UIS_H}
 		)
+	IF(ENABLE_PCH)
+		ADD_PRECOMPILED_HEADER(rom-properties-kde4 ${rom-properties-kde4_PCH_H}
+			SOURCE_CXX ${rom-properties-kde4_PCH_CXX}
+			)
+	ENDIF(ENABLE_PCH)
 	DO_SPLIT_DEBUG(rom-properties-kde4)
 	TARGET_INCLUDE_DIRECTORIES(rom-properties-kde4
 		PUBLIC	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>		# kde4
@@ -57,10 +89,13 @@ IF(BUILD_KDE4)
 			$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>	# src
 			$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>	# src
 		)
-	TARGET_LINK_LIBRARIES(rom-properties-kde4 cachemgr romdata rpbase)
-	TARGET_LINK_LIBRARIES(rom-properties-kde4 ${ZLIB_LIBRARY})
-	TARGET_LINK_LIBRARIES(rom-properties-kde4 ${KDE4_KFILE_LIBRARY})
-	TARGET_LINK_LIBRARIES(rom-properties-kde4 Qt4::QtGui Qt4::QtCore)
+	TARGET_LINK_LIBRARIES(rom-properties-kde4 PRIVATE romdata rpfile rpbase unixcommon)
+	IF(ENABLE_NLS)
+		TARGET_LINK_LIBRARIES(rom-properties-kde4 PRIVATE i18n)
+	ENDIF(ENABLE_NLS)
+	TARGET_LINK_LIBRARIES(rom-properties-kde4 PRIVATE ${ZLIB_LIBRARY})
+	TARGET_LINK_LIBRARIES(rom-properties-kde4 PUBLIC ${KDE4_KFILE_LIBRARY} ${KDE4_KDEUI_LIBRARY})
+	TARGET_LINK_LIBRARIES(rom-properties-kde4 PUBLIC Qt4::QtGui Qt4::QtCore)
 	TARGET_INCLUDE_DIRECTORIES(rom-properties-kde4 PUBLIC ${KDE4_INCLUDE_DIR})
 
 	# Add zlib and png directories for the About tab.
@@ -72,22 +107,31 @@ IF(BUILD_KDE4)
 	ENDIF(HAVE_PNG)
 ENDIF(BUILD_KDE4)
 
-# Define -DQT_NO_DEBUG in release builds.
-SET(CMAKE_C_FLAGS_RELEASE   "-DQT_NO_DEBUG ${CMAKE_C_FLAGS_RELEASE}")
-SET(CMAKE_CXX_FLAGS_RELEASE "-DQT_NO_DEBUG ${CMAKE_CXX_FLAGS_RELEASE}")
-
 #######################
 # Install the plugin. #
 #######################
 
 IF(BUILD_KDE4)
+	# Process MIME types for the .desktop files.
+	INCLUDE(ParseMimeTypes)
+	PARSE_MIME_TYPES(MIMETYPES_THUMBONLY
+		"${CMAKE_SOURCE_DIR}/xdg/mime.thumbnail.types"
+		)
+	PARSE_MIME_TYPES(MIMETYPES_ALL
+		"${CMAKE_SOURCE_DIR}/xdg/mime.thumbnail.types"
+		"${CMAKE_SOURCE_DIR}/xdg/mime.no-thumbnail.types"
+		)
+	CONFIGURE_FILE(rom-properties-kde4.KPropertiesDialog.desktop.in rom-properties-kde4.KPropertiesDialog.desktop @ONLY)
+	CONFIGURE_FILE(rom-properties-kde4.ThumbCreator.desktop.in      rom-properties-kde4.ThumbCreator.desktop @ONLY)
+
 	# FIXME: KDE4's installation directories have the prefix
 	# hard-coded. This should be removed.
 	INSTALL(TARGETS rom-properties-kde4
 		LIBRARY DESTINATION "${PLUGIN_INSTALL_DIR}"
 		COMPONENT "plugin"
 		)
-	INSTALL(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rom-properties-kde4.desktop"
+	INSTALL(FILES "${CMAKE_CURRENT_BINARY_DIR}/rom-properties-kde4.KPropertiesDialog.desktop"
+		      "${CMAKE_CURRENT_BINARY_DIR}/rom-properties-kde4.ThumbCreator.desktop"
 		DESTINATION "${SERVICES_INSTALL_DIR}"
 		COMPONENT "plugin"
 		)

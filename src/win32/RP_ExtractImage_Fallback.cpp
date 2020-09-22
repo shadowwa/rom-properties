@@ -3,39 +3,21 @@
  * RP_ExtractImage_Fallback.cpp: IExtractImage implementation.             *
  * Fallback functions for unsupported files.                               *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #include "stdafx.h"
 #include "RP_ExtractImage.hpp"
 #include "RP_ExtractImage_p.hpp"
 
-// librpbase
-#include "librpbase/TextFuncs.hpp"
-#include "librpbase/file/FileSystem.hpp"
+// librpbase, librpfile, libwin32common
 using namespace LibRpBase;
-
-// libwin32common
-#include "libwin32common/RegKey.hpp"
+using namespace LibRpFile;
 using LibWin32Common::RegKey;
 
-// C++ includes.
-#include <string>
-using std::wstring;
+// C++ STL classes.
+using std::tstring;
 
 // COM smart pointer typedefs.
 #ifndef _MSC_VER
@@ -54,19 +36,21 @@ _COM_SMARTPTR_TYPEDEF(IExtractImage, IID_IExtractImage);
 HRESULT RP_ExtractImage_Private::Fallback_int(RegKey &hkey_Assoc, HBITMAP *phBmpImage)
 {
 	// Is RP_Fallback present?
-	RegKey hkey_RP_Fallback(hkey_Assoc, L"RP_Fallback", KEY_READ, false);
+	RegKey hkey_RP_Fallback(hkey_Assoc, _T("RP_Fallback"), KEY_READ, false);
 	if (!hkey_RP_Fallback.isOpen()) {
 		return hkey_RP_Fallback.lOpenRes();
 	}
 
 	// Get the IExtractImage key.
-	wstring clsid_reg = hkey_RP_Fallback.read(L"IExtractImage");
+	const tstring clsid_reg = hkey_RP_Fallback.read(_T("IExtractImage"));
 	if (clsid_reg.empty()) {
 		// No CLSID.
 		return E_FAIL;
 	}
 
-	// Convert the CLSID from the string.
+	// Parse the CLSID string.
+	// TODO: Use IIDFromString() instead to skip ProgID handling?
+	// Reference: https://blogs.msdn.microsoft.com/oldnewthing/20151015-00/?p=91351
 	CLSID clsidExtractImage;
 	HRESULT hr = CLSIDFromString(clsid_reg.c_str(), &clsidExtractImage);
 	if (FAILED(hr)) {
@@ -91,8 +75,7 @@ HRESULT RP_ExtractImage_Private::Fallback_int(RegKey &hkey_Assoc, HBITMAP *phBmp
 	}
 
 	// Load the file.
-	// TODO: Proper string conversion.
-	hr = pPersistFile->Load((LPCOLESTR)this->filename.c_str(), STGM_READ);
+	hr = pPersistFile->Load(U82W_s(this->filename), STGM_READ);
 	if (FAILED(hr)) {
 		// Failed to load the file.
 		return hr;
@@ -110,7 +93,7 @@ HRESULT RP_ExtractImage_Private::Fallback_int(RegKey &hkey_Assoc, HBITMAP *phBmp
 	wchar_t szPathBuffer[MAX_PATH];	// NOTE: Not actually used.
 	DWORD dwPriority = IEIT_PRIORITY_NORMAL;
 	DWORD dwFlags = this->dwFlags;
-	hr = pExtractImage->GetLocation(szPathBuffer, ARRAY_SIZE(szPathBuffer),
+	hr = pExtractImage->GetLocation(szPathBuffer, _countof(szPathBuffer),
 		&dwPriority, &rgSize, dwRecClrDepth, &dwFlags);
 	if (FAILED(hr) && hr != E_PENDING) {
 		// Failed to get the image location.
@@ -141,13 +124,13 @@ HRESULT RP_ExtractImage_Private::Fallback(HBITMAP *phBmpImage)
 	}
 
 	// Open the filetype key in HKCR.
-	RegKey hkey_Assoc(HKEY_CLASSES_ROOT, RP2W_c(file_ext), KEY_READ, false);
+	RegKey hkey_Assoc(HKEY_CLASSES_ROOT, U82T_c(file_ext), KEY_READ, false);
 	if (!hkey_Assoc.isOpen()) {
 		return hkey_Assoc.lOpenRes();
 	}
 
 	// If we have a ProgID, check it first.
-	wstring progID = hkey_Assoc.read(nullptr);
+	const tstring progID = hkey_Assoc.read(nullptr);
 	if (!progID.empty()) {
 		// Custom ProgID is registered.
 		// TODO: Get the correct top-level registry key.

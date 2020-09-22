@@ -1,13 +1,21 @@
 This copy of minizip is based on the updated version maintained
 by Nathan Moinvaziri at https://github.com/nmoinvaz/minizip .
 
-Commit: 18a30653b1eb5e9f96ebc5ec1d93313d229bc731
-Verify decrypted header to detect wrong password for Traditional PKZIP.
+commit 46157039728e4220a4f35388c3a9f7a774e7be3a
+Version 2.10.0
+
+Tag: 2.10.0
 
 The following changes have been made to the original:
 
 - cmake_minimum_required() has been disabled. The project-wide values
   will be used instead.
+
+- Certain compile definitions are exported as part of the libminizip
+  target, since they're needed in order to prevent build errors in
+  other projects.
+
+- mz_os_win32.c: #define FSCTL_GET_REPARSE_POINT if it isn't defined.
 
 - Some other functionality not needed by rom-properties has been disabled.
 

@@ -1,0 +1,163 @@
+/***************************************************************************
+ * ROM Properties Page shell extension. (Win32)                            *
+ * resource.rc: Win32 resource script. (en_US)                             *
+ *                                                                         *
+ * Copyright (c) 2016-2018 by David Korth.                                 *
+ * Copyright (c) 2018 by Null Magic.                                       *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
+ ***************************************************************************/
+
+// UTF-8 encoding
+#pragma code_page(65001)
+
+#include "resource.h"
+
+#define APSTUDIO_HIDDEN_SYMBOLS
+#include <windows.h>
+#include <wingdi.h>
+#include <commctrl.h>
+#include <richedit.h>
+#undef APSTUDIO_HIDDEN_SYMBOLS
+
+/**
+ * Configuration: Image type priorities
+ */
+LANGUAGE LANG_PORTUGUESE, SUBLANG_PORTUGUESE_BRAZILIAN
+IDD_CONFIG_IMAGETYPES DIALOGEX 0, 0, 453, 245
+STYLE DS_3DLOOK | DS_CONTROL | DS_SHELLFONT | WS_CAPTION | WS_VISIBLE | WS_CHILDWINDOW | WS_TABSTOP
+EXSTYLE WS_EX_NOPARENTNOTIFY | WS_EX_CONTROLPARENT
+CAPTION "Dialog"
+FONT 8, "MS Shell Dlg", FW_NORMAL, 0, 0
+BEGIN
+    LTEXT           "Selecione os tipos de imagem que você deseja utilizar em cada sistema como miniatura.\nAs imagens internas ficam contidas dentro de uma ROM.\nImagens externas são recebidas de um banco de dados externo de imagens.", IDC_IMAGETYPES_DESC1, 7, 7, 437, 30, SS_LEFT, WS_EX_LEFT
+    LTEXT           "1 = prioridade mais alta; 2 = prioridade alta; Não = ignorar", IDC_IMAGETYPES_DESC2, 7, 37, 437, 8, SS_LEFT, WS_EX_LEFT 
+    CONTROL         "As imagens de GameCube, Wii, Wii U, Nintendo DS, e Nintendo 3DS\nsão fornecidas por <a href=""http://www.gametdb.com/"">GameTDB</a>.\nAs imagens amiibo são fornecidas pelo <a href=""https://amiibo.life/"">amiibo.life</a>, banco de dados não oficial Amiibo.", IDC_IMAGETYPES_CREDITS, "SysLink", 0x50010000, 7, 214, 437, 24, 0x00000000
+END
+
+/**
+ * Configuration: Systems
+ */
+LANGUAGE LANG_PORTUGUESE, SUBLANG_PORTUGUESE_BRAZILIAN
+IDD_CONFIG_SYSTEMS DIALOGEX 0, 0, 453, 240
+STYLE DS_3DLOOK | DS_CONTROL | DS_SHELLFONT | WS_VISIBLE | WS_CHILDWINDOW | WS_TABSTOP
+EXSTYLE WS_EX_NOPARENTNOTIFY | WS_EX_CONTROLPARENT
+CAPTION "Dialog"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    GROUPBOX        "Game Boy Title Screens", IDC_STATIC, 7, 7, 437, 74
+    LTEXT           "Select the Game Boy model to use for title screens for different types of Game Boy ROM images.", IDC_STATIC, 15, 18, 381, 8
+    LTEXT           "Game Boy:",IDC_STATIC, 15, 30, 80, 9
+    COMBOBOX        IDC_SYSTEMS_DMGTS_DMG, 77, 29, 69, 30, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Super Game Boy:",IDC_STATIC, 15, 45, 80, 9
+    COMBOBOX        IDC_SYSTEMS_DMGTS_SGB, 77, 44, 69, 30, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Game Boy Color:",IDC_STATIC, 15, 60, 80, 9
+    COMBOBOX        IDC_SYSTEMS_DMGTS_CGB, 77, 59, 69, 30, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+END
+
+/**
+ * Configuration: Options
+ */
+LANGUAGE LANG_PORTUGUESE, SUBLANG_PORTUGUESE_BRAZILIAN
+IDD_CONFIG_OPTIONS DIALOGEX 0, 0, 453, 245
+STYLE DS_3DLOOK | DS_CONTROL | DS_SHELLFONT | WS_VISIBLE | WS_CHILDWINDOW | WS_TABSTOP
+EXSTYLE WS_EX_NOPARENTNOTIFY | WS_EX_CONTROLPARENT
+FONT 8, "MS Shell Dlg", FW_NORMAL, 0, 0
+BEGIN
+    GROUPBOX        "&Downloads", IDC_STATIC, 7, 7, 437, 84, BS_GROUPBOX, WS_EX_TRANSPARENT
+    AUTOCHECKBOX    "Habilitar recebimentos de imagem externa.", IDC_EXTIMGDL, 15, 19, 421, 8, 0, WS_EX_TRANSPARENT
+    AUTOCHECKBOX    "Sempre utilizar o ícone interno (se presente) para tamanhos pequenos.", IDC_INTICONSMALL, 15, 33, 421, 8, 0, WS_EX_TRANSPARENT
+    AUTOCHECKBOX    "Recber arte de alta qualidade com miniaturas grandes.\nIsto pode aumentar a utilização de largura de banda.", IDC_HIGHRESDL, 15, 47, 421, 16, BS_MULTILINE, WS_EX_TRANSPARENT
+    AUTOCHECKBOX    "Store cached file origin information using extended attributes.\nThis helps to identify where cached files were downloaded from.", IDC_STOREFILEORIGININFO, 15, 68, 381, 16, BS_MULTILINE, WS_EX_TRANSPARENT
+
+    GROUPBOX        "&Options", IDC_STATIC, 7, 92, 437, 50, BS_GROUPBOX, WS_EX_TRANSPARENT
+    AUTOCHECKBOX    "Show a security overlay icon for ROM images with\n""dangerous"" permissions.", IDC_DANGEROUSPERMISSIONS, 15, 103, 421, 16, BS_MULTILINE, WS_EX_TRANSPARENT
+    AUTOCHECKBOX    "Enable thumbnailing and metadata extraction on network\nfile systems. This may slow down file browsing.", IDC_ENABLETHUMBNAILONNETWORKFS, 15, 120, 421, 16, BS_MULTILINE, WS_EX_TRANSPARENT
+END
+
+/**
+ * Configuration: Thumbnail cache (Windows Vista and later)
+ */
+LANGUAGE LANG_PORTUGUESE, SUBLANG_PORTUGUESE_BRAZILIAN
+IDD_CONFIG_CACHE DIALOGEX 0, 0, 453, 245
+STYLE DS_3DLOOK | DS_CONTROL | DS_SHELLFONT | WS_VISIBLE | WS_CHILDWINDOW | WS_TABSTOP
+EXSTYLE WS_EX_NOPARENTNOTIFY | WS_EX_CONTROLPARENT
+FONT 8, "MS Shell Dlg", FW_NORMAL, 0, 0
+BEGIN
+    LTEXT           "IDC_CACHE_DESCRIPTION (Vista)", IDC_CACHE_DESCRIPTION, 7, 7, 437, 8, SS_LEFT, WS_EX_TRANSPARENT
+    PUSHBUTTON      "Apagar Cachê de Miniaturas de Sistema", IDC_CACHE_CLEAR_SYS_THUMBS, 7, 18, 438, 28, 0, WS_EX_LEFT
+    LTEXT           "A página de rom-properties mantém seu próprio cachê de recebimentos para imagens externas. Apagá-lo forçará imagens externas a serem recebidas novamente.", IDC_STATIC, 7, 53, 437, 17, SS_LEFT, WS_EX_TRANSPARENT
+    PUSHBUTTON      "Apagar a página de recebimento de cacê de rom-properties", IDC_CACHE_CLEAR_RP_DL, 7, 73, 438, 28, 0, WS_EX_LEFT
+    LTEXT           "Apagando cachê...", IDC_CACHE_STATUS, 7, 196, 437, 9, NOT WS_VISIBLE | SS_LEFT, WS_EX_LEFT
+    CONTROL         "", IDC_CACHE_PROGRESS, PROGRESS_CLASS, NOT WS_VISIBLE, 7, 207, 437, 16, WS_EX_LEFT
+END
+
+/**
+ * Configuration: Thumbnail cache (Windows XP and earlier)
+ */
+LANGUAGE LANG_PORTUGUESE, SUBLANG_PORTUGUESE_BRAZILIAN
+IDD_CONFIG_CACHE_XP DIALOGEX 0, 0, 453, 245
+STYLE DS_3DLOOK | DS_CONTROL | DS_SHELLFONT | WS_VISIBLE | WS_CHILDWINDOW | WS_TABSTOP
+EXSTYLE WS_EX_NOPARENTNOTIFY | WS_EX_CONTROLPARENT
+FONT 8, "MS Shell Dlg", FW_NORMAL, 0, 0
+BEGIN
+    LTEXT           "IDC_CACHE_DESCRIPTION (XP)", IDC_CACHE_DESCRIPTION, 7, 7, 437, 25, SS_LEFT, WS_EX_TRANSPARENT
+    AUTORADIOBUTTON "Encontrar todos os arquivos Thumbs.db nos drives especificados:", IDC_CACHE_XP_FIND_DRIVES, 7, 35, 220, 8, WS_GROUP, WS_EX_LEFT
+    AUTORADIOBUTTON "Especificar caminho", IDC_CACHE_XP_FIND_PATH, 232, 35, 81, 8, 0, WS_EX_LEFT
+    CONTROL         "", IDC_CACHE_XP_DRIVES, WC_LISTVIEW, WS_TABSTOP | WS_BORDER | LVS_ALIGNLEFT | LVS_LIST | LVS_SINGLESEL, 7, 46, 437, 45, WS_EX_LEFT | WS_EX_CLIENTEDGE
+    EDITTEXT        IDC_CACHE_XP_PATH, 7, 46, 383, 14, NOT WS_VISIBLE | ES_AUTOHSCROLL, WS_EX_LEFT
+    PUSHBUTTON      "Procurar...", IDC_CACHE_XP_BROWSE, 395, 45, 50, 15, NOT WS_VISIBLE, WS_EX_LEFT
+    PUSHBUTTON      "Localizar e remover arquivos Thumbs.db", IDC_CACHE_XP_CLEAR_SYS_THUMBS, 7, 95, 438, 20, WS_DISABLED | BS_MULTILINE, WS_EX_LEFT
+    LTEXT           "A página do rom-properties mantém seu próprio cachê de recebimentos de imagens externas. Limpar o cachê forçará as imagens externas a serem recebidas novamente.", IDC_STATIC, 7, 125, 353, 20, SS_LEFT, WS_EX_TRANSPARENT
+    PUSHBUTTON      "Apagar", IDC_CACHE_CLEAR_RP_DL, 363, 127, 82, 15, 0, WS_EX_LEFT
+    LTEXT           "Apagando o cachê...", IDC_CACHE_STATUS, 7, 196, 437, 9, NOT WS_VISIBLE | SS_LEFT, WS_EX_LEFT
+    CONTROL         "", IDC_CACHE_PROGRESS, PROGRESS_CLASS, NOT WS_VISIBLE, 7, 207, 437, 16, WS_EX_LEFT
+END
+
+#ifdef ENABLE_DECRYPTION
+/**
+ * Configuration: Key Manager
+ */
+LANGUAGE LANG_PORTUGUESE, SUBLANG_PORTUGUESE_BRAZILIAN
+IDD_CONFIG_KEYMANAGER DIALOGEX 0, 0, 453, 245
+STYLE DS_3DLOOK | DS_CONTROL | DS_SHELLFONT | WS_VISIBLE | WS_CHILDWINDOW | WS_TABSTOP
+EXSTYLE WS_EX_NOPARENTNOTIFY | WS_EX_CONTROLPARENT
+FONT 8, "MS Shell Dlg", FW_NORMAL, 0, 0
+BEGIN
+    CONTROL         "", IDC_KEYMANAGER_LIST, WC_LISTVIEW, WS_TABSTOP | WS_BORDER | LVS_ALIGNLEFT | LVS_REPORT | LVS_OWNERDATA | LVS_SINGLESEL, 7, 7, 437, 213, WS_EX_LEFT | WS_EX_CLIENTEDGE
+    // EDIT control is created as a child control of the ListView.
+    //EDITTEXT        IDC_KEYMANAGER_EDIT, 0, 0, 0, 0, NOT WS_VISIBLE | ES_AUTOHSCROLL | ES_WANTRETURN, WS_EX_LEFT
+    PUSHBUTTON      "I&mportar", IDC_KEYMANAGER_IMPORT, 7, 224, 50, 14, 0, WS_EX_LEFT
+END
+
+/**
+ * Configuration: Key Manager ("Import" popup menu)
+ */
+LANGUAGE LANG_PORTUGUESE, SUBLANG_PORTUGUESE_BRAZILIAN
+IDR_KEYMANAGER_IMPORT MENU
+BEGIN
+    POPUP "Importar"
+    BEGIN
+        MENUITEM "Wii keys.bin", IDM_KEYMANAGER_IMPORT_WII_KEYS_BIN
+        MENUITEM "Wii U otp.bin", IDM_KEYMANAGER_IMPORT_WIIU_OTP_BIN
+        MENUITEM "3DS boot9.bin", IDM_KEYMANAGER_IMPORT_3DS_BOOT9_BIN
+        MENUITEM "3DS aeskeydb.bin", IDM_KEYMANAGER_IMPORT_3DS_AESKEYDB
+    END
+END
+#endif /* ENABLE_DECRYPTION */
+
+/**
+ * Configuration: About
+ */
+LANGUAGE LANG_PORTUGUESE, SUBLANG_PORTUGUESE_BRAZILIAN
+IDD_CONFIG_ABOUT DIALOGEX 0, 0, 453, 245
+STYLE DS_3DLOOK | DS_CONTROL | DS_SHELLFONT | WS_VISIBLE | WS_CHILDWINDOW | WS_TABSTOP
+EXSTYLE WS_EX_NOPARENTNOTIFY | WS_EX_CONTROLPARENT
+FONT 8, "MS Shell Dlg", FW_NORMAL, 0, 0
+BEGIN
+    CONTROL         "", IDC_ABOUT_ICON, WC_STATIC, SS_ICON, 7, 7, 16, 16, WS_EX_LEFT
+    CTEXT           "Página de propriedades da ROM", IDC_ABOUT_LINE1, 7, 7, 438, 9, SS_CENTER, WS_EX_LEFT
+    CTEXT           "Extensão Shell", IDC_ABOUT_LINE2, 7, 16, 438, 9, SS_CENTER, WS_EX_LEFT
+    CTEXT           "", IDC_ABOUT_VERSION, 7, 28, 438, 32, SS_CENTER, WS_EX_LEFT
+    CONTROL         "", IDC_ABOUT_TABCONTROL, WC_TABCONTROL, 0, 7, 63, 438, 168, WS_EX_LEFT
+    CONTROL         "", IDC_ABOUT_RICHEDIT, RICHEDIT_CLASS, WS_TABSTOP | WS_BORDER | ES_MULTILINE | ES_READONLY | WS_VSCROLL | ES_AUTOVSCROLL, 14, 84, 366, 140, WS_EX_LEFT | WS_EX_NOPARENTNOTIFY | WS_EX_TRANSPARENT
+END

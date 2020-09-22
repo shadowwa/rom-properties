@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * Cdrom2352Reader.hpp: CD-ROM reader for 2352-byte sector images.         *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 /**
@@ -25,28 +12,20 @@
  * - https://github.com/Karlson2k/libcdio-k2k/blob/master/include/cdio/sector.h
  */
 
+#include "stdafx.h"
 #include "Cdrom2352Reader.hpp"
 #include "librpbase/disc/SparseDiscReader_p.hpp"
 #include "../cdrom_structs.h"
 
-// librpbase
-#include "librpbase/byteswap.h"
-#include "librpbase/file/IRpFile.hpp"
+// librpbase, librpfile
 using namespace LibRpBase;
-
-// C includes.
-#include <stdlib.h>
-
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cerrno>
-#include <cstring>
+using LibRpFile::IRpFile;
 
 namespace LibRomData {
 
 class Cdrom2352ReaderPrivate : public SparseDiscReaderPrivate {
 	public:
-		Cdrom2352ReaderPrivate(Cdrom2352Reader *q, IRpFile *file);
+		Cdrom2352ReaderPrivate(Cdrom2352Reader *q);
 
 	private:
 		typedef SparseDiscReaderPrivate super;
@@ -69,41 +48,41 @@ class Cdrom2352ReaderPrivate : public SparseDiscReaderPrivate {
 const uint8_t Cdrom2352ReaderPrivate::CDROM_2352_MAGIC[12] =
 	{0x00,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x00};
 
-Cdrom2352ReaderPrivate::Cdrom2352ReaderPrivate(Cdrom2352Reader *q, IRpFile *file)
-	: super(q, file)
+Cdrom2352ReaderPrivate::Cdrom2352ReaderPrivate(Cdrom2352Reader *q)
+	: super(q)
 	, blockCount(0)
+{ }
+
+/** Cdrom2352Reader **/
+
+Cdrom2352Reader::Cdrom2352Reader(IRpFile *file)
+	: super(new Cdrom2352ReaderPrivate(this), file)
 {
-	if (!this->file) {
-		// File could not be dup()'d.
+	if (!m_file) {
+		// File could not be ref()'d.
 		return;
 	}
 
 	// Check the disc size.
 	// Should be a multiple of 2352.
-	int64_t fileSize = file->size();
+	const off64_t fileSize = m_file->size();
 	if (fileSize <= 0 || fileSize % 2352 != 0) {
 		// Invalid disc size.
-		delete this->file;
-		this->file = nullptr;
-		q->m_lastError = EIO;
+		UNREF_AND_NULL_NOCHK(m_file);
+		m_lastError = EIO;
 		return;
 	}
 
 	// Disc parameters.
-	// TODO: 64-bit block count?
-	blockCount = (unsigned int)(fileSize / 2352);
-	block_size = 2048;
-	disc_size = fileSize / 2352 * 2048;
+	// NOTE: A 32-bit block count allows for ~8 TiB with 2048-byte sectors.
+	RP_D(Cdrom2352Reader);
+	d->blockCount = static_cast<unsigned int>(fileSize / 2352);
+	d->block_size = 2048;
+	d->disc_size = fileSize / 2352 * 2048;
 
 	// Reset the disc position.
-	pos = 0;
+	d->pos = 0;
 }
-
-/** Cdrom2352Reader **/
-
-Cdrom2352Reader::Cdrom2352Reader(IRpFile *file)
-	: super(new Cdrom2352ReaderPrivate(this, file))
-{ }
 
 /**
  * Is a disc image supported by this class?
@@ -144,18 +123,33 @@ int Cdrom2352Reader::isDiscSupported(const uint8_t *pHeader, size_t szHeader) co
 /** SparseDiscReader functions. **/
 
 /**
+ * Get the physical address of the specified logical block index.
+ *
+ * @param blockIdx	[in] Block index.
+ * @return Physical address. (0 == empty block; -1 == invalid block index)
+ */
+off64_t Cdrom2352Reader::getPhysBlockAddr(uint32_t blockIdx) const
+{
+	// NOTE: This function should NOT be used.
+	// Use the readBlock() function instead.
+	RP_UNUSED(blockIdx);
+	assert(!"Cdrom2352Reader::getPhysBlockAddr() should not be used!");
+	return -1;
+}
+
+/**
  * Read the specified block.
  *
  * This can read either a full block or a partial block.
  * For a full block, set pos = 0 and size = block_size.
  *
  * @param blockIdx	[in] Block index.
- * @param ptr		[out] Output data buffer.
  * @param pos		[in] Starting position. (Must be >= 0 and <= the block size!)
+ * @param ptr		[out] Output data buffer.
  * @param size		[in] Amount of data to read, in bytes. (Must be <= the block size!)
  * @return Number of bytes read, or -1 if the block index is invalid.
  */
-int Cdrom2352Reader::readBlock(uint32_t blockIdx, void *ptr, int pos, size_t size)
+int Cdrom2352Reader::readBlock(uint32_t blockIdx, int pos, void *ptr, size_t size)
 {
 	// Read 'size' bytes of block 'blockIdx', starting at 'pos'.
 	// NOTE: This can only be called by SparseDiscReader,
@@ -163,13 +157,9 @@ int Cdrom2352Reader::readBlock(uint32_t blockIdx, void *ptr, int pos, size_t siz
 	RP_D(Cdrom2352Reader);
 	assert(pos >= 0 && pos < (int)d->block_size);
 	assert(size <= d->block_size);
-	assert(blockIdx < d->blockCount);
 	// TODO: Make sure overflow doesn't occur.
-	assert((int64_t)(pos + size) <= (int64_t)d->block_size);
-	if (pos < 0 || pos >= (int)d->block_size || size > d->block_size ||
-	    (int64_t)(pos + size) > (int64_t)d->block_size ||
-	    blockIdx >= d->blockCount)
-	{
+	assert(static_cast<off64_t>(pos + size) <= static_cast<off64_t>(d->block_size));
+	if (pos < 0 || static_cast<off64_t>(pos + size) > static_cast<off64_t>(d->block_size)) {
 		// pos+size is out of range.
 		return -1;
 	}
@@ -179,13 +169,25 @@ int Cdrom2352Reader::readBlock(uint32_t blockIdx, void *ptr, int pos, size_t siz
 		return 0;
 	}
 
-	// Go to the block.
-	// FIXME: Read the whole block so we can determine if this is Mode1 or Mode2.
-	// Mode1 data starts at byte 16; Mode2 data starts at byte 24.
-	const int64_t phys_pos = ((int64_t)blockIdx * d->physBlockSize) + 16 + pos;
-	size_t sz_read = d->file->seekAndRead(phys_pos, ptr, size);
-	m_lastError = d->file->lastError();
-	return (sz_read > 0 ? (int)sz_read : -1);
+	// Get the physical address first.
+	const off64_t physBlockAddr = static_cast<off64_t>(blockIdx) * d->physBlockSize;
+
+	// Read from the block.
+	// NOTE: We need to read the entire 2352-byte block in order to
+	// determine the data offset, since Mode 1 and Mode 2 XA have different
+	// sector layouts.
+	CDROM_2352_Sector_t sector;
+	size_t sz_read = m_file->seekAndRead(physBlockAddr, &sector, sizeof(sector));
+	m_lastError = m_file->lastError();
+	if (sz_read != sizeof(sector)) {
+		// Read error.
+		return -1;
+	}
+
+	// NOTE: Sector user data area position depends on the sector mode.
+	const uint8_t *const data = cdromSectorDataPtr(&sector);
+	memcpy(ptr, &data[pos], size);
+	return size;
 }
 
 }

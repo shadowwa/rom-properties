@@ -2,29 +2,12 @@
  * ROM Properties Page shell extension. (Win32)                            *
  * stdafx.h: Common definitions and includes for COM.                      *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_WIN32_STDAFX_H__
 #define __ROMPROPERTIES_WIN32_STDAFX_H__
-
-#ifndef _WIN32
-#error stdafx.h is Windows only.
-#endif
 
 // Make sure STRICT is defined for better type safety.
 #ifndef STRICT
@@ -35,90 +18,114 @@
 #include "libwin32common/RpWin32_sdk.h"
 #include <windows.h>
 
+#if _WIN32_WINNT < 0x0600
+# error Windows Vista SDK or later is required.
+#endif
+
 // Typesafe inline function wrappers for some Windows headers.
 #include "libwin32common/sdk/windowsx_ts.h"
 #include "libwin32common/sdk/commctrl_ts.h"
 
 // Additional Windows headers.
 #include <olectl.h>
-#include <shlobj.h>
 #include <shellapi.h>
 #include <shlwapi.h>
-#include <comdef.h>
-#include <shlwapi.h>
 #include <commdlg.h>
+#include <objidl.h>
+
+// FIXME: shlobj.h on MinGW-w64 on AppVeyor doesn't properly inline a few
+// functions when building in C mode, resulting in multiple definition errors.
+// C:/mingw-w64/x86_64-7.2.0-posix-seh-rt_v5-rev1
+// - FreeIDListArray
+// - FreeKnownFolderDefinitionFields
+// - IDListContainerIsConsistent
+#if defined(_MSC_VER) || defined(__cplusplus)
+# include <shlobj.h>
+#endif /* _MSC_VER || __cplusplus */
+
+// Native COM support. (C++ only!)
+#ifdef __cplusplus
+# include <comdef.h>
+#endif
 
 // IEmptyVolumeCache and related.
 #include <emptyvc.h>
 
-// Windows Terminal Services. (Remote Desktop)
-#include <wtsapi32.h>
+// Common Controls COM declarations.
+#include <commoncontrols.h>
 
-/** Windows Vista functionality. **/
-// These aren't available in the Windows headers unless
-// _WIN32_WINNT >= 0x0600.
-#if _WIN32_WINNT < 0x0600
+/** C/C++ headers **/
 
-#ifndef PBM_SETSTATE
-#define PBM_SETSTATE            (WM_USER+16) // wParam = PBST_[State] (NORMAL, ERROR, PAUSED)
-#endif
-#ifndef PBM_GETSTATE
-#define PBM_GETSTATE            (WM_USER+17)
-#endif
+#ifdef __cplusplus
+/** C++ **/
 
-#ifndef PBST_NORMAL
-#define PBST_NORMAL             0x0001
-#endif
-#ifndef PBST_ERROR
-#define PBST_ERROR              0x0002
-#endif
-#ifndef PBST_PAUSED
-#define PBST_PAUSED             0x0003
-#endif
+// C includes. (C++ namespace)
+#include <cassert>
+#include <cstdio>
+#include <cstring>
+#include <stdlib.h>
+#include <stdint.h>
 
-// Split buttons. (for buttons with dropdown menus)
-#ifndef BS_SPLITBUTTON
-#define BS_SPLITBUTTON	0x0000000CL
-#endif
-#ifndef BCSIF_GLYPH
-#define BCSIF_GLYPH	0x0001
-#endif
-#ifndef BCSIF_IMAGE
-#define BCSIF_IMAGE	0x0002
-#endif
-#ifndef BCSIF_STYLE
-#define BCSIF_STYLE	0x0004
-#endif
-#ifndef BCSIF_SIZE
-#define BCSIF_SIZE	0x0008
-#endif
-#ifndef BCSS_NOSPLIT
-#define BCSS_NOSPLIT	0x0001
-#endif
-#ifndef BCSS_STRETCH
-#define BCSS_STRETCH	0x0002
-#endif
-#ifndef BCSS_ALIGNLEFT
-#define BCSS_ALIGNLEFT	0x0004
-#endif
-#ifndef BCSS_IMAGE
-#define BCSS_IMAGE	0x0008
-#endif
-#ifndef BCM_SETSPLITINFO
-#define BCM_SETSPLITINFO         (BCM_FIRST + 0x0007)
-#define Button_SetSplitInfo(hwnd, pInfo) \
-    (BOOL)SNDMSG((hwnd), BCM_SETSPLITINFO, 0, (LPARAM)(pInfo))
-#define BCM_GETSPLITINFO         (BCM_FIRST + 0x0008)
-#define Button_GetSplitInfo(hwnd, pInfo) \
-    (BOOL)SNDMSG((hwnd), BCM_GETSPLITINFO, 0, (LPARAM)(pInfo))
-typedef struct tagBUTTON_SPLITINFO {
-	UINT        mask;
-	HIMAGELIST  himlGlyph;
-	UINT        uSplitStyle;
-	SIZE        size;
-} BUTTON_SPLITINFO, *PBUTTON_SPLITINFO;
-#endif
+// C++ includes.
+#include <algorithm>
+#include <array>
+#include <list>
+#include <memory>
+#include <numeric>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
-#endif /* _WIN32_WINNT < 0x0600 */
+#else /* !__cplusplus */
+/** C **/
+
+// C includes.
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#endif /* __cplusplus */
+
+// libwin32common C headers
+#include "libwin32common/HiDPI.h"
+#include "libwin32common/w32time.h"
+#include "libwin32common/sdk/GUID_fn.h"
+
+#ifdef __cplusplus
+// libwin32common C++ headers
+#include "libwin32common/ComBase.hpp"
+#include "libwin32common/RegKey.hpp"
+#include "libwin32common/WinUI.hpp"
+#include "libwin32common/WTSSessionNotification.hpp"
+#endif /* __cplusplus */
+
+// libi18n
+#include "libi18n/i18n.h"
+
+// librpbase common headers
+#include "common.h"
+
+#ifdef __cplusplus
+// librpbase C++ headers
+#include "librpbase/RomData.hpp"
+#include "librpbase/TextFuncs.hpp"
+#include "librpbase/TextFuncs_wchar.hpp"
+#include "librpbase/config/Config.hpp"
+
+// librpfile C++ headers
+#include "librpfile/IRpFile.hpp"
+#include "librpfile/RpFile.hpp"
+#include "librpfile/FileSystem.hpp"
+
+// librptexture C++ headers
+#include "librptexture/img/rp_image.hpp"
+
+// libromdata C++ headers
+#include "libromdata/RomDataFactory.hpp"
+#endif /* __cplusplus */
 
 #endif /* __ROMPROPERTIES_WIN32_STDAFX_H__ */

@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (libromdata/tests)                 *
  * FstPrint.cpp: FST printer.                                              *
  *                                                                         *
- * Copyright (c) 2016 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2018 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #include "FstPrint.hpp"
@@ -24,6 +11,7 @@
 // librpbase
 #include "librpbase/TextFuncs.hpp"
 #include "librpbase/disc/IFst.hpp"
+#include "libi18n/i18n.h"
 using namespace LibRpBase;
 
 // C includes.
@@ -32,12 +20,17 @@ using namespace LibRpBase;
 #if defined(_MSC_VER) && _MSC_VER < 1700
 // MSVC 2012 added inttypes.h.
 // Older versions don't have it.
-#define PRIu64 "I64u"
-#define PRIX64 "I64X"
+# define PRIu64 "I64u"
+# define PRIX64 "I64X"
+# define PRId64 "I64d"
 #else
-#define __STDC_FORMAT_MACROS
-#include <inttypes.h>
+# define __STDC_FORMAT_MACROS
+# include <inttypes.h>
 #endif
+
+// C includes. (C++ namespace)
+#include <cerrno>
+#include <cstdio>
 
 // C++ includes.
 #include <iomanip>
@@ -45,11 +38,17 @@ using namespace LibRpBase;
 #include <string>
 #include <vector>
 using std::ostream;
+using std::ostringstream;
 using std::setw;
 using std::string;
 using std::vector;
 
 namespace LibRomData {
+
+struct FstFileCount {
+	unsigned int dirs;
+	unsigned int files;
+};
 
 /**
  * Print an FST to an ostream.
@@ -117,7 +116,7 @@ static int fstPrint(IFst *fst, ostream &os, const string &path,
 
 			// Check if any more entries are present.
 			dirent = fst->readdir(dirp);
-			tree_lines.push_back(dirent ? 1 : 0);
+			tree_lines.emplace_back(dirent ? 1 : 0);
 
 			// Tree line for the directory entry.
 			if (dirent) {
@@ -153,7 +152,7 @@ static int fstPrint(IFst *fst, ostream &os, const string &path,
 			// - Attrs should start at column 40.
 			// TODO: Handle full-width and non-BMP Unicode characters correctly.
 			const int tree_name_length = ((level+1)*4) + 1 +
-					(int)rp_string_to_utf16(name).size();
+					static_cast<int>(utf8_to_utf16(name).size());
 			int attr_spaces;
 			if (tree_name_length < 40) {
 				// Pad it to 40 columns.
@@ -164,8 +163,8 @@ static int fstPrint(IFst *fst, ostream &os, const string &path,
 			}
 
 			// Print the attributes. (address, size)
-			char attrs[48];
-			snprintf(attrs, sizeof(attrs), "[addr:0x%08" PRIX64 ", size:%" PRIu64 "]",
+			char attrs[64];
+			snprintf(attrs, sizeof(attrs), "[addr:0x%08" PRIX64 ", size:%" PRId64 "]",
 				 dirent->offset, dirent->size);
 
 			// Check if any more entries are present.
@@ -193,38 +192,38 @@ static int fstPrint(IFst *fst, ostream &os, const string &path,
  * Print an FST to an ostream.
  * @param fst	[in] FST to print.
  * @param os	[in,out] ostream.
- * @param fc	[out,opt] Pointer to FstFileCount struct.
- *
- * If fc is nullptr, file count is printed to os.
- * Otherwise, file count is stored in fc.
  *
  * @return 0 on success; negative POSIX error code on error.
  */
-int fstPrint(IFst *fst, ostream &os, FstFileCount *fc)
+int fstPrint(IFst *fst, ostream &os)
 {
 	if (!fst) {
 		// Invalid parameters.
 		return -EINVAL;
 	}
 
-	std::vector<uint8_t> tree_lines;
+	vector<uint8_t> tree_lines;
 	tree_lines.reserve(16);
 
-	FstFileCount fc_tmp = {0, 0};
-	int ret = fstPrint(fst, os, "/", 0, tree_lines, fc_tmp);
+	FstFileCount fc = {0, 0};
+	int ret = fstPrint(fst, os, "/", 0, tree_lines, fc);
 	if (ret != 0) {
 		return ret;
 	}
 
-	if (fc) {
-		// Return the file count.
-		*fc = fc_tmp;
-	} else {
-		// Print the file count.
-		os << '\n' <<
-			fc_tmp.dirs << ' ' << (fc_tmp.dirs == 1 ? "directory" : "directories") << ", " <<
-			fc_tmp.files << ' ' << (fc_tmp.files == 1 ? "file" : "files") << '\n';
-	}
+	// Print the file count.
+	// NOTE: Formatting numbers using ostringstream() because
+	// MSVC's printf() doesn't support thousands separators.
+	// TODO: CMake checks?
+	ostringstream dircount, filecount;
+	dircount << fc.dirs;
+	filecount << fc.files;
+
+	os << '\n' <<
+		// tr: Parameter is a number; it's formatted elsewhere.
+		rp_sprintf(NC_("FstPrint", "%s directory", "%s directories", fc.dirs), dircount.str().c_str()) << ", " <<
+		// tr: Parameter is a number; it's formatted elsewhere.
+		rp_sprintf(NC_("FstPrint", "%s file", "%s files", fc.files), filecount.str().c_str()) << '\n';
 
 	os.flush();
 	return 0;

@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * NCCHReader.hpp: Nintendo 3DS NCCH reader.                               *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBROMDATA_DISC_NCCHREADER_HPP__
@@ -28,12 +15,9 @@
 #include "librpbase/disc/IPartition.hpp"
 #include "librpbase/crypto/KeyManager.hpp"
 
-namespace LibRpBase {
-	class IRpFile;
-	class IDiscReader;
-}
-
 namespace LibRomData {
+
+class CIAReader;
 
 class NCCHReaderPrivate;
 class NCCHReader : public LibRpBase::IPartition
@@ -50,26 +34,27 @@ class NCCHReader : public LibRpBase::IPartition
 		 * @param ncch_offset		[in] NCCH start offset, in bytes.
 		 * @param ncch_length		[in] NCCH length, in bytes.
 		 */
-		NCCHReader(LibRpBase::IRpFile *file,
+		NCCHReader(LibRpFile::IRpFile *file,
 			uint8_t media_unit_shift,
-			int64_t ncch_offset, uint32_t ncch_length);
+			off64_t ncch_offset, uint32_t ncch_length);
 
 		/**
-		 * Construct an NCCHReader with the specified IDiscReader.
+		 * Construct an NCCHReader with the specified CIAReader.
 		 *
-		 * NOTE: The NCCHReader *takes ownership* of the IDiscReader.
+		 * NOTE: The NCCHReader *takes ownership* of the CIAReader.
 		 * This makes it easier to create a temporary CIAReader
 		 * without worrying about keeping track of it.
 		 *
-		 * @param discReader		[in] IDiscReader. (for CCIs or CIAs)
+		 * @param ciaReader		[in] CIAReader. (for CIAs only)
 		 * @param media_unit_shift	[in] Media unit shift.
 		 * @param ncch_offset		[in] NCCH start offset, in bytes.
 		 * @param ncch_length		[in] NCCH length, in bytes.
 		 */
-		NCCHReader(LibRpBase::IDiscReader *discReader,
+		NCCHReader(CIAReader *ciaReader,
 			uint8_t media_unit_shift,
-			int64_t ncch_offset, uint32_t ncch_length);
-		virtual ~NCCHReader();
+			off64_t ncch_offset, uint32_t ncch_length);
+	protected:
+		virtual ~NCCHReader();	// call unref() instead
 
 	private:
 		typedef IPartition super;
@@ -83,37 +68,26 @@ class NCCHReader : public LibRpBase::IPartition
 		/** IDiscReader **/
 
 		/**
-		 * Is the partition open?
-		 * This usually only returns false if an error occurred.
-		 * @return True if the partition is open; false if it isn't.
-		 */
-		virtual bool isOpen(void) const override final;
-
-		/**
 		 * Read data from the partition.
 		 * @param ptr Output data buffer.
 		 * @param size Amount of data to read, in bytes.
 		 * @return Number of bytes read.
 		 */
-		virtual size_t read(void *ptr, size_t size) override final;
+		ATTR_ACCESS_SIZE(write_only, 2, 3)
+		size_t read(void *ptr, size_t size) final;
 
 		/**
 		 * Set the partition position.
 		 * @param pos Partition position.
 		 * @return 0 on success; -1 on error.
 		 */
-		virtual int seek(int64_t pos) override final;
-
-		/**
-		 * Seek to the beginning of the partition.
-		 */
-		virtual void rewind(void) override final;
+		int seek(off64_t pos) final;
 
 		/**
 		 * Get the partition position.
 		 * @return Partition position on success; -1 on error.
 		 */
-		virtual int64_t tell(void) override final;
+		off64_t tell(void) final;
 
 		/**
 		 * Get the data size.
@@ -121,7 +95,7 @@ class NCCHReader : public LibRpBase::IPartition
 		 * and it's adjusted to exclude hashes.
 		 * @return Data size, or -1 on error.
 		 */
-		virtual int64_t size(void) override final;
+		off64_t size(void) final;
 
 	public:
 		/** IPartition **/
@@ -131,7 +105,7 @@ class NCCHReader : public LibRpBase::IPartition
 		 * This size includes the partition header and hashes.
 		 * @return Partition size, or -1 on error.
 		 */
-		virtual int64_t partition_size(void) const override final;
+		off64_t partition_size(void) const final;
 
 		/**
 		 * Get the used partition size.
@@ -139,7 +113,7 @@ class NCCHReader : public LibRpBase::IPartition
 		 * but does not include "empty" sectors.
 		 * @return Used partition size, or -1 on error.
 		 */
-		virtual int64_t partition_size_used(void) const override final;
+		off64_t partition_size_used(void) const final;
 
 	public:
 		/** NCCHReader **/
@@ -193,6 +167,14 @@ class NCCHReader : public LibRpBase::IPartition
 		 */
 		LibRpBase::KeyManager::VerifyResult verifyResult(void) const;
 
+#ifdef ENABLE_DECRYPTION
+		/**
+		 * Are we using debug keys?
+		 * @return True if using debug keys; false if not.
+		 */
+		bool isDebug(void) const;
+#endif /* ENABLE_DECRYPTION */
+
 		/**
 		 * Get the content type as a string.
 		 * @return Content type, or nullptr on error.
@@ -208,7 +190,7 @@ class NCCHReader : public LibRpBase::IPartition
 		 * @param filename Filename. (ASCII)
 		 * @return IRpFile*, or nullptr on error.
 		 */
-		LibRpBase::IRpFile *open(int section, const char *filename);
+		LibRpFile::IRpFile *open(int section, const char *filename);
 
 		/**
 		 * Open the logo section.
@@ -218,7 +200,7 @@ class NCCHReader : public LibRpBase::IPartition
 		 *
 		 * @return IRpFile*, or nullptr on error.
 		 */
-		LibRpBase::IRpFile *openLogo(void);
+		LibRpFile::IRpFile *openLogo(void);
 };
 
 }

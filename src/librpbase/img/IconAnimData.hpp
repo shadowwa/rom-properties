@@ -3,24 +3,14 @@
  * IconAnimData.hpp: Icon animation data.                                  *
  *                                                                         *
  * Copyright (c) 2016 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBRPBASE_IMG_ICONANIMDATA_HPP__
 #define __ROMPROPERTIES_LIBRPBASE_IMG_ICONANIMDATA_HPP__
+
+#include "common.h"
+#include "RefBase.hpp"
 
 // C includes.
 #include <stdint.h>
@@ -29,14 +19,16 @@
 #include <cstring>
 
 // C++ includes.
+#include <algorithm>
 #include <array>
 #include <cstdio>
 
+// librptexture
+#include "librptexture/img/rp_image.hpp"
+
 namespace LibRpBase {
 
-class rp_image;
-
-struct IconAnimData
+struct IconAnimData : public RefBase
 {
 	static const int MAX_FRAMES = 64;
 	static const int MAX_SEQUENCE = 64;
@@ -67,7 +59,9 @@ struct IconAnimData
 	// how many frames are actually here.
 	// NOTE: Frames may be nullptr, in which case
 	// the previous frame should be used.
-	std::array<const rp_image*, MAX_FRAMES> frames;
+	// NOTE 2: Frames stored here must be ref()'d.
+	// They will be automatically unref()'d in the destructor.
+	std::array<LibRpTexture::rp_image*, MAX_FRAMES> frames;
 
 	IconAnimData()
 		: count(0)
@@ -80,6 +74,43 @@ struct IconAnimData
 		// so create a dummy struct.
 		static const delay_t zero_delay = {0, 0, 0};
 		delays.fill(zero_delay);
+	}
+
+protected:
+	~IconAnimData()	// call unref() instead
+	{
+		std::for_each(frames.begin(), frames.end(),
+			[](LibRpTexture::rp_image *img) {
+				UNREF(img);
+			}
+		);
+	}
+
+private:
+	RP_DISABLE_COPY(IconAnimData);
+
+public:
+	inline IconAnimData *ref(void)
+	{
+		return RefBase::ref<IconAnimData>();
+	}
+
+	/**
+	 * Special case unref() function to allow
+	 * const IconAnimData* to be ref'd.
+	 */
+	inline const IconAnimData *ref(void) const
+	{
+		return const_cast<IconAnimData*>(this)->RefBase::ref<IconAnimData>();
+	}
+
+	/**
+	 * Special case unref() function to allow
+	 * const IconAnimData* to be unref'd.
+	 */
+	inline void unref(void) const
+	{
+		const_cast<IconAnimData*>(this)->RefBase::unref();
 	}
 };
 

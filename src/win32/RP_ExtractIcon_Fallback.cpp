@@ -3,41 +3,21 @@
  * RP_ExtractIcon_Fallback.cpp: IExtractIcon implementation.               *
  * Fallback functions for unsupported files.                               *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #include "stdafx.h"
 #include "RP_ExtractIcon.hpp"
 #include "RP_ExtractIcon_p.hpp"
 
-// librpbase
-#include "librpbase/TextFuncs.hpp"
-#include "librpbase/file/FileSystem.hpp"
+// librpbase, librpfile, libwin32common
 using namespace LibRpBase;
-
-// libwin32common
-#include "libwin32common/RegKey.hpp"
+using namespace LibRpFile;
 using LibWin32Common::RegKey;
 
-// C++ includes.
-#include <memory>
-#include <string>
-using std::unique_ptr;
-using std::wstring;
+// C++ STL classes.
+using std::tstring;
 
 // COM smart pointer typedefs.
 #ifndef _MSC_VER
@@ -66,8 +46,7 @@ LONG RP_ExtractIcon_Private::DoExtractIconW(IExtractIconW *pExtractIconW,
 	}
 
 	// Load the file.
-	// TODO: Proper string conversion.
-	hr = pPersistFile->Load((LPCOLESTR)this->filename.c_str(), STGM_READ);
+	hr = pPersistFile->Load(U82W_s(this->filename), STGM_READ);
 	if (FAILED(hr)) {
 		// Failed to load the file.
 		return ERROR_FILE_NOT_FOUND;
@@ -78,7 +57,7 @@ LONG RP_ExtractIcon_Private::DoExtractIconW(IExtractIconW *pExtractIconW,
 	int nIconIndex;
 	UINT wFlags;
 	// TODO: Handle S_FALSE with GIL_DEFAULTICON?
-	hr = pExtractIconW->GetIconLocation(0, szIconFileW, ARRAY_SIZE(szIconFileW), &nIconIndex, &wFlags);
+	hr = pExtractIconW->GetIconLocation(0, szIconFileW, _countof(szIconFileW), &nIconIndex, &wFlags);
 	if (FAILED(hr)) {
 		// GetIconLocation() failed.
 		return ERROR_FILE_NOT_FOUND;
@@ -98,6 +77,8 @@ LONG RP_ExtractIcon_Private::DoExtractIconW(IExtractIconW *pExtractIconW,
 		// TODO: Verify that hIcons[x] is NULL if only one size is found.
 		// TODO: Verify which icon is extracted.
 		// TODO: What if the size isn't found?
+
+		// TODO: ANSI versions: Use GetProcAddress().
 		HICON hIcons[2];
 		UINT uRet = PrivateExtractIconsW(szIconFileW, nIconIndex,
 				nIconSize, nIconSize, hIcons, nullptr, 2, 0);
@@ -136,8 +117,7 @@ LONG RP_ExtractIcon_Private::DoExtractIconA(IExtractIconA *pExtractIconA,
 	}
 
 	// Load the file.
-	// TODO: Proper string conversion.
-	hr = pPersistFile->Load((LPCOLESTR)this->filename.c_str(), STGM_READ);
+	hr = pPersistFile->Load(U82W_s(this->filename), STGM_READ);
 	if (FAILED(hr)) {
 		// Failed to load the file.
 		return ERROR_FILE_NOT_FOUND;
@@ -148,7 +128,7 @@ LONG RP_ExtractIcon_Private::DoExtractIconA(IExtractIconA *pExtractIconA,
 	int nIconIndex;
 	UINT wFlags;
 	// TODO: Handle S_FALSE with GIL_DEFAULTICON?
-	hr = pExtractIconA->GetIconLocation(0, szIconFileA, ARRAY_SIZE(szIconFileA), &nIconIndex, &wFlags);
+	hr = pExtractIconA->GetIconLocation(0, szIconFileA, _countof(szIconFileA), &nIconIndex, &wFlags);
 	if (FAILED(hr)) {
 		// GetIconLocation() failed.
 		return ERROR_FILE_NOT_FOUND;
@@ -168,6 +148,8 @@ LONG RP_ExtractIcon_Private::DoExtractIconA(IExtractIconA *pExtractIconA,
 		// TODO: Verify that hIcons[x] is NULL if only one size is found.
 		// TODO: Verify which icon is extracted.
 		// TODO: What if the size isn't found?
+
+		// TODO: ANSI versions: Use GetProcAddress().
 		HICON hIcons[2];
 		UINT uRet = PrivateExtractIconsA(szIconFileA, nIconIndex,
 				nIconSize, nIconSize, hIcons, nullptr, 2, 0);
@@ -195,25 +177,28 @@ LONG RP_ExtractIcon_Private::Fallback_int(RegKey &hkey_Assoc,
 	HICON *phiconLarge, HICON *phiconSmall, UINT nIconSize)
 {
 	// Is RP_Fallback present?
-	RegKey hkey_RP_Fallback(hkey_Assoc, L"RP_Fallback", KEY_READ, false);
+	RegKey hkey_RP_Fallback(hkey_Assoc, _T("RP_Fallback"), KEY_READ, false);
 	if (!hkey_RP_Fallback.isOpen()) {
 		return hkey_RP_Fallback.lOpenRes();
 	}
 
 	// Get the DefaultIcon key.
 	DWORD dwType;
-	wstring defaultIcon = hkey_RP_Fallback.read_expand(L"DefaultIcon", &dwType);
+	tstring defaultIcon = hkey_RP_Fallback.read_expand(_T("DefaultIcon"), &dwType);
 	if (defaultIcon.empty()) {
 		// No default icon.
 		return ERROR_FILE_NOT_FOUND;
-	} else if (defaultIcon == L"%1") {
+	} else if (defaultIcon == _T("%1")) {
 		// Forward to the IconHandler.
-		wstring iconHandler = hkey_RP_Fallback.read(L"IconHandler");
+		const tstring iconHandler = hkey_RP_Fallback.read(_T("IconHandler"));
 		if (iconHandler.empty()) {
 			// No IconHandler.
 			return ERROR_FILE_NOT_FOUND;
 		}
 
+		// Parse the CLSID string.
+		// TODO: Use IIDFromString() instead to skip ProgID handling?
+		// Reference: https://blogs.msdn.microsoft.com/oldnewthing/20151015-00/?p=91351
 		CLSID clsidIconHandler;
 		HRESULT hr = CLSIDFromString(iconHandler.c_str(), &clsidIconHandler);
 		if (FAILED(hr)) {
@@ -264,14 +249,14 @@ LONG RP_ExtractIcon_Private::Fallback_int(RegKey &hkey_Assoc,
 	// TODO: Better error codes?
 	int nIconIndex;
 	size_t comma = defaultIcon.find_last_of(L',');
-	if (comma != wstring::npos) {
+	if (comma != tstring::npos) {
 		// Found the comma.
 		if (comma > 0 && comma < defaultIcon.size()-1) {
-			wchar_t *endptr;
+			TCHAR *endptr = nullptr;
 			errno = 0;
-			nIconIndex = (int)wcstol(&defaultIcon[comma+1], &endptr, 10);
+			nIconIndex = (int)_tcstol(&defaultIcon[comma+1], &endptr, 10);
 			if (errno == ERANGE || *endptr != 0) {
-				// strtol() failed.
+				// _tcstol() failed.
 				// DefaultIcon is invalid.
 				return ERROR_FILE_NOT_FOUND;
 			}
@@ -328,13 +313,13 @@ LONG RP_ExtractIcon_Private::Fallback(HICON *phiconLarge, HICON *phiconSmall, UI
 	}
 
 	// Open the filetype key in HKCR.
-	RegKey hkey_Assoc(HKEY_CLASSES_ROOT, RP2W_c(file_ext), KEY_READ, false);
+	RegKey hkey_Assoc(HKEY_CLASSES_ROOT, U82T_c(file_ext), KEY_READ, false);
 	if (!hkey_Assoc.isOpen()) {
 		return hkey_Assoc.lOpenRes();
 	}
 
 	// If we have a ProgID, check it first.
-	wstring progID = hkey_Assoc.read(nullptr);
+	const tstring progID = hkey_Assoc.read(nullptr);
 	if (!progID.empty()) {
 		// Custom ProgID is registered.
 		// TODO: Get the correct top-level registry key.

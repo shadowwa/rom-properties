@@ -2,58 +2,33 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * PlayStationSave.hpp: Sony PlayStation save file reader.                 *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- * Copyright (c) 2017 by Egor.                                             *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * Copyright (c) 2017-2018 by Egor.                                        *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 // References:
 // - http://www.psdevwiki.com/ps3/Game_Saves#Game_Saves_PS1
 // - http://problemkaputt.de/psx-spx.htm
 
+#include "stdafx.h"
 #include "PlayStationSave.hpp"
-#include "librpbase/RomData_p.hpp"
-
 #include "ps1_structs.h"
 
-// librpbase
-#include "librpbase/common.h"
-#include "librpbase/byteswap.h"
-#include "librpbase/TextFuncs.hpp"
-#include "librpbase/file/IRpFile.hpp"
-
-#include "librpbase/img/rp_image.hpp"
-#include "librpbase/img/ImageDecoder.hpp"
-#include "librpbase/img/IconAnimData.hpp"
-
-#include "libi18n/i18n.h"
+// librpbase, librpfile, librptexture
 using namespace LibRpBase;
+using LibRpFile::IRpFile;
+using namespace LibRpTexture;
 
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cerrno>
-#include <cstring>
-
-// C++ includes.
-#include <vector>
+// C++ STL classes.
 using std::vector;
 
 namespace LibRomData {
 
-class PlayStationSavePrivate : public RomDataPrivate
+ROMDATA_IMPL(PlayStationSave)
+ROMDATA_IMPL_IMG(PlayStationSave)
+
+class PlayStationSavePrivate final : public RomDataPrivate
 {
 	public:
 		PlayStationSavePrivate(PlayStationSave *q, IRpFile *file);
@@ -69,15 +44,17 @@ class PlayStationSavePrivate : public RomDataPrivate
 
 	public:
 		// Save file type.
-		enum SaveType {
-			SAVE_TYPE_UNKNOWN = -1,	// Unknown save type.
+		enum class SaveType {
+			Unknown	= -1,
 
-			SAVE_TYPE_PSV = 0,	// PS1 on PS3 individual save file.
-			SAVE_TYPE_RAW,		// Raw blocks without header information
-			SAVE_TYPE_BLOCK,	// Prefixed by header of the first block (*.mcs, *.ps1)
-			SAVE_TYPE_54		// Prefixed by 54-byte header (*.mcb, *.mcx, *.pda, *.psx)
+			PSV = 0,	// PS1 on PS3 individual save file.
+			Raw,		// Raw blocks without header information
+			Block,		// Prefixed by header of the first block (*.mcs, *.ps1)
+			_54,		// Prefixed by 54-byte header (*.mcb, *.mcx, *.pda, *.psx)
+
+			Max
 		};
-		int saveType;
+		SaveType saveType;
 
 	public:
 		// Save file header.
@@ -104,7 +81,7 @@ class PlayStationSavePrivate : public RomDataPrivate
 PlayStationSavePrivate::PlayStationSavePrivate(PlayStationSave *q, IRpFile *file)
 	: super(q, file)
 	, iconAnimData(nullptr)
-	, saveType(SAVE_TYPE_UNKNOWN)
+	, saveType(SaveType::Unknown)
 {
 	// Clear the various headers.
 	memset(&mxh, 0, sizeof(mxh));
@@ -113,14 +90,7 @@ PlayStationSavePrivate::PlayStationSavePrivate(PlayStationSave *q, IRpFile *file
 
 PlayStationSavePrivate::~PlayStationSavePrivate()
 {
-	if (iconAnimData) {
-		// This class owns all of the icons in iconAnimData, so we
-		// must delete all of them.
-		for (int i = iconAnimData->count-1; i >= 0; i--) {
-			delete iconAnimData->frames[i];
-		}
-		delete iconAnimData;
-	}
+	UNREF(iconAnimData);
 }
 
 /**
@@ -138,7 +108,8 @@ const rp_image *PlayStationSavePrivate::loadIcon(void)
 		return iconAnimData->frames[0];
 	}
 
-	if (saveType == SAVE_TYPE_UNKNOWN) {
+	if ((int)saveType < 0) {
+		// Invalid save type...
 		return nullptr;
 	}
 
@@ -187,8 +158,8 @@ const rp_image *PlayStationSavePrivate::loadIcon(void)
 		iconAnimData->seq_index[i] = i;
 
 		// Icon format is linear 16x16 4bpp with RGB555 palette.
-		iconAnimData->frames[i] = ImageDecoder::fromLinearCI4<false>(
-			ImageDecoder::PXF_BGR555_PS1, 16, 16,
+		iconAnimData->frames[i] = ImageDecoder::fromLinearCI4(
+			ImageDecoder::PXF_BGR555_PS1, false, 16, 16,
 			scHeader.icon_data[i], sizeof(scHeader.icon_data[i]),
 			scHeader.icon_pal, sizeof(scHeader.icon_pal));
 	}
@@ -204,7 +175,7 @@ const rp_image *PlayStationSavePrivate::loadIcon(void)
  * Read a PlayStation save file.
  *
  * A save file must be opened by the caller. The file handle
- * will be dup()'d and must be kept open in order to load
+ * will be ref()'d and must be kept open in order to load
  * data from the ROM image.
  *
  * To close the file, either delete this object or call close().
@@ -219,10 +190,11 @@ PlayStationSave::PlayStationSave(IRpFile *file)
 	// This class handles save files.
 	RP_D(PlayStationSave);
 	d->className = "PlayStationSave";
-	d->fileType = FTYPE_SAVE_FILE;
+	d->mimeType = "application/x-ps1-save";	// unofficial, not on fd.o
+	d->fileType = FileType::SaveFile;
 
 	if (!d->file) {
-		// Could not dup() the file handle.
+		// Could not ref() the file handle.
 		return;
 	}
 
@@ -230,8 +202,10 @@ PlayStationSave::PlayStationSave(IRpFile *file)
 	uint8_t header[1024];
 	d->file->rewind();
 	size_t size = d->file->read(&header, sizeof(header));
-	if (size != sizeof(header))
+	if (size != sizeof(header)) {
+		UNREF_AND_NULL_NOCHK(d->file);
 		return;
+	}
 
 	// Check if this ROM image is supported.
 	DetectInfo info;
@@ -240,28 +214,29 @@ PlayStationSave::PlayStationSave(IRpFile *file)
 	info.header.pData = header;
 	info.ext = nullptr;	// Not needed for PS1.
 	info.szFile = file->size();
-	d->saveType = isRomSupported(&info);
+	d->saveType = static_cast<PlayStationSavePrivate::SaveType>(isRomSupported(&info));
 
 	switch (d->saveType) {
-		case PlayStationSavePrivate::SAVE_TYPE_PSV:
+		case PlayStationSavePrivate::SaveType::PSV:
 			// PSV (PS1 on PS3)
 			memcpy(&d->mxh.psvHeader, header, sizeof(d->mxh.psvHeader));
 			memcpy(&d->scHeader, &header[sizeof(d->mxh.psvHeader)], sizeof(d->scHeader));
 			break;
-		case PlayStationSavePrivate::SAVE_TYPE_RAW:
+		case PlayStationSavePrivate::SaveType::Raw:
 			memcpy(&d->scHeader, header, sizeof(d->scHeader));
 			break;
-		case PlayStationSavePrivate::SAVE_TYPE_BLOCK:
+		case PlayStationSavePrivate::SaveType::Block:
 			memcpy(&d->mxh.blockHeader, header, sizeof(d->mxh.blockHeader));
 			memcpy(&d->scHeader, &header[sizeof(d->mxh.blockHeader)], sizeof(d->scHeader));
 			break;
-		case PlayStationSavePrivate::SAVE_TYPE_54:
+		case PlayStationSavePrivate::SaveType::_54:
 			memcpy(&d->mxh.ps54Header, header, sizeof(d->mxh.ps54Header));
 			memcpy(&d->scHeader, &header[sizeof(d->mxh.ps54Header)], sizeof(d->scHeader));
 			break;
 		default:
 			// Unknown save type.
-			d->saveType = PlayStationSavePrivate::SAVE_TYPE_UNKNOWN;
+			UNREF_AND_NULL_NOCHK(d->file);
+			d->saveType = PlayStationSavePrivate::SaveType::Unknown;
 			return;
 	}
 
@@ -285,74 +260,83 @@ int PlayStationSave::isRomSupported_static(const DetectInfo *info)
 	{
 		// Either no detection information was specified,
 		// or the header is too small.
-		return -1;
+		return static_cast<int>(PlayStationSavePrivate::SaveType::Unknown);
 	}
 
-	const uint8_t *header = info->header.pData;
+	// Check for PSV+SC.
+	if (info->header.size >= sizeof(PS1_PSV_Header) + sizeof(PS1_SC_Struct)) {
+		// Check for SC magic.
+		const PS1_SC_Struct *const scHeader =
+			reinterpret_cast<const PS1_SC_Struct*>(
+				&info->header.pData[sizeof(PS1_PSV_Header)]);
+		if (scHeader->magic == cpu_to_be16(PS1_SC_MAGIC)) {
+			// Check the PSV magic.
+			const PS1_PSV_Header *const psvHeader =
+				reinterpret_cast<const PS1_PSV_Header*>(info->header.pData);
+			if (psvHeader->magic == cpu_to_be64(PS1_PSV_MAGIC)) {
+				// This is a PSV (PS1 on PS3) save file.
+				return static_cast<int>(PlayStationSavePrivate::SaveType::PSV);
+			}
 
-	// Check the SC struct magic.
-	static const char sc_magic[2] = { 'S','C' };
-	if (info->header.size >= sizeof(PS1_PSV_Header) + sizeof(PS1_SC_Struct) &&
-	    memcmp(&header[sizeof(PS1_PSV_Header)], sc_magic, sizeof(sc_magic)) == 0)
-	{
-		// Check the PSV magic.
-		static const char psv_magic[8] = {
-			0x00, 0x56, 0x53, 0x50, 0x00, 0x00, 0x00, 0x00
-		};
-		if (memcmp(header, psv_magic, sizeof(psv_magic)) != 0) {
 			// PSV magic is incorrect.
-			return -1;
+			return static_cast<int>(PlayStationSavePrivate::SaveType::Unknown);
 		}
-
-		// This is a PSV (PS1 on PS3) save file.
-		return PlayStationSavePrivate::SAVE_TYPE_PSV;
 	}
-	else if (info->header.size >= sizeof(PS1_Block_Entry) + sizeof(PS1_SC_Struct) &&
-		 memcmp(&header[sizeof(PS1_Block_Entry)], sc_magic, sizeof(sc_magic)) == 0)
-	{
-		// Check the block magic.
-		static const char block_magic[4] = {
-			PS1_ENTRY_ALLOC_FIRST, 0x00, 0x00, 0x00,
-		};
-		if (memcmp(header, block_magic, sizeof(block_magic)) != 0) {
-			// Block magic is incorrect.
-			return -1;
-		}
 
-		// Check the checksum
-		uint8_t checksum = 0;
-		for (int i = sizeof(PS1_Block_Entry)-1; i >= 0; i--) {
-			checksum ^= header[i];
-		}
-		if (checksum != 0) return -1;
+	// Check for Block Entry + SC.
+	if (info->header.size >= sizeof(PS1_Block_Entry) + sizeof(PS1_SC_Struct)) {
+		// Check for SC magic.
+		const PS1_SC_Struct *const scHeader =
+			reinterpret_cast<const PS1_SC_Struct*>(
+				&info->header.pData[sizeof(PS1_Block_Entry)]);
+		if (scHeader->magic == cpu_to_be16(PS1_SC_MAGIC)) {
+			const uint8_t *const header = info->header.pData;
 
-		return PlayStationSavePrivate::SAVE_TYPE_BLOCK;
+			// Check the block magic.
+			static const uint8_t block_magic[4] = {
+				PS1_ENTRY_ALLOC_FIRST, 0x00, 0x00, 0x00,
+			};
+			if (memcmp(header, block_magic, sizeof(block_magic)) != 0) {
+				// Block magic is incorrect.
+				return static_cast<int>(PlayStationSavePrivate::SaveType::Unknown);
+			}
+
+			// Check the checksum
+			uint8_t checksum = 0;
+			for (int i = sizeof(PS1_Block_Entry)-1; i >= 0; i--) {
+				checksum ^= header[i];
+			}
+			if (checksum != 0) return -1;
+
+			return static_cast<int>(PlayStationSavePrivate::SaveType::Block);
+		}
 	}
-	else if (info->header.size >= sizeof(PS1_54_Header) + sizeof(PS1_SC_Struct) &&
-		 memcmp(&header[sizeof(PS1_54_Header)], sc_magic, sizeof(sc_magic)) == 0)
-	{
+
+	// Check for PS1 54.
+	if (info->header.size >= sizeof(PS1_54_Header) + sizeof(PS1_SC_Struct)) {
+		// Check for SC magic.
+		const PS1_SC_Struct *const scHeader =
+			reinterpret_cast<const PS1_SC_Struct*>(
+				&info->header.pData[sizeof(PS1_54_Header)]);
+		if (scHeader->magic == cpu_to_be16(PS1_SC_MAGIC)) {
+			// Extra filesize check to prevent false-positives
+			if (info->szFile % 8192 != 54) return -1;
+			return static_cast<int>(PlayStationSavePrivate::SaveType::_54);
+		}
+	}
+
+	// Check for PS1 SC by itself.
+	const PS1_SC_Struct *const scHeader =
+		reinterpret_cast<const PS1_SC_Struct*>(info->header.pData);
+	if (scHeader->magic == cpu_to_be16(PS1_SC_MAGIC)) {
 		// Extra filesize check to prevent false-positives
-		if (info->szFile % 8192 != 54) return -1;
-		return PlayStationSavePrivate::SAVE_TYPE_54;
-	}
-	else if (memcmp(header, sc_magic, sizeof(sc_magic)) == 0)
-	{
-		// Extra filesize check to prevent false-positives
-		if (info->szFile % 8192 != 0) return -1;
-		return PlayStationSavePrivate::SAVE_TYPE_RAW;
+		if (info->szFile % 8192 == 0) {
+			return static_cast<int>(PlayStationSavePrivate::SaveType::Raw);
+		}
 	}
 
-	return -1;
-}
-
-/**
- * Is a ROM image supported by this object?
- * @param info DetectInfo containing ROM detection information.
- * @return Class-specific system ID (>= 0) if supported; -1 if not.
- */
-int PlayStationSave::isRomSupported(const DetectInfo *info) const
-{
-	return isRomSupported_static(info);
+	// Not supported.
+	return static_cast<int>(PlayStationSavePrivate::SaveType::Unknown);
 }
 
 /**
@@ -366,9 +350,13 @@ const char *PlayStationSave::systemName(unsigned int type) const
 	if (!d->isValid || !isSystemNameTypeValid(type))
 		return nullptr;
 
-	// Bits 0-1: Type. (short, long, abbreviation)
+	// PlayStation has the same name worldwide, so we can
+	// ignore the region selection.
+	static_assert(SYSNAME_TYPE_MASK == 3,
+		"PlayStationSave::systemName() array index optimization needs to be updated.");
+
+	// Bits 0-1: Type. (long, short, abbreviation)
 	static const char *const sysNames[4] = {
-		// TODO: PS1 or PSX?
 		"Sony PlayStation", "PlayStation", "PS1", nullptr
 	};
 
@@ -402,21 +390,25 @@ const char *const *PlayStationSave::supportedFileExtensions_static(void)
 }
 
 /**
- * Get a list of all supported file extensions.
- * This is to be used for file type registration;
- * subclasses don't explicitly check the extension.
+ * Get a list of all supported MIME types.
+ * This is to be used for metadata extractors that
+ * must indicate which MIME types they support.
  *
- * NOTE: The extensions include the leading dot,
- * e.g. ".bin" instead of "bin".
- *
- * NOTE 2: The array and the strings in the array should
+ * NOTE: The array and the strings in the array should
  * *not* be freed by the caller.
  *
  * @return NULL-terminated array of all supported file extensions, or nullptr on error.
  */
-const char *const *PlayStationSave::supportedFileExtensions(void) const
+const char *const *PlayStationSave::supportedMimeTypes_static(void)
 {
-	return supportedFileExtensions_static();
+	static const char *const mimeTypes[] = {
+		// Unofficial MIME types.
+		// TODO: Get these upstreamed on FreeDesktop.org.
+		"application/x-ps1-save",
+
+		nullptr
+	};
+	return mimeTypes;
 }
 
 /**
@@ -429,15 +421,6 @@ uint32_t PlayStationSave::supportedImageTypes_static(void)
 }
 
 /**
- * Get a bitfield of image types this class can retrieve.
- * @return Bitfield of supported image types. (ImageTypesBF)
- */
-uint32_t PlayStationSave::supportedImageTypes(void) const
-{
-	return supportedImageTypes_static();
-}
-
-/**
  * Get a list of all available image sizes for the specified image type.
  *
  * The first item in the returned vector is the "default" size.
@@ -446,17 +429,13 @@ uint32_t PlayStationSave::supportedImageTypes(void) const
  * @param imageType Image type.
  * @return Vector of available image sizes, or empty vector if no images are available.
  */
-std::vector<RomData::ImageSizeDef> PlayStationSave::supportedImageSizes_static(ImageType imageType)
+vector<RomData::ImageSizeDef> PlayStationSave::supportedImageSizes_static(ImageType imageType)
 {
-	assert(imageType >= IMG_INT_MIN && imageType <= IMG_EXT_MAX);
-	if (imageType < IMG_INT_MIN || imageType > IMG_EXT_MAX) {
-		// ImageType is out of range.
-		return std::vector<ImageSizeDef>();
-	}
+	ASSERT_supportedImageSizes(imageType);
 
 	if (imageType != IMG_INT_ICON) {
 		// Only icons are supported.
-		return std::vector<ImageSizeDef>();
+		return vector<ImageSizeDef>();
 	}
 
 	// PlayStation save files have 16x16 icons.
@@ -465,20 +444,6 @@ std::vector<RomData::ImageSizeDef> PlayStationSave::supportedImageSizes_static(I
 	};
 	return vector<ImageSizeDef>(sz_INT_ICON,
 		sz_INT_ICON + ARRAY_SIZE(sz_INT_ICON));
-}
-
-/**
- * Get a list of all available image sizes for the specified image type.
- *
- * The first item in the returned vector is the "default" size.
- * If the width/height is 0, then an image exists, but the size is unknown.
- *
- * @param imageType Image type.
- * @return Vector of available image sizes, or empty vector if no images are available.
- */
-std::vector<RomData::ImageSizeDef> PlayStationSave::supportedImageSizes(ImageType imageType) const
-{
-	return supportedImageSizes_static(imageType);
 }
 
 /**
@@ -492,18 +457,14 @@ std::vector<RomData::ImageSizeDef> PlayStationSave::supportedImageSizes(ImageTyp
  */
 uint32_t PlayStationSave::imgpf(ImageType imageType) const
 {
-	assert(imageType >= IMG_INT_MIN && imageType <= IMG_EXT_MAX);
-	if (imageType < IMG_INT_MIN || imageType > IMG_EXT_MAX) {
-		// ImageType is out of range.
-		return 0;
-	}
+	ASSERT_imgpf(imageType);
 
-	RP_D(const PlayStationSave);
 	uint32_t ret = 0;
 	switch (imageType) {
-		case IMG_INT_ICON:
+		case IMG_INT_ICON: {
 			// Use nearest-neighbor scaling when resizing.
 			// Also, need to check if this is an animated icon.
+			RP_D(const PlayStationSave);
 			const_cast<PlayStationSavePrivate*>(d)->loadIcon();
 			if (d->iconAnimData && d->iconAnimData->count > 1) {
 				// Animated icon.
@@ -513,6 +474,7 @@ uint32_t PlayStationSave::imgpf(ImageType imageType) const
 				ret = IMGPF_RESCALE_NEAREST;
 			}
 			break;
+		}
 
 		default:
 			break;
@@ -528,13 +490,13 @@ uint32_t PlayStationSave::imgpf(ImageType imageType) const
 int PlayStationSave::loadFieldData(void)
 {
 	RP_D(PlayStationSave);
-	if (d->fields->isDataLoaded()) {
+	if (!d->fields->empty()) {
 		// Field data *has* been loaded...
 		return 0;
 	} else if (!d->file) {
 		// File isn't open.
 		return -EBADF;
-	} else if (!d->isValid) {
+	} else if (!d->isValid || (int)d->saveType < 0) {
 		// ROM image isn't valid.
 		return -EIO;
 	}
@@ -545,16 +507,18 @@ int PlayStationSave::loadFieldData(void)
 
 	// Filename.
 	const char* filename = nullptr;
-	switch(d->saveType) {
-	case PlayStationSavePrivate::SAVE_TYPE_PSV:
-		filename = d->mxh.psvHeader.filename;
-		break;
-	case PlayStationSavePrivate::SAVE_TYPE_BLOCK:
-		filename = d->mxh.blockHeader.filename;
-		break;
-	case PlayStationSavePrivate::SAVE_TYPE_54:
-		filename = d->mxh.ps54Header.filename;
-		break;
+	switch (d->saveType) {
+		case PlayStationSavePrivate::SaveType::PSV:
+			filename = d->mxh.psvHeader.filename;
+			break;
+		case PlayStationSavePrivate::SaveType::Block:
+			filename = d->mxh.blockHeader.filename;
+			break;
+		case PlayStationSavePrivate::SaveType::_54:
+			filename = d->mxh.ps54Header.filename;
+			break;
+		default:
+			break;
 	}
 
 	if (filename) {
@@ -569,7 +533,41 @@ int PlayStationSave::loadFieldData(void)
 	// TODO: Moar fields.
 
 	// Finished reading the field data.
-	return (int)d->fields->count();
+	return static_cast<int>(d->fields->count());
+}
+
+/**
+ * Load metadata properties.
+ * Called by RomData::metaData() if the field data hasn't been loaded yet.
+ * @return Number of metadata properties read on success; negative POSIX error code on error.
+ */
+int PlayStationSave::loadMetaData(void)
+{
+	RP_D(PlayStationSave);
+	if (d->metaData != nullptr) {
+		// Metadata *has* been loaded...
+		return 0;
+	} else if (!d->file) {
+		// File isn't open.
+		return -EBADF;
+	} else if (!d->isValid) {
+		// Unknown file type.
+		return -EIO;
+	}
+
+	// Create the metadata object.
+	d->metaData = new RomMetaData();
+	d->metaData->reserve(1);	// Maximum of 1 metadata property.
+
+	// PSV (PS1 on PS3) save file header.
+	const PS1_SC_Struct *const scHeader = &d->scHeader;
+
+	// Title. (Description)
+	d->metaData->addMetaData_string(Property::Title,
+		cp1252_sjis_to_utf8(scHeader->title, sizeof(scHeader->title)));
+
+	// Finished reading the metadata.
+	return static_cast<int>(d->metaData->count());
 }
 
 /**
@@ -581,16 +579,7 @@ int PlayStationSave::loadFieldData(void)
  */
 int PlayStationSave::loadInternalImage(ImageType imageType, const rp_image **pImage)
 {
-	assert(imageType >= IMG_INT_MIN && imageType <= IMG_INT_MAX);
-	assert(pImage != nullptr);
-	if (!pImage) {
-		// Invalid parameters.
-		return -EINVAL;
-	} else if (imageType < IMG_INT_MIN || imageType > IMG_INT_MAX) {
-		// ImageType is out of range.
-		*pImage = nullptr;
-		return -ERANGE;
-	}
+	ASSERT_loadInternalImage(imageType, pImage);
 
 	RP_D(PlayStationSave);
 	if (imageType != IMG_INT_ICON) {
@@ -624,6 +613,9 @@ int PlayStationSave::loadInternalImage(ImageType imageType, const rp_image **pIm
  *
  * Check imgpf for IMGPF_ICON_ANIMATED first to see if this
  * object has an animated icon.
+ *
+ * The retrieved IconAnimData must be ref()'d by the caller if the
+ * caller stores it instead of using it immediately.
  *
  * @return Animated icon data, or nullptr if no animated icon is present.
  */

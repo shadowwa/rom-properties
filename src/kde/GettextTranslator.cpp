@@ -2,30 +2,15 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * GettextTranslator.cpp: QTranslator class using GNU Gettext.             *
  *                                                                         *
- * Copyright (c) 2017 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License       *
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.   *
+ * Copyright (c) 2017-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "GettextTranslator.hpp"
-#include "libi18n/i18n.h"
 
 GettextTranslator::GettextTranslator(QObject *parent)
 	: super(parent)
-{ }
-
-GettextTranslator::~GettextTranslator()
 { }
 
 QString GettextTranslator::translate(const char *context,
@@ -34,7 +19,7 @@ QString GettextTranslator::translate(const char *context,
 	// FIXME: Make use of disambiguation.
 	Q_UNUSED(disambiguation)
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
+#if QT_VERSION >= QT_VERSION_CHECK(5,0,0)
 	// Qt5: This function handles non-plurals as well as plurals.
 	if (n >= 0)
 #endif
@@ -49,7 +34,7 @@ QString GettextTranslator::translate(const char *context,
 		return QString::fromUtf8(txt);
 	}
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
+#if QT_VERSION >= QT_VERSION_CHECK(5,0,0)
 	// Qt5: No plurals here.
 	const char *const txt = dpgettext_expr(RP_I18N_DOMAIN, context, sourceText);
 	if (txt == sourceText) {
@@ -60,7 +45,7 @@ QString GettextTranslator::translate(const char *context,
 #endif
 }
 
-#if QT_VERSION < QT_VERSION_CHECK(5, 0, 0)
+#if QT_VERSION < QT_VERSION_CHECK(5,0,0)
 QString GettextTranslator::translate(const char *context,
 	const char *sourceText, const char *disambiguation) const
 {

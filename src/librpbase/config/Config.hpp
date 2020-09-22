@@ -3,20 +3,7 @@
  * Config.hpp: Configuration manager.                                      *
  *                                                                         *
  * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBRPBASE_CONFIG_CONFIG_HPP__
@@ -59,7 +46,7 @@ class Config : public ConfReader
 		static Config *instance(void);
 
 	public:
-		/** Image types. **/
+		/** Image types **/
 
 		// Image type priority data.
 		struct ImgTypePrio_t {
@@ -70,7 +57,7 @@ class Config : public ConfReader
 		// TODO: Function to get image type priority for a specified class.
 
 	public:
-		/** Image types. **/
+		/** Image types **/
 
 		enum ImgTypeResult {
 			IMGTR_ERR_MAP_CORRUPTED	= -2,	// Internal map is corrupted.
@@ -97,7 +84,7 @@ class Config : public ConfReader
 		 */
 		void getDefImgTypePrio(ImgTypePrio_t *imgTypePrio) const;
 
-		/** Download options. **/
+		/** Download options **/
 
 		/**
 		 * Should we download images from external databases?
@@ -120,6 +107,46 @@ class Config : public ConfReader
 		 * @return True if we should download high-resolution scans; false if not.
 		 */
 		bool downloadHighResScans(void) const;
+
+		/**
+		 * Store file origin information?
+		 * NOTE: Call load() before using this function.
+		 * @return True if we should; false if not.
+		 */
+		bool storeFileOriginInfo(void) const;
+
+		/** DMG title screen mode **/
+
+		enum DMG_TitleScreen_Mode : uint8_t {
+			DMG_TS_DMG,	// Use DMG mode title screens.
+			DMG_TS_SGB,	// Use SGB mode title screens if available.
+			DMG_TS_CGB,	// Use CGB mode title screens if available.
+
+			DMG_TS_MAX
+		};
+
+		/**
+		 * Which title screen should we use for the specified DMG ROM type?
+		 * @param romType DMG ROM type.
+		 * @return Title screen to use.
+		 */
+		DMG_TitleScreen_Mode dmgTitleScreenMode(DMG_TitleScreen_Mode romType) const;
+
+		/** Other options **/
+
+		/**
+		 * Show an overlay icon for "dangerous" permissions?
+		 * NOTE: Call load() before using this function.
+		 * @return True if we should show the overlay icon; false if not.
+		 */
+		bool showDangerousPermissionsOverlayIcon(void) const;
+
+		/**
+		 * Enable thumbnailing and metadata on network filesystems?
+		 * NOTE: Call load() before using this function.
+		 * @return True if we should enable; false if not.
+		 */
+		bool enableThumbnailOnNetworkFS(void) const;
 };
 
 }

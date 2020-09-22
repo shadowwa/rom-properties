@@ -2,28 +2,14 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * GcnFst.hpp: GameCube/Wii FST parser.                                    *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBROMDATA_DISC_GCNFST_HPP__
 #define __ROMPROPERTIES_LIBROMDATA_DISC_GCNFST_HPP__
 
 #include "librpbase/disc/IFst.hpp"
-#include "../Console/gcn_structs.h"
 
 namespace LibRomData {
 
@@ -37,6 +23,7 @@ class GcnFst : public LibRpBase::IFst
 		 * @param len Length of fstData, in bytes.
 		 * @param offsetShift File offset shift. (0 = GCN, 2 = Wii)
 		 */
+		ATTR_ACCESS_SIZE(read_only, 2, 3)
 		GcnFst(const uint8_t *fstData, uint32_t len, uint8_t offsetShift);
 		virtual ~GcnFst();
 
@@ -53,13 +40,13 @@ class GcnFst : public LibRpBase::IFst
 		 * Is the FST open?
 		 * @return True if open; false if not.
 		 */
-		virtual bool isOpen(void) const override final;
+		bool isOpen(void) const final;
 
 		/**
 		 * Have any errors been detected in the FST?
 		 * @return True if yes; false if no.
 		 */
-		virtual bool hasErrors(void) const override final;
+		bool hasErrors(void) const final;
 
 	public:
 		/** opendir() interface. **/
@@ -69,7 +56,7 @@ class GcnFst : public LibRpBase::IFst
 		 * @param path	[in] Directory path.
 		 * @return Dir*, or nullptr on error.
 		 */
-		virtual Dir *opendir(const char *path) override final;
+		Dir *opendir(const char *path) final;
 
 		/**
 		 * Read a directory entry.
@@ -77,14 +64,14 @@ class GcnFst : public LibRpBase::IFst
 		 * @return DirEnt*, or nullptr if end of directory or on error.
 		 * (TODO: Add lastError()?)
 		 */
-		virtual DirEnt *readdir(Dir *dirp) override final;
+		DirEnt *readdir(Dir *dirp) final;
 
 		/**
 		 * Close an opened directory.
 		 * @param dirp Dir pointer.
 		 * @return 0 on success; negative POSIX error code on error.
 		 */
-		virtual int closedir(Dir *dirp) override final;
+		int closedir(Dir *dirp) final;
 
 		/**
 		 * Get the directory entry for the specified file.
@@ -92,7 +79,7 @@ class GcnFst : public LibRpBase::IFst
 		 * @param dirent	[out] Pointer to DirEnt buffer.
 		 * @return 0 on success; negative POSIX error code on error.
 		 */
-		virtual int find_file(const char *filename, DirEnt *dirent) override final;
+		int find_file(const char *filename, DirEnt *dirent) final;
 
 	public:
 		/**
@@ -103,7 +90,7 @@ class GcnFst : public LibRpBase::IFst
 		 *
 		 * @return Size of all files, in bytes. (-1 on error)
 		 */
-		int64_t totalUsedSize(void) const;
+		off64_t totalUsedSize(void) const;
 };
 
 }

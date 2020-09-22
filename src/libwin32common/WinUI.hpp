@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (libwin32common)                   *
  * WinUI.hpp: Windows UI common functions.                                 *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2019 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBWIN32COMMON_WINUICOMMON_HPP__
@@ -32,33 +19,33 @@ namespace LibWin32Common {
 
 /**
  * Convert UNIX line endings to DOS line endings.
- * @param wstr_unix	[in] wstring with UNIX line endings.
+ * @param tstr_unix	[in] String with UNIX line endings.
  * @param lf_count	[out,opt] Number of LF characters found.
- * @return wstring with DOS line endings.
+ * @return tstring with DOS line endings.
  */
-std::wstring unix2dos(const std::wstring &wstr_unix, int *lf_count);
+std::tstring unix2dos(const TCHAR *tstr_unix, int *lf_count = nullptr);
 
 /**
  * Measure text size using GDI.
  * @param hWnd		[in] hWnd.
  * @param hFont		[in] Font.
- * @param wstr		[in] String.
+ * @param tstr		[in] String.
  * @param lpSize	[out] Size.
  * @return 0 on success; non-zero on error.
  */
-int measureTextSize(HWND hWnd, HFONT hFont, const wchar_t *wstr, LPSIZE lpSize);
+int measureTextSize(HWND hWnd, HFONT hFont, const TCHAR *tstr, LPSIZE lpSize);
 
 /**
  * Measure text size using GDI.
  * @param hWnd		[in] hWnd.
  * @param hFont		[in] Font.
- * @param wstr		[in] String.
+ * @param tstr		[in] String.
  * @param lpSize	[out] Size.
  * @return 0 on success; non-zero on error.
  */
-static inline int measureTextSize(HWND hWnd, HFONT hFont, const std::wstring &wstr, LPSIZE lpSize)
+static inline int measureTextSize(HWND hWnd, HFONT hFont, const std::tstring &tstr, LPSIZE lpSize)
 {
-	return measureTextSize(hWnd, hFont, wstr.c_str(), lpSize);
+	return measureTextSize(hWnd, hFont, tstr.c_str(), lpSize);
 }
 
 /**
@@ -67,11 +54,11 @@ static inline int measureTextSize(HWND hWnd, HFONT hFont, const std::wstring &ws
  * calling the regular measureTextSize() function.
  * @param hWnd		[in] hWnd.
  * @param hFont		[in] Font.
- * @param wstr		[in] String.
+ * @param tstr		[in] String.
  * @param lpSize	[out] Size.
  * @return 0 on success; non-zero on error.
  */
-int measureTextSizeLink(HWND hWnd, HFONT hFont, const wchar_t *wstr, LPSIZE lpSize);
+int measureTextSizeLink(HWND hWnd, HFONT hFont, const TCHAR *tstr, LPSIZE lpSize);
 
 /**
  * Measure text size using GDI.
@@ -79,21 +66,14 @@ int measureTextSizeLink(HWND hWnd, HFONT hFont, const wchar_t *wstr, LPSIZE lpSi
  * calling the regular measureTextSize() function.
  * @param hWnd		[in] hWnd.
  * @param hFont		[in] Font.
- * @param wstr		[in] String.
+ * @param tstr		[in] String.
  * @param lpSize	[out] Size.
  * @return 0 on success; non-zero on error.
  */
-static inline int measureTextSizeLink(HWND hWnd, HFONT hFont, const std::wstring &wstr, LPSIZE lpSize)
+static inline int measureTextSizeLink(HWND hWnd, HFONT hFont, const std::tstring &tstr, LPSIZE lpSize)
 {
-	return measureTextSizeLink(hWnd, hFont, wstr.c_str(), lpSize);
+	return measureTextSizeLink(hWnd, hFont, tstr.c_str(), lpSize);
 }
-
-/**
- * Determine the monospaced font to use.
- * @param plfFontMono Pointer to LOGFONT to store the font name in.
- * @return 0 on success; negative POSIX error code on error.
- */
-int findMonospacedFont(LOGFONT *plfFontMono);
 
 /**
  * Get the alternate row color for ListViews.
@@ -104,6 +84,73 @@ int findMonospacedFont(LOGFONT *plfFontMono);
  * @return Alternate row color for ListViews.
  */
 COLORREF getAltRowColor(void);
+
+/**
+ * Get the alternate row color for ListViews in ARGB32 format.
+ * @return Alternate row color for ListViews in ARGB32 format.
+ */
+static inline uint32_t getAltRowColor_ARGB32(void)
+{
+	const COLORREF color = getAltRowColor();
+	return  (color & 0x00FF00) | 0xFF000000 |
+	       ((color & 0xFF) << 16) |
+	       ((color >> 16) & 0xFF);
+}
+
+/**
+ * Get a Windows system color in ARGB32 format.
+ *
+ * Both GDI+ and rp_image use ARGB32 format,
+ * whereas Windows' GetSysColor() uses ABGR32.
+ *
+ * @param nIndex System color index.
+ * @return ARGB32 system color.
+ */
+static inline uint32_t GetSysColor_ARGB32(int nIndex)
+{
+	const COLORREF color = GetSysColor(nIndex);
+	return  (color & 0x00FF00) | 0xFF000000 |
+	       ((color & 0xFF) << 16) |
+	       ((color >> 16) & 0xFF);
+}
+
+/**
+ * Are we using COMCTL32.DLL v6.10 or later?
+ * @return True if it's v6.10 or later; false if not.
+ */
+bool isComCtl32_v610(void);
+
+/**
+ * Get a filename using the Open File Name dialog.
+ *
+ * Depending on OS, this may use:
+ * - Vista+: IFileOpenDialog
+ * - XP: GetOpenFileName()
+ *
+ * @param hWnd		[in] Owner.
+ * @param dlgTitle	[in] Dialog title.
+ * @param filterSpec	[in] Filter specification. (RP format, UTF-8)
+ * @param origFilename	[in,opt] Starting filename.
+ * @return Filename, or empty string on error.
+ */
+std::tstring getOpenFileName(HWND hWnd, const TCHAR *dlgTitle, const char *filterSpec, const TCHAR *origFilename);
+
+/**
+ * Get a filename using the Save File Name dialog.
+ *
+ * Depending on OS, this may use:
+ * - Vista+: IFileSaveDialog
+ * - XP: GetSaveFileName()
+ *
+ * @param hWnd		[in] Owner.
+ * @param dlgTitle	[in] Dialog title.
+ * @param filterSpec	[in] Filter specification. (RP format, UTF-8)
+ * @param origFilename	[in,opt] Starting filename.
+ * @return Filename, or empty string on error.
+ */
+std::tstring getSaveFileName(HWND hWnd, const TCHAR *dlgTitle, const char *filterSpec, const TCHAR *origFilename);
+
+/** Window procedure subclasses **/
 
 /**
  * Subclass procedure for multi-line EDIT and RICHEDIT controls.

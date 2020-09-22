@@ -2,43 +2,34 @@
  * ROM Properties Page shell extension. (Win32)                            *
  * RpFile_IStream.hpp: IRpFile using an IStream*.                          *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_WIN32_RPFILE_ISTREAM_HPP__
 #define __ROMPROPERTIES_WIN32_RPFILE_ISTREAM_HPP__
 
-#include "librpbase/file/IRpFile.hpp"
+#include "librpfile/IRpFile.hpp"
 #include <objidl.h>
 
-class RpFile_IStream : public LibRpBase::IRpFile
+// zlib
+struct z_stream_s;
+
+class RpFile_IStream final : public LibRpFile::IRpFile
 {
 	public:
 		/**
 		 * Create an IRpFile using IStream* as the underlying storage mechanism.
-		 * @param pStream IStream*.
+		 * @param pStream	[in] IStream*.
+		 * @param gzip		[in] If true, handle gzipped files automatically.
 		 */
-		explicit RpFile_IStream(IStream *pStream);
-		virtual ~RpFile_IStream();
+		explicit RpFile_IStream(IStream *pStream, bool gzip = false);
+	protected:
+		virtual ~RpFile_IStream();	// call unref() instead
 
 	private:
-		typedef LibRpBase::IRpFile super;
-		RpFile_IStream(const RpFile_IStream &other);
-		RpFile_IStream &operator=(const RpFile_IStream &other);
+		typedef LibRpFile::IRpFile super;
+		RP_DISABLE_COPY(RpFile_IStream)
 
 	public:
 		/**
@@ -46,25 +37,12 @@ class RpFile_IStream : public LibRpBase::IRpFile
 		 * This usually only returns false if an error occurred.
 		 * @return True if the file is open; false if it isn't.
 		 */
-		virtual bool isOpen(void) const override final;
-
-		/**
-		 * dup() the file handle.
-		 *
-		 * Needed because IRpFile* objects are typically
-		 * pointers, not actual instances of the object.
-		 *
-		 * NOTE: The dup()'d IRpFile* does NOT have a separate
-		 * file pointer. This is due to how dup() works.
-		 *
-		 * @return dup()'d file, or nullptr on error.
-		 */
-		virtual IRpFile *dup(void) override final;
+		bool isOpen(void) const final;
 
 		/**
 		 * Close the file.
 		 */
-		virtual void close(void) override final;
+		void close(void) final;
 
 		/**
 		 * Read data from the file.
@@ -72,7 +50,7 @@ class RpFile_IStream : public LibRpBase::IRpFile
 		 * @param size Amount of data to read, in bytes.
 		 * @return Number of bytes read.
 		 */
-		virtual size_t read(void *ptr, size_t size) override final;
+		size_t read(void *ptr, size_t size) final;
 
 		/**
 		 * Write data to the file.
@@ -80,27 +58,34 @@ class RpFile_IStream : public LibRpBase::IRpFile
 		 * @param size Amount of data to read, in bytes.
 		 * @return Number of bytes written.
 		 */
-		virtual size_t write(const void *ptr, size_t size) override final;
+		size_t write(const void *ptr, size_t size) final;
 
 		/**
 		 * Set the file position.
 		 * @param pos File position.
 		 * @return 0 on success; -1 on error.
 		 */
-		virtual int seek(int64_t pos) override final;
+		int seek(off64_t pos) final;
 
 		/**
 		 * Get the file position.
 		 * @return File position, or -1 on error.
 		 */
-		virtual int64_t tell(void) override final;
+		off64_t tell(void) final;
 
 		/**
 		 * Truncate the file.
 		 * @param size New size. (default is 0)
 		 * @return 0 on success; negative POSIX error code on error.
 		 */
-		virtual int truncate(int64_t size = 0) override final;
+		int truncate(off64_t size = 0) final;
+
+		/**
+		 * Flush buffers.
+		 * This operation only makes sense on writable files.
+		 * @return 0 on success; negative POSIX error code on error.
+		 */
+		int flush(void) final;
 
 	public:
 		/** File properties. **/
@@ -109,17 +94,48 @@ class RpFile_IStream : public LibRpBase::IRpFile
 		 * Get the file size.
 		 * @return File size, or negative on error.
 		 */
-		virtual int64_t size(void) override final;
+		off64_t size(void) final;
 
 		/**
 		 * Get the filename.
 		 * @return Filename. (May be empty if the filename is not available.)
 		 */
-		virtual std::string filename(void) const override final;
+		std::string filename(void) const final;
+
+	public:
+		/** Extra functions **/
+
+		/**
+		 * Make the file writable.
+		 * @return 0 on success; negative POSIX error code on error.
+		 */
+		int makeWritable(void) final
+		{
+			// TODO: Actually do something here...
+			// For now, return 0 if writable; -ENOTSUP if not.
+			return (isWritable() ? 0 : -ENOTSUP);
+		}
 
 	protected:
 		IStream *m_pStream;
 		std::string m_filename;
+
+		// zlib
+		unsigned int m_z_uncomp_sz;
+		unsigned int m_z_filepos;	// position in compressed file
+		off64_t m_z_realpos;		// position in real file
+		struct z_stream_s *m_pZstm;
+		// zlib buffer
+		uint8_t *m_pZbuf;
+		ULONG m_zbufLen;
+		ULONG m_zcurPos;
+
+		/**
+		 * Copy the zlib stream from another RpFile_IStream.
+		 * @param other
+		 * @return 0 on success; non-zero on error.
+		 */
+		int copyZlibStream(const RpFile_IStream &other);
 };
 
 #endif /* __ROMPROPERTIES_WIN32_RPFILE_ISTREAM_HPP__ */

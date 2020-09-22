@@ -2,27 +2,12 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * WiiUData.hpp: Nintendo Wii U publisher data.                            *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2019 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "WiiUData.hpp"
-
-// C includes.
-#include <stdlib.h>
 
 namespace LibRomData {
 
@@ -44,7 +29,7 @@ class WiiUDataPrivate {
 		 * These games have the same publisher in all regions.
 		 * ID4 region byte is 'x'. (Not '\0' due to MSVC issues.)
 		 *
-		 * Reference: http://www.gametdb.com/WiiU/List
+		 * Reference: https://www.gametdb.com/WiiU/List
 		 */
 		static const WiiUDiscPublisher disc_publishers_noregion[];
 
@@ -53,7 +38,7 @@ class WiiUDataPrivate {
 		 * These games have different publishers in different regions.
 		 * ID4 region byte is the original region.
 		 *
-		 * Reference: http://www.gametdb.com/WiiU/List
+		 * Reference: https://www.gametdb.com/WiiU/List
 		 */
 		static const WiiUDiscPublisher disc_publishers_region[];
 
@@ -73,7 +58,7 @@ class WiiUDataPrivate {
  * These games have the same publisher in all regions.
  * ID4 region byte is 'x'. (Not '\0' due to MSVC issues.)
  *
- * Reference: http://www.gametdb.com/WiiU/List
+ * Reference: https://www.gametdb.com/WiiU/List
  */
 const WiiUDataPrivate::WiiUDiscPublisher WiiUDataPrivate::disc_publishers_noregion[] = {
 	{'AAFx', '0001'},	// Bayonetta
@@ -145,6 +130,7 @@ const WiiUDataPrivate::WiiUDiscPublisher WiiUDataPrivate::disc_publishers_noregi
 	{'ALRx', '00WR'},	// LEGO Marvel's Avengers
 	{'ALVx', '00YF'},	// Luv Me Buddies Wonderland
 	{'ALZx', '0001'},	// The Legend of Zelda: Breath of the Wild
+	{'AM7x', '0008'},	// Monster Hunter Frontier G7 Premium Package
 	{'AM8x', '0008'},	// Monster Hunter Frontier G8 Premium Package
 	{'AM9x', '0052'},	// The Amazing Spider-Man 2
 	{'AMAx', '0001'},	// Super Mario Maker
@@ -171,7 +157,7 @@ const WiiUDataPrivate::WiiUDiscPublisher WiiUDataPrivate::disc_publishers_noregi
 	{'APUx', '00C8'},	// Sangokushi 12 with Power-Up Kit
 	{'APWx', '00AF'},	// Kamen Rider: Battride War II (Premium TV & Movie Sound Edition)
 	{'APZx', '00WR'},	// LEGO Dimensions
-	{'AQUx', '0001'},	// Bayonetta 2 (TODO: Standalone or bundled?)
+	{'AQUx', '0001'},	// Bayonetta 2
 	{'ARBx', '0041'},	// Rabbids Land
 	{'ARDx', '0001'},	// Super Mario 3D World
 	{'ARKx', '0001'},	// Donkey Kong Country: Tropical Freeze
@@ -233,6 +219,7 @@ const WiiUDataPrivate::WiiUDiscPublisher WiiUDataPrivate::disc_publishers_noregi
 	{'BEDx', '0078'},	// Darksiders - Warmastered Edition
 	{'BENx', '008X'},	// Runbow Deluxe
 	{'BFNx', '00VZ'},	// Adventure Time: Finn & Jake Investigations
+	{'BH9x', '0008'},	// Monster Hunter Frontier G9 Premium Package
 	{'BJ7x', '0041'},	// Just Dance 2017
 	{'BJDx', '0041'},	// Just Dance 2015
 	{'BK7x', '0052'},	// Skylanders: Trap Team
@@ -243,7 +230,7 @@ const WiiUDataPrivate::WiiUDiscPublisher WiiUDataPrivate::disc_publishers_noregi
 	{'BLKx', '006V'},	// Legend of Kay Anniversary
 	{'BLTx', '00AF'},	// Gotouchi Tetsudou: Gotouchi Chara to Nihon Zenkoku no Tabi
 	{'BMSx', '00VZ'},	// Monster High: New Ghoul in School
-	{'BPCx', '0001'},	// Bayonetta 2 (TODO: Standalone or bundled?)
+	{'BPCx', '0001'},	// Bayonetta 2 (Special Edition)
 	{'BPEx', '0052'},	// The Peanuts Movie: Snoopy's Grand Adventure
 	{'BPMx', '00AF'},	// Pac-Man and the Ghostly Adventures 2
 	{'BR5x', '00JX'},	// FAST Racing NEO
@@ -282,7 +269,7 @@ const WiiUDataPrivate::WiiUDiscPublisher WiiUDataPrivate::disc_publishers_noregi
  * These games have different publishers in different regions.
  * ID4 region byte is the original region.
  *
- * Reference: http://www.gametdb.com/WiiU/List
+ * Reference: https://www.gametdb.com/WiiU/List
  */
 const WiiUDataPrivate::WiiUDiscPublisher WiiUDataPrivate::disc_publishers_region[] = {
 	{'ABEE', '00G9'},	// Ben 10: Omniverse (NTSC-U)
@@ -357,9 +344,9 @@ uint32_t WiiUData::lookup_disc_publisher(const char *id4)
 {
 	// Check the region-independent list first.
 	WiiUDataPrivate::WiiUDiscPublisher key;
-	key.id4 = ((uint8_t)id4[0] << 24) |
-		  ((uint8_t)id4[1] << 16) |
-		  ((uint8_t)id4[2] << 8) | 'x';
+	key.id4 = (static_cast<uint8_t>(id4[0]) << 24) |
+		  (static_cast<uint8_t>(id4[1]) << 16) |
+		  (static_cast<uint8_t>(id4[2]) << 8) | 'x';
 	key.publisher = 0;
 
 	// Do a binary search.
@@ -376,7 +363,7 @@ uint32_t WiiUData::lookup_disc_publisher(const char *id4)
 
 	// Check the region-specific list.
 	key.id4 &= ~0xFF;
-	key.id4 |= (uint8_t)id4[3];
+	key.id4 |= static_cast<uint8_t>(id4[3]);
 
 	// Do a binary search.
 	res = static_cast<const WiiUDataPrivate::WiiUDiscPublisher*>(bsearch(&key,

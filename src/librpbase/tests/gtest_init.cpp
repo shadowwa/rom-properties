@@ -2,54 +2,111 @@
  * ROM Properties Page shell extension. (librpbase/tests)                  *
  * gtest_init.c: Google Test initialization.                               *
  *                                                                         *
- * Copyright (c) 2016 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
+
+#include "librpbase/config.librpbase.h"
+
+// C includes. (C++ namespace)
+#include <cstdlib>
 
 // C++ includes.
 #include <locale>
 using std::locale;
 
-#include "librpbase/common.h"
+#include "common.h"
+#include "tcharx.h"
+
+// librpsecure
+#include "librpsecure/os-secure.h"
 
 #ifdef _WIN32
-#include "libwin32common/secoptions.h"
-
 // rp_image backend registration.
-#include "librpbase/img/RpGdiplusBackend.hpp"
-#include "librpbase/img/rp_image.hpp"
-using LibRpBase::RpGdiplusBackend;
-using LibRpBase::rp_image;
+#include "librptexture/img/RpGdiplusBackend.hpp"
+#include "librptexture/img/rp_image.hpp"
+using LibRpTexture::RpGdiplusBackend;
+using LibRpTexture::rp_image;
 #endif /* _WIN32 */
 
-extern "C" int gtest_main(int argc, char *argv[]);
+extern "C" int gtest_main(int argc, TCHAR *argv[]);
 
-int RP_C_API main(int argc, char *argv[])
+int RP_C_API _tmain(int argc, TCHAR *argv[])
 {
-#ifdef _WIN32
-	// Set Win32 security options.
-	secoptions_init();
+	// Set OS-specific security options.
+	rp_secure_param_t param;
+#if defined(_WIN32)
+	param.bHighSec = FALSE;
+#elif defined(HAVE_SECCOMP)
+	static const int syscall_wl[] = {
+		// Syscalls used by rp-download.
+		// TODO: Add more syscalls.
+		// FIXME: glibc-2.31 uses 64-bit time syscalls that may not be
+		// defined in earlier versions, including Ubuntu 14.04.
+		SCMP_SYS(fcntl),     SCMP_SYS(fcntl64),		// gcc profiling
+		SCMP_SYS(fstat),     SCMP_SYS(fstat64),		// __GI___fxstat() [printf()]
+		SCMP_SYS(fstatat64), SCMP_SYS(newfstatat),	// Ubuntu 19.10 (32-bit)
+		SCMP_SYS(futex),	// iconv_open()
+		SCMP_SYS(gettimeofday),	// 32-bit only? [testing::internal::GetTimeInMillis()]
+		SCMP_SYS(mmap),		// iconv_open()
+		SCMP_SYS(mmap2),	// iconv_open() [might only be needed on i386...]
+		SCMP_SYS(mprotect),	// iconv_open()
+		SCMP_SYS(munmap),	// free() [in some cases]
+		SCMP_SYS(lseek), SCMP_SYS(_llseek),
+		SCMP_SYS(open),		// Ubuntu 16.04
+		SCMP_SYS(openat),	// glibc-2.31
+#if defined(__SNR_openat2)
+		SCMP_SYS(openat2),	// Linux 5.6
+#elif defined(__NR_openat2)
+		__NR_openat2,		// Linux 5.6
+#endif /* __SNR_openat2 || __NR_openat2 */
 
+		// Google Test
+		SCMP_SYS(getcwd),	// testing::internal::FilePath::GetCurrentDir()
+					// - testing::internal::UnitTestImpl::AddTestInfo()
+		SCMP_SYS(ioctl),	// testing::internal::posix::IsATTY()
+
+		// MiniZip
+		SCMP_SYS(close),	// mktime() [mz_zip_dosdate_to_time_t()]
+		SCMP_SYS(stat), SCMP_SYS(stat64),	// mktime() [mz_zip_dosdate_to_time_t()]
+
+		// glibc ncsd
+		// TODO: Restrict connect() to AF_UNIX.
+		SCMP_SYS(connect), SCMP_SYS(recvmsg), SCMP_SYS(sendto),
+
+#if defined(__SNR_statx) || defined(__NR_statx)
+		//SCMP_SYS(getcwd),	// called by glibc's statx() [referenced above]
+		SCMP_SYS(statx),
+#endif /* __SNR_statx || __NR_statx */
+
+		-1	// End of whitelist
+	};
+	param.syscall_wl = syscall_wl;
+#elif defined(HAVE_PLEDGE)
+	// Promises:
+	// - stdio: General stdio functionality.
+	// - rpath: Read test cases.
+	param.promises = "stdio rpath";
+#elif defined(HAVE_TAME)
+	param.tame_flags = TAME_STDIO | TAME_RPATH;
+#else
+	param.dummy = 0;
+#endif
+	rp_secure_enable(param);
+
+#ifdef _WIN32
 	// Register RpGdiplusBackend.
 	// TODO: Static initializer somewhere?
 	rp_image::setBackendCreatorFn(RpGdiplusBackend::creator_fn);
-#endif
+#endif /* _WIN32 */
 
 	// Set the C and C++ locales.
-	locale::global(locale(""));
+	// NOTE: The variable needs to be static char[] because
+	// POSIX putenv() takes `char*` and the buffer becomes
+	// part of the environment.
+	static TCHAR lc_all_env[] = _T("LC_ALL=C");
+	_tputenv(lc_all_env);
+	locale::global(locale("C"));
 
 	// Call the actual main function.
 	return gtest_main(argc, argv);

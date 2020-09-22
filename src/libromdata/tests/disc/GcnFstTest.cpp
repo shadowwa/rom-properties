@@ -2,34 +2,25 @@
  * ROM Properties Page shell extension. (libromdata/tests)                 *
  * GcnFstTest.cpp: GameCube/Wii FST test.                                  *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
+
+// for HAVE_ZLIB for mz_compat.h
+#include "config.librpbase.h"
 
 // Google Test
 #include "gtest/gtest.h"
+#include "tcharx.h"
 
 // MiniZip
+#include <zlib.h>
 #include "mz_zip.h"
 #include "mz_compat.h"
 
-// librpbase
+// librpbase, librpfile
 #include "librpbase/TextFuncs.hpp"
-#include "librpbase/TextFuncs_utf8.hpp"
-#include "librpbase/file/FileSystem.hpp"
+#include "librpfile/FileSystem.hpp"
 using namespace LibRpBase;
 
 // libromdata
@@ -45,17 +36,19 @@ using LibRomData::GcnFst;
 #include "FstPrint.hpp"
 
 // C includes. (C++ namespace)
-#include <cctype>
+#include "ctypex.h"
 
 // C++ includes.
 #include <sstream>
 #include <string>
 #include <unordered_set>
+#include <vector>
 using std::istringstream;
 using std::ostream;
 using std::string;
 using std::stringstream;
 using std::unordered_set;
+using std::vector;
 
 // Uninitialized vector class.
 // Reference: http://andreoffringa.org/?q=uvector
@@ -91,8 +84,8 @@ inline ::std::ostream& operator<<(::std::ostream& os, const GcnFstTest_mode& mod
 };
 
 // Maximum file size for FST files.
-static const int MAX_GCN_FST_BIN_FILESIZE = 1024*1024;	// 1.0 MB
-static const int MAX_GCN_FST_TXT_FILESIZE = 1536*1024;	// 1.5 MB
+static const uint64_t MAX_GCN_FST_BIN_FILESIZE = 1024*1024;	// 1.0 MB
+static const uint64_t MAX_GCN_FST_TXT_FILESIZE = 1536*1024;	// 1.5 MB
 
 class GcnFstTest : public ::testing::TestWithParam<GcnFstTest_mode>
 {
@@ -102,8 +95,8 @@ class GcnFstTest : public ::testing::TestWithParam<GcnFstTest_mode>
 			, m_fst(nullptr)
 		{ }
 
-		virtual void SetUp(void) override final;
-		virtual void TearDown(void) override final;
+		void SetUp(void) final;
+		void TearDown(void) final;
 
 		/**
 		 * Open a Zip file for reading.
@@ -123,7 +116,7 @@ class GcnFstTest : public ::testing::TestWithParam<GcnFstTest_mode>
 		static int getFileFromZip(const char *zip_filename,
 			const char *int_filename,
 			ao::uvector<uint8_t>& buf,
-			int max_filesize = MAX_GCN_FST_BIN_FILESIZE);
+			uint64_t max_filesize = MAX_GCN_FST_BIN_FILESIZE);
 
 	public:
 		// FST data.
@@ -136,16 +129,6 @@ class GcnFstTest : public ::testing::TestWithParam<GcnFstTest_mode>
 		 */
 		void checkNoDuplicateFilenames(const char *subdir);
 
-		/**
-		 * Print a uint32_t using en_US formatting.
-		 * This is needed in order to work around issues
-		 * caused by locales with number formatting that
-		 * doesn't match en_US.
-		 * @param os	[out] ostream.
-		 * @param val	[in] Number.
-		 */
-		static void print_uint32_en_US(ostream &os, uint32_t val);
-
 	public:
 		/** Test case parameters. **/
 
@@ -155,7 +138,7 @@ class GcnFstTest : public ::testing::TestWithParam<GcnFstTest_mode>
 		 * @param offsetShift File offset shift. (0 == GCN, 2 == Wii)
 		 * @return FST files.
 		 */
-		static std::vector<GcnFstTest_mode> ReadTestCasesFromDisk(uint8_t offsetShift);
+		static vector<GcnFstTest_mode> ReadTestCasesFromDisk(uint8_t offsetShift);
 
 		/**
 		 * Test case suffix generator.
@@ -191,8 +174,21 @@ void GcnFstTest::SetUp(void)
 
 	ASSERT_GT(getFileFromZip(zip_filename, mode.fst_filename.c_str(), m_fst_buf, MAX_GCN_FST_BIN_FILESIZE), 0);
 
+	// Check for NKit FST recovery data.
+	// These FSTs have an extra header at the top, indicating what
+	// disc the FST belongs to.
+	unsigned int fst_start_offset = 0;
+	static const uint8_t root_dir_data[] = {1,0,0,0,0,0,0,0,0,0};
+	if (m_fst_buf.size() >= 0x60) {
+		if (!memcmp(&m_fst_buf[0x50], root_dir_data, sizeof(root_dir_data))) {
+			// Found an NKit FST.
+			fst_start_offset = 0x50;
+		}
+	}
+
 	// Create the GcnFst object.
-	m_fst = new GcnFst(m_fst_buf.data(), (uint32_t)m_fst_buf.size(), mode.offsetShift);
+	m_fst = new GcnFst(&m_fst_buf[fst_start_offset],
+		static_cast<uint32_t>(m_fst_buf.size() - fst_start_offset), mode.offsetShift);
 	ASSERT_TRUE(m_fst->isOpen());
 }
 
@@ -225,11 +221,7 @@ unzFile GcnFstTest::openZip(const char *filename)
 	fill_win32_filefunc64W(&ffunc);
 	return unzOpen2_64(path.c_str(), &ffunc);
 #else /* !_WIN32 */
-#ifdef RP_UTF8
 	return unzOpen(path.c_str());
-#else /* RP_UTF16 */
-	return unzOpen(path.c_str());
-#endif
 #endif /* _WIN32 */
 }
 
@@ -244,7 +236,7 @@ unzFile GcnFstTest::openZip(const char *filename)
 int GcnFstTest::getFileFromZip(const char *zip_filename,
 	const char *int_filename,
 	ao::uvector<uint8_t>& buf,
-	int max_filesize)
+	uint64_t max_filesize)
 {
 	// Open the Zip file.
 	// NOTE: MiniZip 2.2.3's compatibility functions
@@ -277,9 +269,9 @@ int GcnFstTest::getFileFromZip(const char *zip_filename,
 		unzClose(unz);
 		return -3;
 	}
-	EXPECT_LE(file_info.uncompressed_size, (uLong)max_filesize) <<
+	EXPECT_LE(file_info.uncompressed_size, max_filesize) <<
 		"Compressed file '" << int_filename << "' is too big.";
-	if (file_info.uncompressed_size > (uLong)max_filesize) {
+	if (file_info.uncompressed_size > max_filesize) {
 		unzClose(unz);
 		return -4;
 	}
@@ -296,11 +288,11 @@ int GcnFstTest::getFileFromZip(const char *zip_filename,
 	// NOTE: zlib and minizip are only guaranteed to be able to
 	// read UINT16_MAX (64 KB) at a time, and the updated MiniZip
 	// from https://github.com/nmoinvaz/minizip enforces this.
-	buf.resize((size_t)file_info.uncompressed_size);
+	buf.resize(static_cast<size_t>(file_info.uncompressed_size));
 	uint8_t *p = buf.data();
 	size_t size = buf.size();
 	while (size > 0) {
-		int to_read = (int)(size > UINT16_MAX ? UINT16_MAX : size);
+		int to_read = static_cast<int>(size > UINT16_MAX ? UINT16_MAX : size);
 		ret = unzReadCurrentFile(unz, p, to_read);
 		EXPECT_EQ(to_read, ret);
 		if (ret != to_read) {
@@ -334,7 +326,7 @@ int GcnFstTest::getFileFromZip(const char *zip_filename,
 
 	// Close the Zip file.
 	unzClose(unz);
-	return (int)file_info.uncompressed_size;
+	return static_cast<int>(file_info.uncompressed_size);
 }
 
 /**
@@ -370,7 +362,8 @@ void GcnFstTest::checkNoDuplicateFilenames(const char *subdir)
 	}
 
 	// Check subdirectories.
-	for (auto iter = subdirs.cbegin(); iter != subdirs.cend(); ++iter) {
+	const auto subdirs_cend = subdirs.cend();
+	for (auto iter = subdirs.cbegin(); iter != subdirs_cend; ++iter) {
 		string path = subdir;
 		if (!path.empty() && path[path.size()-1] != '/') {
 			path += '/';
@@ -384,34 +377,17 @@ void GcnFstTest::checkNoDuplicateFilenames(const char *subdir)
 }
 
 /**
- * Print a uint32_t using en_US formatting.
- * This is needed in order to work around issues
- * caused by locales with number formatting that
- * doesn't match en_US.
- * @param os	[out] ostream.
- * @param val	[in] Number.
+ * Verify that '/' is collapsed correctly.
  */
-void GcnFstTest::print_uint32_en_US(ostream &os, uint32_t val)
+TEST_P(GcnFstTest, RootDirectoryCollapse)
 {
-	char buf[16];
-	char *p = &buf[0];
-	unsigned int digits = 0;
-	do {
-		if (digits > 0 && (digits % 3 == 0)) {
-			// en_US thousands separator.
-			*p++ = ',';
-		}
-		assert(p < &buf[sizeof(buf)]);
-		*p++ = '0' + (val % 10);
-		val /= 10;
-		digits++;
-	} while (val != 0);
-	assert(p < &buf[sizeof(buf)]);
-	*p = 0;
-
-	// Number is formatted, but it's in reverse-order.
-	while (p > &buf[0]) {
-		os << *--p;
+	char path_buf[17];
+	memset(path_buf, 0, sizeof(path_buf));
+	for (unsigned int i = 0; i < sizeof(path_buf)-1; i++) {
+		path_buf[i] = '/';
+		IFst::Dir *rootdir = m_fst->opendir(path_buf);
+		EXPECT_TRUE(rootdir != nullptr);
+		m_fst->closedir(rootdir);
 	}
 }
 
@@ -464,17 +440,8 @@ TEST_P(GcnFstTest, FstPrint)
 		string(reinterpret_cast<const char*>(fst_txt_buf.data()), fst_txt_buf.size()));
 
 	// Print the FST.bin to a new stringstream.
-	FstFileCount fc = {0, 0};
 	stringstream fst_text_actual;
-	fstPrint(m_fst, fst_text_actual, &fc);
-
-	// Print the directory/file count manually in order to
-	// avoid locale issues. (Test data uses en_US.)
-	fst_text_actual << '\n';
-	print_uint32_en_US(fst_text_actual, fc.dirs);
-	fst_text_actual << ' ' << (fc.dirs == 1 ? "directory" : "directories") << ", ";
-	print_uint32_en_US(fst_text_actual, fc.files);
-	fst_text_actual << ' ' << (fc.files == 1 ? "file" : "files") << '\n';
+	fstPrint(m_fst, fst_text_actual);
 
 	// Compare the two stringstreams.
 	// NOTE: Only Unix line endings are supported.
@@ -566,17 +533,17 @@ std::vector<GcnFstTest_mode> GcnFstTest::ReadTestCasesFromDisk(uint8_t offsetShi
 		EXPECT_GT(file_info.size_filename, 0) << "A filename in the ZIP file has no name. Skipping...";
 
 		// Make sure the file isn't too big.
-		EXPECT_LE(file_info.uncompressed_size, (uLong)MAX_GCN_FST_BIN_FILESIZE) <<
+		EXPECT_LE(file_info.uncompressed_size, MAX_GCN_FST_BIN_FILESIZE) <<
 			"GCN FST file '" << filename << "' is too big. (maximum size is 1 MB)";
 
 		if (file_info.size_filename > 0 &&
-		    file_info.uncompressed_size <= (uLong)MAX_GCN_FST_BIN_FILESIZE)
+		    file_info.uncompressed_size <= MAX_GCN_FST_BIN_FILESIZE)
 		{
 			// Add this filename to the list.
 			// NOTE: Filename might not be NULL-terminated,
 			// so use the explicit length.
 			GcnFstTest_mode mode(string(filename, file_info.size_filename), offsetShift);
-			files.push_back(mode);
+			files.emplace_back(mode);
 		}
 
 		// Next file.
@@ -604,27 +571,30 @@ string GcnFstTest::test_case_suffix_generator(const ::testing::TestParamInfo<Gcn
 
 	// Replace all non-alphanumeric characters with '_'.
 	// See gtest-param-util.h::IsValidParamName().
-	for (int i = (int)suffix.size()-1; i >= 0; i--) {
-		char chr = suffix[i];
-		if (!isalnum(chr) && chr != '_') {
-			suffix[i] = '_';
+	std::for_each(suffix.begin(), suffix.end(),
+		[](char &c) {
+			// NOTE: Not checking for '_' because that
+			// wastes a branch.
+			if (!ISALNUM(c)) {
+				c = '_';
+			}
 		}
-	}
+	);
 
 	return suffix;
 }
 
-INSTANTIATE_TEST_CASE_P(GameCube, GcnFstTest,
+INSTANTIATE_TEST_SUITE_P(GameCube, GcnFstTest,
 	testing::ValuesIn(GcnFstTest::ReadTestCasesFromDisk(0))
 	, GcnFstTest::test_case_suffix_generator);
 
-INSTANTIATE_TEST_CASE_P(Wii, GcnFstTest,
+INSTANTIATE_TEST_SUITE_P(Wii, GcnFstTest,
 	testing::ValuesIn(GcnFstTest::ReadTestCasesFromDisk(2))
 	, GcnFstTest::test_case_suffix_generator);
 
 } }
 
-extern "C" int gtest_main(int argc, char *argv[])
+extern "C" int gtest_main(int argc, TCHAR *argv[])
 {
 	fprintf(stderr, "LibRomData test suite: GcnFst tests.\n\n");
 	fflush(nullptr);

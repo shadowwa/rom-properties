@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * RomData_p.hpp: ROM data base class. (PRIVATE CLASS)                     *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBRPBASE_ROMDATA_P_HPP__
@@ -30,14 +17,22 @@
 
 #include "RomData.hpp"
 
+// TODO: Remove from here and add to each RomData subclass?
+#include "RomFields.hpp"
+#include "RomMetaData.hpp"
+
+namespace LibRpFile {
+	class IRpFile;
+}
+namespace LibRpTexture {
+	class rp_image;
+}
+
 namespace LibRpBase {
 
-class IRpFile;
-class RomData;
 class RomFields;
-class rp_image;
+class RomMetaData;
 
-class RomData;
 class RomDataPrivate
 {
 	public:
@@ -47,7 +42,7 @@ class RomDataPrivate
 		 * @param q RomData class.
 		 * @param file ROM file.
 		 */
-		RomDataPrivate(RomData *q, IRpFile *file);
+		RomDataPrivate(RomData *q, LibRpFile::IRpFile *file);
 
 		virtual ~RomDataPrivate();
 
@@ -58,25 +53,21 @@ class RomDataPrivate
 		RomData *const q_ptr;
 
 	public:
-		volatile int ref_cnt;		// Reference count.
 		bool isValid;			// Subclass must set this to true if the ROM is valid.
-		IRpFile *file;			// Open file.
-		RomFields *const fields;	// ROM fields.
+		bool isCompressed;		// True if the file is compressed. (transparent decompression)
+		LibRpFile::IRpFile *file;	// Open file.
+		std::string filename;		// Copy of the filename.
+		RomFields *const fields;	// ROM fields. (NOTE: allocated by the base class)
+		RomMetaData *metaData;		// ROM metadata. (NOTE: nullptr initially.)
 
-		// Class name for user configuration. (ASCII) (default is nullptr)
-		const char *className;
-		// File type. (default is FTYPE_ROM_IMAGE)
-		RomData::FileType fileType;
+	public:
+		/** These fields must be set by RomData subclasses in their constructors. **/
+		const char *className;		// Class name for user configuration. (ASCII) (default is nullptr)
+		const char *mimeType;		// MIME type. (ASCII) (default is nullptr)
+		RomData::FileType fileType;	// File type. (default is FileType::ROM_Image)
 
 	public:
 		/** Convenience functions. **/
-
-		/**
-		 * Format a file size.
-		 * @param fileSize File size.
-		 * @return Formatted file size.
-		 */
-		static std::string formatFileSize(int64_t fileSize);
 
 		/**
 		 * Get the GameTDB URL for a given game.
@@ -109,6 +100,36 @@ class RomDataPrivate
 			const char *ext);
 
 		/**
+		 * Get the RPDB URL for a given game.
+		 * @param system System name.
+		 * @param type Image type.
+		 * @param region Region name.
+		 * @param gameID Game ID.
+		 * @param ext File extension, e.g. ".png" or ".jpg".
+		 * TODO: PAL multi-region selection?
+		 * @return RPDB URL.
+		 */
+		static std::string getURL_RPDB(
+			const char *system, const char *type,
+			const char *region, const char *gameID,
+			const char *ext);
+
+		/**
+		 * Get the RPDB cache key for a given game.
+		 * @param system System name.
+		 * @param type Image type.
+		 * @param region Region name.
+		 * @param gameID Game ID.
+		 * @param ext File extension, e.g. ".png" or ".jpg".
+		 * TODO: PAL multi-region selection?
+		 * @return RPDB cache key.
+		 */
+		static std::string getCacheKey_RPDB(
+			const char *system, const char *type,
+			const char *region, const char *gameID,
+			const char *ext);
+
+		/**
 		 * Select the best size for an image.
 		 * @param sizeDefs Image size definitions.
 		 * @param size Requested thumbnail dimension. (assuming a square thumbnail)
@@ -123,6 +144,26 @@ class RomDataPrivate
 		 * @return Unix time_t, or -1 on error.
 		 */
 		static time_t ascii_yyyymmdd_to_unix_time(const char *ascii_date);
+
+		/**
+		 * Convert a BCD timestamp to Unix time.
+		 * @param bcd_tm BCD timestamp. (YY YY MM DD HH mm ss)
+		 * @param size Size of BCD timestamp. (4 or 7)
+		 * @return Unix time, or -1 if an error occurred.
+		 *
+		 * NOTE: -1 is a valid Unix timestamp (1970/01/01), but is
+		 * not likely to be valid, since the first programmable
+		 * video game consoles were released in the late 1970s.
+		 */
+		static time_t bcd_to_unix_time(const uint8_t *bcd_tm, size_t size);
+
+		/**
+		 * Convert an ISO PVD timestamp to UNIX time.
+		 * @param pvd_time PVD timestamp (16-char buffer)
+		 * @param tz_offset PVD timezone offset
+		 * @return UNIX time, or -1 if invalid or not set.
+		 */
+		static time_t pvd_time_to_unix_time(const char pvd_time[16], int8_t tz_offset);
 };
 
 }

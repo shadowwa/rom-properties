@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (Win32)                            *
  * RP_ExtractIcon.hpp: IExtractIcon implementation.                        *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_WIN32_RP_EXTRACTICON_H__
@@ -24,7 +11,7 @@
 
 // librpbase
 #include "librpbase/config.librpbase.h"
-#include "librpbase/common.h"
+#include "common.h"
 
 // Reference: http://www.codeproject.com/Articles/338268/COM-in-C
 #include "libwin32common/ComBase.hpp"
@@ -41,10 +28,11 @@ namespace LibWin32Common {
 class RP_ExtractIcon_Private;
 
 class UUID_ATTR("{E51BC107-E491-4B29-A6A3-2A4309259802}")
-RP_ExtractIcon : public LibWin32Common::ComBase3<IPersistFile, IExtractIconW, IExtractIconA>
+RP_ExtractIcon final : public LibWin32Common::ComBase3<IPersistFile, IExtractIconW, IExtractIconA>
 {
 	public:
 		RP_ExtractIcon();
+	protected:
 		virtual ~RP_ExtractIcon();
 
 	private:
@@ -56,7 +44,7 @@ RP_ExtractIcon : public LibWin32Common::ComBase3<IPersistFile, IExtractIconW, IE
 
 	public:
 		// IUnknown
-		IFACEMETHODIMP QueryInterface(REFIID riid, LPVOID *ppvObj) override final;
+		IFACEMETHODIMP QueryInterface(REFIID riid, LPVOID *ppvObj) final;
 
 	public:
 		/**
@@ -71,7 +59,7 @@ RP_ExtractIcon : public LibWin32Common::ComBase3<IPersistFile, IExtractIconW, IE
 		 * @param ext File extension, including the leading dot.
 		 * @return ERROR_SUCCESS on success; Win32 error code on error.
 		 */
-		static LONG RegisterFileType(LibWin32Common::RegKey &hkcr, LPCWSTR ext);
+		static LONG RegisterFileType(LibWin32Common::RegKey &hkcr, LPCTSTR ext);
 
 		/**
 		 * Unregister the COM object.
@@ -85,36 +73,42 @@ RP_ExtractIcon : public LibWin32Common::ComBase3<IPersistFile, IExtractIconW, IE
 		 * @param ext File extension, including the leading dot.
 		 * @return ERROR_SUCCESS on success; Win32 error code on error.
 		 */
-		static LONG UnregisterFileType(LibWin32Common::RegKey &hkcr, LPCWSTR ext);
+		static LONG UnregisterFileType(LibWin32Common::RegKey &hkcr, LPCTSTR ext);
 
 	public:
 		// IPersist (IPersistFile base class)
-		IFACEMETHODIMP GetClassID(CLSID *pClassID) override final;
+		IFACEMETHODIMP GetClassID(CLSID *pClassID) final;
 		// IPersistFile
-		IFACEMETHODIMP IsDirty(void) override final;
-		IFACEMETHODIMP Load(LPCOLESTR pszFileName, DWORD dwMode) override final;
-		IFACEMETHODIMP Save(LPCOLESTR pszFileName, BOOL fRemember) override final;
-		IFACEMETHODIMP SaveCompleted(LPCOLESTR pszFileName) override final;
-		IFACEMETHODIMP GetCurFile(LPOLESTR *ppszFileName) override final;
+		IFACEMETHODIMP IsDirty(void) final;
+		IFACEMETHODIMP Load(LPCOLESTR pszFileName, DWORD dwMode) final;
+		IFACEMETHODIMP Save(LPCOLESTR pszFileName, BOOL fRemember) final;
+		IFACEMETHODIMP SaveCompleted(LPCOLESTR pszFileName) final;
+		IFACEMETHODIMP GetCurFile(LPOLESTR *ppszFileName) final;
 
 		// IExtractIconW
 		IFACEMETHODIMP GetIconLocation(UINT uFlags, LPWSTR pszIconFile,
-			UINT cchMax, int *piIndex, UINT *pwFlags) override final;
+			UINT cchMax, int *piIndex, UINT *pwFlags) final;
 		IFACEMETHODIMP Extract(LPCWSTR pszFile, UINT nIconIndex,
 			HICON *phiconLarge, HICON *phiconSmall,
-			UINT nIconSize) override final;
+			UINT nIconSize) final;
 
 		// IExtractIconA
 		IFACEMETHODIMP GetIconLocation(UINT uFlags, LPSTR pszIconFile,
-			UINT cchMax, int *piIndex, UINT *pwFlags) override final;
+			UINT cchMax, int *piIndex, UINT *pwFlags) final;
 		IFACEMETHODIMP Extract(LPCSTR pszFile, UINT nIconIndex,
 			HICON *phiconLarge, HICON *phiconSmall,
-			UINT nIconSize) override final;
+			UINT nIconSize) final;
 };
 
 #ifdef __CRT_UUID_DECL
-// Required for MinGw-w64 __uuidof() emulation.
-__CRT_UUID_DECL(RP_ExtractIcon, 0xe51bc107, 0xe491, 0x4b29, 0xa6, 0xa3, 0x2a, 0x43, 0x09, 0x25, 0x98, 0x02)
+// Required for MinGW-w64 __uuidof() emulation.
+__CRT_UUID_DECL(RP_ExtractIcon, __MSABI_LONG(0xe51bc107), 0xe491, 0x4b29, 0xa6,0xa3, 0x2a, 0x43, 0x09, 0x25, 0x98, 0x02)
+
+// FIXME: MSYS2/MinGW-w64 (gcc-9.2.0-2, MinGW-w64 7.0.0.5524.2346384e-1)
+// doesn't declare the UUID for either IExtractIconW or IExtractIconA for
+// __uuidof() emulation.
+__CRT_UUID_DECL(IExtractIconA, __MSABI_LONG(0x000214eb), 0, 0, 0xc0,0, 0, 0, 0, 0, 0, 0x46)
+__CRT_UUID_DECL(IExtractIconW, __MSABI_LONG(0x000214fa), 0, 0, 0xc0,0, 0, 0, 0, 0, 0, 0x46)
 #endif
 
 #endif /* __ROMPROPERTIES_WIN32_RP_EXTRACTICON_H__ */

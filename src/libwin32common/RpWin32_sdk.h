@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (libwin32common)                   *
  * RpWin32_sdk.h: Windows SDK defines and includes.                        *
  *                                                                         *
- * Copyright (c) 2009-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2009-2019 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBWIN32COMMON_RPWIN32_SDK_H__
@@ -53,7 +40,7 @@
 //#define NOSYSMETRICS 1
 //#define NOMENUS 1
 #define NOICONS 1
-#define NOKEYSTATES 1
+//#define NOKEYSTATES 1
 #define NOSYSCOMMANDS 1
 //#define NORASTEROPS 1
 //#define NOSHOWWINDOW 1
@@ -61,7 +48,7 @@
 //#define NOCLIPBOARD 1
 //#define NOCOLOR 1
 //#define NOCTLMGR 1
-#define NODRAWTEXT 1
+//#define NODRAWTEXT 1
 //#define NOGDI 1
 //#define NOKERNEL 1
 //#define NONLS 1
@@ -71,7 +58,7 @@
 #define NOMINMAX 1
 //#define NOMSG 1
 #define NOOPENFILE 1
-#define NOSCROLL 1
+//#define NOSCROLL 1
 #define NOSERVICE 1
 //#define NOSOUND 1
 //#define NOTEXTMETRIC 1
@@ -85,6 +72,26 @@
 #define NOMCX 1
 
 #include <windows.h>
+#include <tchar.h>
+
+#if defined(__cplusplus) && !defined(tstring)
+// FIXME: Would be better to use typedef, but oh well.
+# ifdef _UNICODE
+#  define tstring wstring
+# else /* !_UNICODE */
+#  define tstring string
+# endif /* _UNICODE */
+#endif /* defined(__cplusplus) && !defined(tstring) */
+
+#ifndef WM_DPICHANGED
+# define WM_DPICHANGED 0x2E0
+#endif
+#ifndef WM_DPICHANGED_BEFOREPARENT
+# define WM_DPICHANGED_BEFOREPARENT 0x2E2
+#endif
+#ifndef WM_DPICHANGED_AFTERPARENT
+# define WM_DPICHANGED_AFTERPARENT 0x2E3
+#endif
 
 #if defined(__GNUC__) && defined(__MINGW32__) && _WIN32_WINNT < 0x0502 && defined(__cplusplus)
 /**
@@ -103,23 +110,47 @@ static inline ULONG InterlockedDecrement(ULONG volatile *Addend)
 
 // UUID attribute.
 #ifdef _MSC_VER
-#define UUID_ATTR(str) __declspec(uuid(str))
+# define UUID_ATTR(str) __declspec(uuid(str))
 #else /* !_MSC_VER */
 // UUID attribute is not supported by gcc-5.2.0.
-#define UUID_ATTR(str)
+# define UUID_ATTR(str)
 #endif /* _MSC_VER */
 
 // SAL 1.0 annotations not supported by MinGW-w64 5.0.1.
 #ifndef __out_opt
-#define __out_opt
+# define __out_opt
 #endif
 
-// SAL 2.0 annotations not supported by MSVC 2010.
+// SAL 2.0 annotations not supported by Windows SDK 7.1A. (MSVC 2010)
 #ifndef _COM_Outptr_
-#define _COM_Outptr_
+# define _COM_Outptr_
 #endif
 #ifndef _Outptr_
-#define _Outptr_
+# define _Outptr_
+#endif
+#ifndef _Acquires_lock_
+# define _Acquires_lock_(lock)
+#endif
+#ifndef _Releases_lock_
+# define _Releases_lock_(lock)
+#endif
+#ifndef _Out_writes_
+# define _Out_writes_(var)
+#endif
+#ifndef _Outptr_result_nullonfailure_
+# define _Outptr_result_nullonfailure_
+#endif
+#ifndef _Outptr_opt_
+# define _Outptr_opt_
+#endif
+
+// FIXME: _Check_return_ on MSYS2/MinGW-w64 (gcc-9.2.0-2, MinGW-w64 7.0.0.5524.2346384e-1) fails:
+// "error: expected unqualified-id before string constant"
+#if defined(__GNUC__)
+# ifdef _Check_return_
+#  undef _Check_return_
+# endif
+# define _Check_return_
 #endif
 
 // Current image instance.

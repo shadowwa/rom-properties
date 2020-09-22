@@ -1,29 +1,16 @@
 /***************************************************************************
- * ROM Properties Page shell extension. (KDE4/KDE5)                        *
+ * ROM Properties Page shell extension. (KDE4/KF5)                         *
  * RpQImageBackend.hpp: rp_image_backend using QImage.                     *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_KDE_RPQIMAGEBACKEND_HPP__
 #define __ROMPROPERTIES_KDE_RPQIMAGEBACKEND_HPP__
 
-// librpbase
-#include "librpbase/img/rp_image_backend.hpp"
+// librptexture
+#include "librptexture/img/rp_image_backend.hpp"
 
 // Qt
 #include <QtCore/QVector>
@@ -33,30 +20,39 @@
  * rp_image data storage class.
  * This can be overridden for e.g. QImage or GDI+.
  */
-class RpQImageBackend : public LibRpBase::rp_image_backend
+class RpQImageBackend : public LibRpTexture::rp_image_backend
 {
 	public:
-		RpQImageBackend(int width, int height, LibRpBase::rp_image::Format format);
+		RpQImageBackend(int width, int height, LibRpTexture::rp_image::Format format);
 
 	private:
-		typedef LibRpBase::rp_image_backend super;
+		typedef LibRpTexture::rp_image_backend super;
 		Q_DISABLE_COPY(RpQImageBackend)
 
 	public:
 		/**
 		 * Creator function for rp_image::setBackendCreatorFn().
 		 */
-		static LibRpBase::rp_image_backend *creator_fn(int width, int height, LibRpBase::rp_image::Format format);
+		static LibRpTexture::rp_image_backend *creator_fn(int width, int height, LibRpTexture::rp_image::Format format);
 
 		// Image data.
-		virtual void *data(void) override final;
-		virtual const void *data(void) const override final;
-		virtual size_t data_len(void) const override final;
+		void *data(void) final;
+		const void *data(void) const final;
+		size_t data_len(void) const final;
 
 		// Image palette.
-		virtual uint32_t *palette(void) override final;
-		virtual const uint32_t *palette(void) const override final;
-		virtual int palette_len(void) const override final;
+		uint32_t *palette(void) final;
+		const uint32_t *palette(void) const final;
+		int palette_len(void) const final;
+
+	public:
+		/**
+		 * Shrink image dimensions.
+		 * @param width New width.
+		 * @param height New height.
+		 * @return 0 on success; negative POSIX error code on error.
+		 */
+		int shrink(int width, int height) final;
 
 	public:
 		/**

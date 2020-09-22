@@ -1,21 +1,9 @@
 /***************************************************************************
- * ROM Properties Page shell extension. (KDE4/KDE5)                        *
+ * ROM Properties Page shell extension. (KDE4/KF5)                         *
  * RomDataView.hpp: RomData viewer.                                        *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License       *
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.   *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_KDE_ROMDATAVIEW_HPP__
@@ -49,29 +37,26 @@ class RomDataView : public QWidget
 		/** QWidget overridden functions. **/
 
 		/**
-		 * State change handler.
-		 *
-		 * Used to determine if the system font or theme
-		 * changes, in which case the ListData row heights
-		 * need to be recalculated.
-		 *
-		 * @param event QEvent.
-		 */
-		virtual void changeEvent(QEvent *event) override final;
-
-		/**
 		 * Window has been hidden.
 		 * This means that this tab has been selected.
 		 * @param event QShowEvent.
 		 */
-		virtual void showEvent(QShowEvent *event) override final;
+		void showEvent(QShowEvent *event) final;
 
 		/**
 		 * Window has been hidden.
 		 * This means that a different tab has been selected.
 		 * @param event QHideEvent.
 		 */
-		virtual void hideEvent(QHideEvent *event) override final;
+		void hideEvent(QHideEvent *event) final;
+
+		/**
+		 * Event filter for recalculating RFT_LISTDATA row heights.
+		 * @param object QObject.
+		 * @param event Event.
+		 * @return True to filter the event; false to pass it through.
+		 */
+		bool eventFilter(QObject *object, QEvent *event) final;
 
 	protected slots:
 		/** Widget slots. **/
@@ -79,16 +64,17 @@ class RomDataView : public QWidget
 		/**
 		 * Disable user modification of RFT_BITFIELD checkboxes.
 		 */
-		void bitfield_toggled_slot(bool checked);
+		void bitfield_clicked_slot(bool checked);
 
 		/**
-		 * Animated icon timer.
+		 * The RFT_MULTI_STRING language was changed.
+		 * @param index Index.
 		 */
-		void tmrIconAnim_timeout(void);
-
-		/** Properties. **/
+		void cboLanguage_currentIndexChanged_slot(int index);
 
 	public:
+		/** Properties. **/
+
 		/**
 		 * Get the current RomData object.
 		 * @return RomData object.
@@ -110,6 +96,13 @@ class RomDataView : public QWidget
 		 * @param romData New RomData object.
 		 */
 		void romDataChanged(LibRpBase::RomData *romData);
+
+	private slots:
+		/**
+		 * An "Options" menu action was triggered.
+		 * @param id Options ID.
+		 */
+		void menuOptions_action_triggered(int id);
 };
 
 #endif /* __ROMPROPERTIES_KDE_ROMDATAVIEW_HPP__ */

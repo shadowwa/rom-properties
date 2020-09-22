@@ -2,81 +2,34 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * TextFuncs.hpp: Text encoding functions.                                 *
  *                                                                         *
- * Copyright (c) 2009-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2009-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBRPBASE_TEXTFUNCS_HPP__
 #define __ROMPROPERTIES_LIBRPBASE_TEXTFUNCS_HPP__
 
-#include "librpbase/config.librpbase.h"
-
-#ifdef RP_UTF8
-// rp_str*() are inlined versions of the standard
-// str*() functions in the UTF-8 build.
-#include <cstring>
-#endif
-
-#if defined(RP_UTF16) && defined(RP_WIS16)
-// rp_str*() are inlined versions of the standard
-// wcs*() functions in the UTF-16 build if
-// wchar_t is 16-bit.
-#include <cwchar>
-#endif
-
 // System byteorder is needed for conversions from UTF-16.
 // Conversions to UTF-16 always use host-endian.
-#include "byteorder.h"
+#include "librpcpu/byteorder.h"
 
-// printf()-style function attribute.
-#ifndef ATTR_PRINTF
-# ifdef __GNUC__
-#  define ATTR_PRINTF(fmt, args) __attribute__((format(printf, fmt, args)))
-# else
-#  define ATTR_PRINTF(fmt, args)
-# endif
-#endif /* ATTR_PRINTF */
+// Common definitions, including function attributes.
+#include "common.h"
 
-/** Reimplementations of libc functions that aren't present on this system. **/
+// C includes.
+#include <stddef.h>	/* size_t */
+#include <stdarg.h>
 
-#ifndef HAVE_STRNLEN
-/**
- * String length with limit. (8-bit strings)
- * @param str The string itself
- * @param maxlen Maximum length of the string
- * @returns equivivalent to min(strlen(str), maxlen) without buffer overruns
- */
-extern "C"
-size_t strnlen(const char *str, size_t maxlen);
-#endif /* HAVE_STRNLEN */
+// C++ includes.
+#include <string>
 
-#ifndef HAVE_MEMMEM
-/**
- * Find a string within a block of memory.
- * @param haystack Block of memory.
- * @param haystacklen Length of haystack.
- * @param needle String to search for.
- * @param needlelen Length of needle.
- * @return Location of needle in haystack, or nullptr if not found.
- */
-void *memmem(const void *haystack, size_t haystacklen,
-	     const void *needle, size_t needlelen);
-#endif /* HAVE_MEMMEM */
-
+#ifdef __cplusplus
 namespace LibRpBase {
+
+/* Define to 1 if the system has a 16-bit wchar_t. */
+#ifdef _WIN32
+# define RP_WIS16 1
+#endif
 
 /** UTF-16 string functions. **/
 
@@ -101,6 +54,7 @@ size_t u16_strlen(const char16_t *wcs);
  * @return Length of wcs, in characters.
  */
 #ifdef RP_WIS16
+ATTR_ACCESS_SIZE(read_only, 1, 2)
 static inline size_t u16_strnlen(const char16_t *wcs, size_t maxlen)
 {
 	return wcsnlen(reinterpret_cast<const wchar_t*>(wcs), maxlen);
@@ -134,150 +88,388 @@ char16_t *u16_strdup(const char16_t *wcs);
 static inline int u16_strcmp(const char16_t *wcs1, const char16_t *wcs2)
 {
 	return wcscmp(reinterpret_cast<const wchar_t*>(wcs1),
-		      reinterpret_cast<const wchar_t*>(wcs2));
+	              reinterpret_cast<const wchar_t*>(wcs2));
 }
 #else /* !RP_WIS16 */
 int u16_strcmp(const char16_t *wcs1, const char16_t *wcs2);
 #endif /* RP_WIS16 */
 
 /**
- * char16_t strcmp().
+ * char16_t strncmp().
  * @param wcs1 16-bit string 1.
  * @param wcs2 16-bit string 2.
- * @return strcmp() result.
+ * @return strncmp() result.
+ */
+#ifdef RP_WIS16
+ATTR_ACCESS_SIZE(read_only, 1, 3)
+ATTR_ACCESS_SIZE(read_only, 2, 3)
+static inline int u16_strncmp(const char16_t *wcs1, const char16_t *wcs2, size_t n)
+{
+	return wcsncmp(reinterpret_cast<const wchar_t*>(wcs1),
+	               reinterpret_cast<const wchar_t*>(wcs2), n);
+}
+#else /* !RP_WIS16 */
+ATTR_ACCESS_SIZE(read_only, 1, 3)
+ATTR_ACCESS_SIZE(read_only, 2, 3)
+int u16_strncmp(const char16_t *wcs1, const char16_t *wcs2, size_t n);
+#endif /* RP_WIS16 */
+
+/**
+ * char16_t strcasecmp().
+ * @param wcs1 16-bit string 1.
+ * @param wcs2 16-bit string 2.
+ * @return strcasecmp() result.
  */
 #ifdef RP_WIS16
 static inline int u16_strcasecmp(const char16_t *wcs1, const char16_t *wcs2)
 {
 	return wcscasecmp(reinterpret_cast<const wchar_t*>(wcs1),
-			  reinterpret_cast<const wchar_t*>(wcs2));
+	                  reinterpret_cast<const wchar_t*>(wcs2));
 }
 #else /* !RP_WIS16 */
 int u16_strcasecmp(const char16_t *wcs1, const char16_t *wcs2);
 #endif /* RP_WIS16 */
 
-/** Generic text conversion functions. **/
+/** Text conversion functions **/
 
 // NOTE: All of these functions will remove trailing
 // NULL characters from strings.
 
-// TODO: #ifdef out functions that aren't used
-// in RP_UTF8 and/or RP_UTF16 builds?
+#ifndef CP_ACP
+# define CP_ACP 0
+#endif
+#ifndef CP_LATIN1
+# define CP_LATIN1 28591
+#endif
+#ifndef CP_UTF8
+# define CP_UTF8 65001
+#endif
+#ifndef CP_SJIS
+# define CP_SJIS 932
+#endif
+#ifndef CP_GB2312
+# define CP_GB2312 936
+#endif
 
-/** Code Page 1252 **/
+// Text conversion flags.
+typedef enum {
+	// Enable cp1252 fallback if the text fails to
+	// decode using the specified code page.
+	TEXTCONV_FLAG_CP1252_FALLBACK		= (1U << 0),
+} TextConv_Flags_e;
+
+/**
+ * Convert 8-bit text to UTF-8.
+ * Trailing NULL bytes will be removed.
+ *
+ * The specified code page number will be used.
+ *
+ * @param cp	[in] Code page number.
+ * @param str	[in] 8-bit text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
+ * @param flags	[in] Flags. (See TextConv_Flags_e.)
+ * @return UTF-8 string.
+ */
+std::string cpN_to_utf8(unsigned int cp, const char *str, int len, unsigned int flags = 0);
+
+/**
+ * Convert 8-bit text to UTF-16.
+ * Trailing NULL bytes will be removed.
+ *
+ * The specified code page number will be used.
+ *
+ * @param cp	[in] Code page number.
+ * @param str	[in] 8-bit text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
+ * @param flags	[in] Flags. (See TextConv_Flags_e.)
+ * @return UTF-16 string.
+ */
+std::u16string cpN_to_utf16(unsigned int cp, const char *str, int len, unsigned int flags = 0);
+
+/**
+ * Convert UTF-8 to 8-bit text.
+ * Trailing NULL bytes will be removed.
+ *
+ * The specified code page number will be used.
+ * Invalid characters will be ignored.
+ *
+ * @param cp	[in] Code page number.
+ * @param str	[in] UTF-8 text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
+ * @return 8-bit text.
+ */
+std::string utf8_to_cpN(unsigned int cp, const char *str, int len);
+
+/**
+ * Convert UTF-16 to 8-bit text.
+ * Trailing NULL bytes will be removed.
+ *
+ * The specified code page number will be used.
+ * Invalid characters will be ignored.
+ *
+ * @param cp	[in] Code page number.
+ * @param wcs	[in] UTF-16 text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
+ * @return 8-bit text.
+ */
+std::string utf16_to_cpN(unsigned int cp, const char16_t *wcs, int len);
+
+/** Inline wrappers for text conversion functions **/
+
+/* ANSI */
+
+/**
+ * Convert ANSI text to UTF-8.
+ * Trailing NULL bytes will be removed.
+ * @param str	[in] ANSI text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
+ * @return UTF-8 string.
+ */
+static inline std::string ansi_to_utf8(const char *str, int len)
+{
+	return cpN_to_utf8(CP_ACP, str, len);
+}
+
+/**
+ * Convert ANSI text to UTF-8.
+ * Trailing NULL bytes will be removed.
+ * @param str	[in] ANSI text.
+ * @return UTF-8 string.
+ */
+static inline std::string ansi_to_utf8(const std::string &str)
+{
+	return cpN_to_utf8(CP_ACP, str.data(), static_cast<int>(str.size()));
+}
+
+/**
+ * Convert UTF-8 text to ANSI
+ * Trailing NULL bytes will be removed.
+ * @param str	[in] UTF-8 text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
+ * @return ANSI string.
+ */
+static inline std::string utf8_to_ansi(const char *str, int len)
+{
+	return utf8_to_cpN(CP_ACP, str, len);
+}
+
+/**
+ * Convert UTF-8 text to ANSI
+ * Trailing NULL bytes will be removed.
+ * @param str	[in] ANSI text.
+ * @return ANSI string.
+ */
+static inline std::string utf8_to_ansi(const std::string &str)
+{
+	return utf8_to_cpN(CP_ACP, str.data(), static_cast<int>(str.size()));
+}
+
+/* cp1252 */
 
 /**
  * Convert cp1252 text to UTF-8.
  * Trailing NULL bytes will be removed.
- * @param str cp1252 text.
- * @param len Length of str, in bytes. (-1 for NULL-terminated string)
+ * @param str	[in] cp1252 text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
  * @return UTF-8 string.
  */
-std::string cp1252_to_utf8(const char *str, int len);
+static inline std::string cp1252_to_utf8(const char *str, int len)
+{
+	return cpN_to_utf8(1252, str, len);
+}
+
+/**
+ * Convert cp1252 text to UTF-8.
+ * Trailing NULL bytes will be removed.
+ * @param str	[in] cp1252 text.
+ * @return UTF-8 string.
+ */
+static inline std::string cp1252_to_utf8(const std::string &str)
+{
+	return cpN_to_utf8(1252, str.data(), static_cast<int>(str.size()));
+}
 
 /**
  * Convert cp1252 text to UTF-16.
  * Trailing NULL bytes will be removed.
- * @param str cp1252 text.
- * @param len Length of str, in bytes. (-1 for NULL-terminated string)
+ * @param str	[in] cp1252 text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
  * @return UTF-16 string.
  */
-std::u16string cp1252_to_utf16(const char *str, int len);
+static inline std::u16string cp1252_to_utf16(const char *str, int len)
+{
+	return cpN_to_utf16(1252, str, len);
+}
 
 /**
  * Convert UTF-8 text to cp1252.
  * Trailing NULL bytes will be removed.
  * Invalid characters will be ignored.
- * @param str UTF-8 text.
- * @param len Length of str, in bytes. (-1 for NULL-terminated string)
+ * @param str	[in] UTF-8 text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
  * @return cp1252 string.
  */
-std::string utf8_to_cp1252(const char *str, int len);
+static inline std::string utf8_to_cp1252(const char *str, int len)
+{
+	return utf8_to_cpN(1252, str, len);
+}
 
 /**
  * Convert UTF-16 text to cp1252.
  * Trailing NULL bytes will be removed.
  * Invalid characters will be ignored.
- * @param wcs UTF-16 text.
- * @param len Length of str, in bytes. (-1 for NULL-terminated string)
+ * @param wcs	[in] UTF-16 text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
  * @return cp1252 string.
  */
-std::string utf16_to_cp1252(const char16_t *wcs, int len);
+static inline std::string utf16_to_cp1252(const char16_t *wcs, int len)
+{
+	return utf16_to_cpN(1252, wcs, len);
+}
 
-/** Code Page 1252 + Shift-JIS (932) **/
+/* Shift-JIS (cp932) with cp1252 fallback */
 
 /**
- * Convert cp1252 or Shift-JIS text to UTF-8.
+ * Convert cp1252 or Shift-JIS (cp932) text to UTF-8.
  * Trailing NULL bytes will be removed.
- * @param str cp1252 or Shift-JIS text.
- * @param len Length of str, in bytes. (-1 for NULL-terminated string)
+ * @param str	[in] cp1252 or Shift-JIS (cp932) text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
  * @return UTF-8 string.
  */
-std::string cp1252_sjis_to_utf8(const char *str, int len);
+static inline std::string cp1252_sjis_to_utf8(const char *str, int len)
+{
+	return cpN_to_utf8(932, str, len, TEXTCONV_FLAG_CP1252_FALLBACK);
+}
 
 /**
- * Convert cp1252 or Shift-JIS text to UTF-16.
+ * Convert cp1252 or Shift-JIS (cp932) text to UTF-8.
  * Trailing NULL bytes will be removed.
- * @param str cp1252 or Shift-JIS text.
- * @param len Length of str, in bytes. (-1 for NULL-terminated string)
+ * @param str	[in] cp1252 or Shift-JIS string.
+ * @return UTF-8 string.
+ */
+static inline std::string cp1252_sjis_to_utf8(const std::string &str)
+{
+	return cpN_to_utf8(932, str.data(), static_cast<int>(str.size()),
+		TEXTCONV_FLAG_CP1252_FALLBACK);
+}
+
+/**
+ * Convert cp1252 or Shift-JIS (cp932) text to UTF-16.
+ * Trailing NULL bytes will be removed.
+ * @param str	[in] cp1252 or Shift-JIS (cp932) text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
  * @return UTF-16 string.
  */
-std::u16string cp1252_sjis_to_utf16(const char *str, int len);
+static inline std::u16string cp1252_sjis_to_utf16(const char *str, int len)
+{
+	return cpN_to_utf16(932, str, len, TEXTCONV_FLAG_CP1252_FALLBACK);
+}
 
-/** Latin-1 (ISO-8859-1) **/
+/* Latin-1 (ISO-8859-1) */
 
 /**
  * Convert Latin-1 (ISO-8859-1) text to UTF-8.
  * Trailing NULL bytes will be removed.
- * @param str Latin-1 text.
- * @param len Length of str, in bytes. (-1 for NULL-terminated string)
+ * @param str	[in] Latin-1 text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
  * @return UTF-8 string.
  */
-std::string latin1_to_utf8(const char *str, int len);
+static inline std::string latin1_to_utf8(const char *str, int len)
+{
+	return cpN_to_utf8(CP_LATIN1, str, len, TEXTCONV_FLAG_CP1252_FALLBACK);
+}
+
+/**
+ * Convert Latin-1 (ISO-8859-1) text to UTF-8
+ * Trailing NULL bytes will be removed.
+ * @param str	[in] Latin-1 string.
+ * @return UTF-8 string.
+ */
+static inline std::string latin1_to_utf8(const std::string &str)
+{
+	return cpN_to_utf8(CP_LATIN1, str.data(), static_cast<int>(str.size()),
+		TEXTCONV_FLAG_CP1252_FALLBACK);
+}
 
 /**
  * Convert Latin-1 (ISO-8859-1) text to UTF-16.
  * Trailing NULL bytes will be removed.
- * @param str Latin-1 text.
- * @param len Length of str, in bytes. (-1 for NULL-terminated string)
+ * @param str	[in] Latin-1 text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
  * @return UTF-16 string.
  */
-std::u16string latin1_to_utf16(const char *str, int len);
+static inline std::u16string latin1_to_utf16(const char *str, int len)
+{
+	return cpN_to_utf16(CP_LATIN1, str, len, TEXTCONV_FLAG_CP1252_FALLBACK);
+}
 
 /**
  * Convert UTF-8 text to Latin-1 (ISO-8859-1).
  * Trailing NULL bytes will be removed.
- * @param str UTF-8 text.
- * @param len Length of str, in bytes. (-1 for NULL-terminated string)
+ * @param str	[in] UTF-8 text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
  * @return Latin-1 string.
  */
-std::string utf8_to_latin1(const char *str, int len);
+static inline std::string utf8_to_latin1(const char *str, int len)
+{
+	return utf8_to_cpN(CP_LATIN1, str, len);
+}
+
+/**
+ * Convert UTF-8 text to Latin-1 (ISO-8859-1).
+ * Trailing NULL bytes will be removed.
+ * @param str	[in] UTF-8 text.
+ * @return Latin-1 string.
+ */
+static inline std::string utf8_to_latin1(const std::string &str)
+{
+	return utf8_to_cpN(CP_LATIN1, str.data(), static_cast<int>(str.size()));
+}
 
 /**
  * Convert UTF-16 Latin-1 (ISO-8859-1).
  * Trailing NULL bytes will be removed.
- * @param wcs UTF-16 text.
- * @param len Length of str, in bytes. (-1 for NULL-terminated string)
+ * @param wcs	[in] UTF-16 text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
  * @return Latin-1 string.
  */
-std::string utf16_to_latin1(const char16_t *wcs, int len);
+static inline std::string utf16_to_latin1(const char16_t *wcs, int len)
+{
+	return utf16_to_cpN(CP_LATIN1, wcs, len);
+}
 
-/** UTF-8 to UTF-16 and vice-versa **/
+/* UTF-8 to UTF-16 and vice-versa */
 
 /**
  * Convert UTF-8 text to UTF-16.
  * Trailing NULL bytes will be removed.
- * @param str UTF-8 text.
- * @param len Length of str, in bytes. (-1 for NULL-terminated string)
+ * @param str	[in] UTF-8 text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
  * @return UTF-16 string.
  */
-std::u16string utf8_to_utf16(const char *str, int len);
+static inline std::u16string utf8_to_utf16(const char *str, int len)
+{
+	return cpN_to_utf16(CP_UTF8, str, len);
+}
+
+/**
+ * Convert UTF-8 text to UTF-16.
+ * Trailing NULL bytes will be removed.
+ * @param str UTF-8 string.
+ * @return UTF-16 string.
+ */
+static inline std::u16string utf8_to_utf16(const std::string &str)
+{
+	return cpN_to_utf16(CP_UTF8, str.data(), static_cast<int>(str.size()));
+}
+
+/* Specialized UTF-16 conversion functions */
 
 /**
  * Convert UTF-16LE text to UTF-8.
  * Trailing NULL bytes will be removed.
- * @param wcs UTF-16LE text.
- * @param len Length of wcs, in characters. (-1 for NULL-terminated string)
+ * @param wcs	[in] UTF-16LE text.
+ * @param len	[in] Length of wcs, in characters. (-1 for NULL-terminated string)
  * @return UTF-8 string.
  */
 std::string utf16le_to_utf8(const char16_t *wcs, int len);
@@ -285,8 +477,8 @@ std::string utf16le_to_utf8(const char16_t *wcs, int len);
 /**
  * Convert UTF-16BE text to UTF-8.
  * Trailing NULL bytes will be removed.
- * @param wcs UTF-16BE text.
- * @param len Length of wcs, in characters. (-1 for NULL-terminated string)
+ * @param wcs	[in] UTF-16BE text.
+ * @param len	[in] Length of wcs, in characters. (-1 for NULL-terminated string)
  * @return UTF-8 string.
  */
 std::string utf16be_to_utf8(const char16_t *wcs, int len);
@@ -307,6 +499,8 @@ static inline std::string utf16_to_utf8(const char16_t *wcs, int len)
 #endif
 }
 
+/** UTF-16 to UTF-16 conversion functions **/
+
 /**
  * Byteswap and return UTF-16 text.
  * @param wcs UTF-16 text to byteswap.
@@ -326,9 +520,9 @@ static inline std::u16string utf16le_to_utf16(const char16_t *wcs, int len)
 {
 	// Check for a NULL terminator.
 	if (len < 0) {
-		len = (int)u16_strlen(wcs);
+		len = static_cast<int>(u16_strlen(wcs));
 	} else {
-		len = (int)u16_strnlen(wcs, len);
+		len = static_cast<int>(u16_strnlen(wcs, len));
 	}
 
 #if SYS_BYTEORDER == SYS_LIL_ENDIAN
@@ -348,9 +542,9 @@ static inline std::u16string utf16be_to_utf16(const char16_t *wcs, int len)
 {
 	// Check for a NULL terminator.
 	if (len < 0) {
-		len = (int)u16_strlen(wcs);
+		len = static_cast<int>(u16_strlen(wcs));
 	} else {
-		len = (int)u16_strnlen(wcs, len);
+		len = static_cast<int>(u16_strnlen(wcs, len));
 	}
 
 #if SYS_BYTEORDER == SYS_LIL_ENDIAN
@@ -360,460 +554,186 @@ static inline std::u16string utf16be_to_utf16(const char16_t *wcs, int len)
 #endif
 }
 
-/** rp_string wrappers. **/
+/** Specialized text conversion functions **/
 
 /**
- * Convert cp1252 text to rp_string.
+ * Convert Atari ST text to UTF-8.
  * Trailing NULL bytes will be removed.
- * @param str cp1252 text.
- * @param len Length of str, in bytes. (-1 for NULL-terminated string)
- * @return rp_string.
- */
-static inline rp_string cp1252_to_rp_string(const char *str, int len)
-{
-#ifdef RP_UTF8
-	return cp1252_to_utf8(str, len);
-#else
-	return cp1252_to_utf16(str, len);
-#endif
-}
-
-/**
- * Convert cp1252 text to rp_string.
- * Trailing NULL bytes will be removed.
- * @param str cp1252 text.
- * @return rp_string.
- */
-static inline rp_string cp1252_to_rp_string(const std::string &str)
-{
-#ifdef RP_UTF8
-	return cp1252_to_utf8(str.data(), (int)str.size());
-#else
-	return cp1252_to_utf16(str.data(), (int)str.size());
-#endif
-}
-
-/**
- * Convert rp_string to cp1252.
- * @param str rp_string.
- * @param len Length of str, in characters. (-1 for NULL-terminated string)
- * @return rp_string.
- */
-static inline std::string rp_string_to_cp1252(const rp_char *str, int len)
-{
-#ifdef RP_UTF8
-	return utf8_to_cp1252(str, len);
-#else
-	return utf16_to_cp1252(str, len);
-#endif
-}
-
-/**
- * Convert rp_string to cp1252.
- * @param rps rp_string.
- * @return rp_string.
- */
-static inline std::string rp_string_to_cp1252(const rp_string &rps)
-{
-#ifdef RP_UTF8
-	return utf8_to_cp1252(rps.data(), (int)rps.size());
-#else
-	return utf16_to_cp1252(rps.data(), (int)rps.size());
-#endif
-}
-
-/**
- * Convert cp1252 or Shift-JIS text to rp_string.
- * Trailing NULL bytes will be removed.
- * @param str cp1252 or Shift-JIS text.
- * @param len Length of str, in bytes. (-1 for NULL-terminated string)
- * @return rp_string.
- */
-static inline rp_string cp1252_sjis_to_rp_string(const char *str, int len)
-{
-#ifdef RP_UTF8
-	return cp1252_sjis_to_utf8(str, len);
-#else
-	return cp1252_sjis_to_utf16(str, len);
-#endif
-}
-
-/**
- * Convert UTF-8 text to rp_string.
- * Trailing NULL bytes will be removed.
- * @param str UTF-8 text.
- * @param len Length of str, in bytes. (-1 for NULL-terminated string)
- * @return rp_string.
- */
-static inline rp_string utf8_to_rp_string(const char *str, int len)
-{
-#if defined(RP_UTF8)
-	// Check for a NULL terminator.
-	if (len < 0) {
-		len = (int)strlen(str);
-	} else {
-		len = (int)strnlen(str, len);
-	}
-	return rp_string(str, len);
-#elif defined(RP_UTF16)
-	return utf8_to_utf16(str, len);
-#endif
-}
-
-/**
- * Convert UTF-8 text to rp_string.
- * Trailing NULL bytes will be removed.
- * @param str UTF-8 text.
- * @return rp_string.
- */
-static inline rp_string utf8_to_rp_string(const std::string &str)
-{
-#if defined(RP_UTF8)
-	return str;
-#elif defined(RP_UTF16)
-	return utf8_to_utf16(str.data(), (int)str.size());
-#endif
-}
-
-/**
- * Convert rp_string to UTF-8 text.
- * Trailing NULL bytes will be removed.
- * @param str rp_string.
- * @param len Length of str, in characters. (-1 for NULL-terminated string)
+ * @param str	[in] Atari ST text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
  * @return UTF-8 string.
  */
-static inline std::string rp_string_to_utf8(const rp_char *str, int len)
-{
-#if defined(RP_UTF8)
-	// Check for a NULL terminator.
-	if (len < 0) {
-		len = (int)strlen(str);
-	} else {
-		len = (int)strnlen(str, len);
-	}
-	return std::string(str, len);
-#elif defined(RP_UTF16)
-	return utf16_to_utf8(str, len);
-#endif
-}
+std::string atariST_to_utf8(const char *str, int len);
 
 /**
- * Convert rp_string to UTF-8 text.
+ * Convert Atari ATASCII text to UTF-8.
  * Trailing NULL bytes will be removed.
- * @param rps rp_string.
+ * @param str	[in] Atari ATASCII text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
  * @return UTF-8 string.
  */
-static inline std::string rp_string_to_utf8(const rp_string &rps)
-{
-#if defined(RP_UTF8)
-	return rps;
-#elif defined(RP_UTF16)
-	return utf16_to_utf8(rps.data(), (int)rps.size());
-#endif
-}
+std::string atascii_to_utf8(const char *str, int len);
 
 /**
- * Convert UTF-16LE text to rp_string.
+ * Convert Commodore PETSCII text (C64 variant) to UTF-8.
  * Trailing NULL bytes will be removed.
- * @param wcs UTF-16LE text.
- * @param len Length of wcs, in characters. (-1 for NULL-terminated string)
- * @return rp_string.
+ * @param str	[in] Commodore PETSCII text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
+ * @param shifted [in] False for unshifted (uppercase+graphics); true for shifted (lowercase+uppercase).
+ * @return UTF-8 string.
  */
-static inline rp_string utf16le_to_rp_string(const char16_t *wcs, int len)
-{
-#if defined(RP_UTF8)
-	return utf16le_to_utf8(wcs, len);
-#elif defined(RP_UTF16)
-	return utf16le_to_utf16(wcs, len);
-#endif
-}
+std::string petscii_to_utf8(const char *str, int len, bool shifted = false);
+
+/** sprintf() **/
 
 /**
- * Convert UTF-16BE text to rp_string.
- * Trailing NULL bytes will be removed.
- * @param wcs UTF-16BE text.
- * @param len Length of wcs, in characters. (-1 for NULL-terminated string)
- * @return rp_string.
+ * vsprintf()-style function for std::string.
+ *
+ * @param fmt Format string
+ * @param ap Arguments
+ * @return std::string
  */
-static inline rp_string utf16be_to_rp_string(const char16_t *wcs, int len)
-{
-#if defined(RP_UTF8)
-	return utf16be_to_utf8(wcs, len);
-#elif defined(RP_UTF16)
-	return utf16be_to_utf16(wcs, len);
-#endif
-}
-
-/**
- * Convert UTF-16 text to rp_string. (host-endian)
- * Trailing NULL bytes will be removed.
- * @param wcs UTF-16 text.
- * @param len Length of wcs, in characters. (-1 for NULL-terminated string)
- * @return rp_string.
- */
-static inline rp_string utf16_to_rp_string(const char16_t *wcs, int len)
-{
-#if SYS_BYTEORDER == SYS_LIL_ENDIAN
-	return utf16le_to_rp_string(wcs, len);
-#else /* SYS_BYTEORDER == SYS_BIG_ENDIAN */
-	return utf16be_to_rp_string(wcs, len);
-#endif
-}
-
-/**
- * Convert UTF-16LE text to rp_string.
- * Trailing NULL bytes will be removed.
- * @param wcs UTF-16LE text.
- * @return rp_string.
- */
-static inline rp_string utf16le_to_rp_string(const std::u16string &wcs)
-{
-#if defined(RP_UTF8)
-	return utf16le_to_utf8(wcs.data(), (int)wcs.size());
-#elif defined(RP_UTF16)
-# if SYS_BYTEORDER == SYS_LIL_ENDIAN
-	return wcs;
-# else /* SYS_BYTEORDER == SYS_BIG_ENDIAN */
-	return utf16le_to_utf16(wcs.data(), (int)wcs.size());
-# endif
-#endif
-}
-
-/**
- * Convert UTF-16BE text to rp_string.
- * Trailing NULL bytes will be removed.
- * @param wcs UTF-16BE text.
- * @return rp_string.
- */
-static inline rp_string utf16be_to_rp_string(const std::u16string &wcs)
-{
-#if defined(RP_UTF8)
-	return utf16be_to_utf8(wcs.data(), (int)wcs.size());
-#elif defined(RP_UTF16)
-# if SYS_BYTEORDER == SYS_BIG_ENDIAN
-	return wcs;
-# else /* SYS_BYTEORDER == SYS_BIG_ENDIAN */
-	return utf16be_to_utf16(wcs.data(), (int)wcs.size());
-# endif
-#endif
-}
-
-/**
- * Convert UTF-16 text to rp_string. (host-endian)
- * Trailing NULL bytes will be removed.
- * @param wcs UTF-16 text.
- * @return rp_string.
- */
-static inline rp_string utf16_to_rp_string(const std::u16string &wcs)
-{
-#if defined(RP_UTF8)
-	return utf16_to_utf8(wcs.data(), (int)wcs.size());
-#elif defined(RP_UTF16)
-	return wcs;
-#endif
-}
-
-/**
- * Convert rp_string to UTF-16 text.
- * Trailing NULL bytes will be removed.
- * @param str rp_string.
- * @param len Length of str, in characters. (-1 for NULL-terminated string)
- * @return UTF-16 string.
- */
-static inline std::u16string rp_string_to_utf16(const rp_char *str, int len)
-{
-#if defined(RP_UTF8)
-	return utf8_to_utf16(str, len);
-#elif defined(RP_UTF16)
-	// Check for a NULL terminator.
-	// NOTE: Can't use rp_strlen() / rp_strnlen() here.
-	if (len < 0) {
-		len = (int)u16_strlen(str);
-	} else {
-		len = (int)u16_strnlen(str, len);
-	}
-	return std::u16string(str, len);
-#endif
-}
-
-/**
- * Convert rp_string to UTF-16 text.
- * Trailing NULL bytes will be removed.
- * @param rps rp_string.
- * @return UTF-16 string.
- */
-static inline std::u16string rp_string_to_utf16(const rp_string &rps)
-{
-#if defined(RP_UTF8)
-	return utf8_to_utf16(rps.data(), (int)rps.size());
-#elif defined(RP_UTF16)
-	return rps;
-#endif
-}
-
-/**
- * Convert Latin-1 (ISO-8859-1) text to rp_string.
- * Trailing NULL bytes will be removed.
- * @param str Latin-1 text.
- * @param len Length of str, in bytes. (-1 for NULL-terminated string)
- * @return rp_string.
- */
-static inline rp_string latin1_to_rp_string(const char *str, int len)
-{
-#if defined(RP_UTF8)
-	return latin1_to_utf8(str, len);
-#elif defined(RP_UTF16)
-	return latin1_to_utf16(str, len);
-#endif
-}
-
-/**
- * Convert rp_string to Latin-1 (ISO-8859-1) text.
- * Trailing NULL bytes will be removed.
- * @param str rp_string.
- * @param len Length of str, in characters. (-1 for NULL-terminated string)
- * @return Latin-1 string.
- */
-static inline std::string rp_string_to_latin1(const rp_char *str, int len)
-{
-#if defined(RP_UTF8)
-	return utf8_to_latin1(str, len);
-#elif defined(RP_UTF16)
-	return utf16_to_latin1(str, len);
-#endif
-}
-
-/**
- * Convert rp_string to Latin-1 (ISO-8859-1) text.
- * Trailing NULL bytes will be removed.
- * @param rps rp_string.
- * @return Latin-1 string.
- */
-static inline std::string rp_string_to_latin1(const rp_string &rps)
-{
-#if defined(RP_UTF8)
-	return utf8_to_latin1(rps.data(), (int)rps.size());
-#elif defined(RP_UTF16)
-	return utf16_to_latin1(rps.data(), (int)rps.size());
-#endif
-}
-
-/**
- * strlen() function for rp_char strings.
- * @param str rp_string.
- * @return Length of str, in characters.
- */
-static inline size_t rp_strlen(const rp_char *str)
-{
-#if defined(RP_UTF8)
-	return strlen(str);
-#elif defined(RP_UTF16)
-	return u16_strlen(str);
-#endif
-}
-
-/**
- * strnlen() function for rp_char strings.
- * @param str rp_string.
- * @param Maximum length.
- * @return Length of str, in characters.
- */
-static inline size_t rp_strnlen(const rp_char *str, int maxlen)
-{
-#if defined(RP_UTF8)
-	return strnlen(str, maxlen);
-#elif defined(RP_UTF16)
-	return u16_strnlen(str, maxlen);
-#endif
-}
-
-/**
- * strdup() function for rp_char strings.
- * @param str String.
- * @return Duplicated string.
- */
-static inline rp_char *rp_strdup(const rp_char *str)
-{
-#if defined(RP_UTF8)
-	return strdup(str);
-#elif defined(RP_UTF16)
-	return u16_strdup(str);
-#endif
-}
-static inline rp_char *rp_strdup(const rp_string &str)
-{
-#if defined(RP_UTF8)
-	return strdup(str.c_str());
-#elif defined(RP_UTF16)
-	return u16_strdup(str.c_str());
-#endif
-}
-
-/**
- * strcmp() function for rp_char strings.
- * @param str1 rp_string 1.
- * @param str2 rp_string 2.
- * @return strcmp() result.
- */
-static inline int rp_strcmp(const rp_char *str1, const rp_char *str2)
-{
-#if defined(RP_UTF8)
-	return strcmp(str1, str2);
-#elif defined(RP_UTF16)
-	return u16_strcmp(str1, str2);
-#endif
-}
-
-/**
- * strcasecmp() function for rp_char strings.
- * @param str1 rp_string 1.
- * @param str2 rp_string 2.
- * @return strcasecmp() result.
- */
-static inline int rp_strcasecmp(const rp_char *str1, const rp_char *str2)
-{
-#if defined(RP_UTF8)
-	return strcasecmp(str1, str2);
-#elif defined(RP_UTF16)
-	return u16_strcasecmp(str1, str2);
-#endif
-}
+ATTR_PRINTF(1, 0)
+std::string rp_vsprintf(const char *fmt, va_list ap);
 
 /**
  * sprintf()-style function for std::string.
  *
- * @param fmt Format string.
- * @param ... Arguments.
- * @return rp_string.
+ * @param fmt Format string
+ * @param ... Arguments
+ * @return std::string
  */
-std::string rp_sprintf(const char *fmt, ...) ATTR_PRINTF(1, 2);
+ATTR_PRINTF(1, 2)
+static inline std::string rp_sprintf(const char *fmt, ...)
+{
+	va_list ap;
+	va_start(ap, fmt);
+	std::string s_ret = rp_vsprintf(fmt, ap);
+	va_end(ap);
+	return s_ret;
+}
 
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__MINGW32__)
 /**
  * sprintf()-style function for std::string.
  * This version supports positional format string arguments.
  *
- * @param fmt Format string.
- * @param ... Arguments.
- * @return rp_string.
+ * MSVCRT doesn't support positional arguments in the standard
+ * printf() functions. Instead, it has printf_p().
+ *
+ * @param fmt Format string
+ * @param ap Arguments
+ * @return std::string
  */
-std::string rp_sprintf_p(const char *fmt, ...) ATTR_PRINTF(1, 2);
-#else
-// glibc supports positional format string arguments
-// in the standard printf() functions.
-#define rp_sprintf_p(fmt, ...) rp_sprintf(fmt, ##__VA_ARGS__)
-#endif
+ATTR_PRINTF(1, 0)
+std::string rp_vsprintf_p(const char *fmt, va_list ap);
 
+/**
+ * sprintf()-style function for std::string.
+ * This version supports positional format string arguments.
+ *
+ * MSVCRT doesn't support positional arguments in the standard
+ * printf() functions. Instead, it has printf_p().
+ *
+ * @param fmt Format string
+ * @param ... Arguments
+ * @return std::string
+ */
+ATTR_PRINTF(1, 2)
+static inline std::string rp_sprintf_p(const char *fmt, ...)
+{
+	va_list ap;
+	va_start(ap, fmt);
+	std::string s_ret = rp_vsprintf_p(fmt, ap);
+	va_end(ap);
+	return s_ret;
 }
 
-#ifdef _WIN32
-// wchar_t text conversion macros.
-// Generally used only on Windows.
-#include "TextFuncs_wchar.hpp"
-#else
-// UTF-8 text conversion macros.
-// Generally used on non-Windows platforms.
-#include "TextFuncs_utf8.hpp"
-#endif
+#else /* !_MSC_VER && !__MINGW32__ */
+
+// glibc supports positional format string arguments
+// in the standard printf() functions.
+static inline std::string rp_vsprintf_p(const char *fmt, va_list ap)
+{
+	return rp_vsprintf(fmt, ap);
+}
+
+static inline std::string rp_sprintf_p(const char *fmt, ...)
+{
+	va_list ap;
+	va_start(ap, fmt);
+	std::string s_ret = rp_vsprintf(fmt, ap);
+	va_end(ap);
+	return s_ret;
+}
+#endif /* _MSC_VER && __MINGW32__ */
+
+/** Other useful text functions **/
+
+/**
+ * Format a file size.
+ * @param fileSize File size.
+ * @return Formatted file size.
+ */
+std::string formatFileSize(off64_t fileSize);
+
+/**
+ * Format a file size, in KiB.
+ *
+ * This function expects the size to be a multiple of 1024,
+ * so it doesn't do any fractional rounding or printing.
+ *
+ * @param size File size.
+ * @return Formatted file size.
+ */
+std::string formatFileSizeKiB(unsigned int size);
+
+/**
+ * Remove trailing spaces from a string.
+ * NOTE: This modifies the string *in place*.
+ * @param str String.
+ */
+void trimEnd(std::string &str);
+
+/**
+ * Convert DOS (CRLF) line endings to UNIX (LF) line endings.
+ * @param str_dos	[in] String with DOS line endings.
+ * @param len		[in] Length of str, in characters. (-1 for NULL-terminated string)
+ * @param lf_count	[out,opt] Number of CRLF pairs found.
+ * @return String with UNIX line endings.
+ */
+std::string dos2unix(const char *str_dos, int len = -1, int *lf_count = nullptr);
+
+/**
+ * Convert DOS (CRLF) line endings to UNIX (LF) line endings.
+ * @param str_dos	[in] String with DOS line endings.
+ * @param lf_count	[out,opt] Number of CRLF pairs found.
+ * @return String with UNIX line endings.
+ */
+static inline std::string dos2unix(const std::string &str_dos, int *lf_count = nullptr)
+{
+	return dos2unix(str_dos.data(), static_cast<int>(str_dos.size()), lf_count);
+}
+
+/** Audio functions. **/
+
+/**
+ * Format a sample value as m:ss.cs.
+ * @param sample Sample value.
+ * @param rate Sample rate.
+ * @return m:ss.cs
+ */
+std::string formatSampleAsTime(unsigned int sample, unsigned int rate);
+
+/**
+ * Convert a sample value to milliseconds.
+ * @param sample Sample value.
+ * @param rate Sample rate.
+ * @return Milliseconds.
+ */
+unsigned int convSampleToMs(unsigned int sample, unsigned int rate);
+
+}
+#endif /* __cplusplus */
 
 #endif /* __ROMPROPERTIES_LIBRPBASE_TEXTFUNCS_HPP__ */

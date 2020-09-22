@@ -15,8 +15,7 @@ ENDFUNCTION(SET_EXTLIB_PROPERTIES)
 # TODO: Test on all archs and fix Z_PREFIX issues.
 # TODO: Add more assembly files from contrib/ besides the
 # default ones that were listed in zlib's CMakeLists.txt.
-STRING(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" arch)
-IF(arch MATCHES "^(i.|x)86$|^x86_64$|^amd64$")
+IF(CPU_i386 OR CPU_amd64)
 	# i386/amd64. Check sizeof(void*) for the actual architecture,
 	# since building 32-bit on 64-bit isn't considered "cross-compiling",
 	# so CMAKE_SYSTEM_PROCESSOR might not be accurate.
@@ -28,8 +27,7 @@ IF(arch MATCHES "^(i.|x)86$|^x86_64$|^amd64$")
 	ELSE()
 		SET(ASM686 "ON")
 	ENDIF()
-ENDIF(arch MATCHES "^(i.|x)86$|^x86_64$|^amd64$")
-UNSET(arch)
+ENDIF(CPU_i386 OR CPU_amd64)
 
 # FIXME: zlib-1.2.9's asm optimizations break on 32-bit Windows...
 # Reference:  https://github.com/madler/zlib/issues/41
@@ -103,55 +101,61 @@ IF(USE_INTERNAL_PNG)
 	SET_EXTLIB_PROPERTIES(png_static)
 ENDIF(USE_INTERNAL_PNG)
 
-IF(USE_INTERNAL_JPEG)
-	# Use the internal copy of libjpeg-turbo.
+IF(USE_INTERNAL_ZSTD)
+	# Use the internal copy of zstd.
 	# On Windows and Mac OS X, this will build DLLs.
 	# On other systems, this will be statically-linked.
-	# FIXME: libjpeg-turbo's CMakeLists.txt only officially supports Windows.
 	IF(WIN32 OR APPLE)
-		SET(ENABLE_SHARED ON)
-		SET(ENABLE_STATIC OFF)
-		SET(SKIP_INSTALL_LIBRARIES OFF)
+		SET(SKIP_INSTALL_LIBRARIES ON)
 		SET(SKIP_INSTALL_ALL OFF)
 		SET(BUILD_SHARED_LIBS ON)
 		SET(BUILD_STATIC_LIBS OFF)
 	ELSE()
-		SET(ENABLE_SHARED OFF)
-		SET(ENABLE_STATIC ON)
 		SET(SKIP_INSTALL_LIBRARIES ON)
 		SET(SKIP_INSTALL_ALL ON)
 		SET(BUILD_SHARED_LIBS OFF)
 		SET(BUILD_STATIC_LIBS ON)
 	ENDIF()
-
-	# libjpeg-turbo options.
-	SET(WITH_SIMD TRUE)
-	SET(WITH_ARITH_ENC TRUE)
-	SET(WITH_ARITH_DEC TRUE)
-	SET(WITH_JPEG7 FALSE)
-	SET(WITH_JPEG8 FALSE)
-	SET(WITH_MEM_SRCDST TRUE)
-	SET(WITH_TURBOJPEG FALSE)
-	SET(WITH_JAVA FALSE)
-	SET(WITH_12BIT FALSE)
-
-	# Build libjpeg-turbo.
-	ADD_SUBDIRECTORY(libjpeg-turbo)
-
+	ADD_SUBDIRECTORY(zstd)
 	# NOTE: Cannot remove targets from all builds
 	# if they're being installed.
-	#SET_EXTLIB_PROPERTIES(jpeg)
-	SET_EXTLIB_PROPERTIES(jpeg-static)
-	#SET_EXTLIB_PROPERTIES(turbojpeg)
-	SET_EXTLIB_PROPERTIES(turbojpeg-static)
-ENDIF(USE_INTERNAL_JPEG)
+	#SET_EXTLIB_PROPERTIES(zstd)
+	SET_EXTLIB_PROPERTIES(zstdstatic)
+ENDIF(USE_INTERNAL_ZSTD)
 
-# MiniZip.
+# MiniZip
 SET(SKIP_INSTALL_LIBRARIES ON)
 SET(SKIP_INSTALL_ALL ON)
 SET(BUILD_SHARED_LIBS OFF)
 SET(BUILD_STATIC_LIBS ON)
+SET(MZ_COMPAT ON)
+SET(MZ_ZLIB ON)
+SET(MZ_BZIP2 OFF)
+SET(MZ_LZMA OFF)
+SET(MZ_ZSTD ${ENABLE_ZSTD})
+SET(MZ_PKCRYPT OFF)
+SET(MZ_WZAES OFF)
+SET(MZ_LIBCOMP OFF)
+SET(MZ_OPENSSL OFF)
+SET(MZ_BRG OFF)
+SET(MZ_SIGNING OFF)
+SET(MZ_COMPRESS_ONLY OFF)
+SET(MZ_DECOMPRESS_ONLY OFF)
+SET(MZ_BUILD_TEST ON)	# Allow manually building test executables.
+SET(MZ_BUILD_UNIT_TEST OFF)
+SET(MZ_BUILD_FUZZ_TEST OFF)
+SET(MZ_CODE_COVERAGE OFF)
+SET(MZ_FILE32_API OFF)
+SET(ZLIB_FORCE_FETCH OFF)
+SET(ZSTD_FORCE_FETCH OFF)
 ADD_SUBDIRECTORY(minizip)
+SET_EXTLIB_PROPERTIES(minizip)
+SET_EXTLIB_PROPERTIES(minigzip_cmd)
+SET_EXTLIB_PROPERTIES(minizip_cmd)
+SET_EXTLIB_PROPERTIES(test_cmd)
+UNSET(USE_COMPAT)
+UNSET(COMPRESS_ONLY)
+UNSET(DECOMPRESS_ONLY)
 
 # inih
 SET(SKIP_INSTALL_LIBRARIES ON)
@@ -161,21 +165,18 @@ SET(BUILD_STATIC_LIBS ON)
 ADD_SUBDIRECTORY(inih)
 SET_EXTLIB_PROPERTIES(inih)
 
-# tinyxml2
+# TinyXML2
 IF(USE_INTERNAL_XML)
 	# Use the internal copy of TinyXML2.
-	# On Windows and Mac OS X, this will build DLLs.
+	# On Windows, this will build DLLs.
 	# On other systems, this will be statically-linked.
-	IF(WIN32 OR APPLE)
-		SET(ENABLE_SHARED ON)
-		SET(ENABLE_STATIC OFF)
+	# TODO: Build a dylib for Mac OS X.
+	IF(WIN32)
 		SET(SKIP_INSTALL_LIBRARIES OFF)
 		SET(SKIP_INSTALL_ALL OFF)
 		SET(BUILD_STATIC_LIBS OFF)
 		SET(BUILD_SHARED_LIBS ON)
 	ELSE()
-		SET(ENABLE_SHARED OFF)
-		SET(ENABLE_STATIC ON)
 		SET(SKIP_INSTALL_LIBRARIES ON)
 		SET(SKIP_INSTALL_ALL ON)
 		SET(BUILD_STATIC_LIBS ON)
@@ -193,14 +194,114 @@ IF(USE_INTERNAL_XML)
 	# TODO: Set TinyXML2::tinyxml2 and use it in libromdata?
 ENDIF(USE_INTERNAL_XML)
 
+# UnICE68 for Atari ST SNDH files.
+IF(ENABLE_UNICE68)
+	SET(BUILD_UNICE68_CLI ON) # only builds if unice68_exe is explicitly built
+	SET(BUILD_STATIC_LIBS ON)
+	SET(BUILD_SHARED_LIBS OFF)
+	ADD_SUBDIRECTORY(unice68)
+	SET_EXTLIB_PROPERTIES(unice68_lib)
+	SET_EXTLIB_PROPERTIES(unice68_exe)
+ENDIF(ENABLE_UNICE68)
+
+# libmspack-xenia for LZX-compressed Xbox 360 executables.
+IF(ENABLE_LIBMSPACK)
+	SET(BUILD_STATIC_LIBS ON)
+	SET(BUILD_SHARED_LIBS OFF)
+	ADD_SUBDIRECTORY(libmspack-xenia)
+	SET_EXTLIB_PROPERTIES(libmspack)
+ENDIF(ENABLE_LIBMSPACK)
+
+# PowerVR texture decompression.
+IF(ENABLE_PVRTC)
+	SET(BUILD_STATIC_LIBS ON)
+	SET(BUILD_SHARED_LIBS OFF)
+	ADD_SUBDIRECTORY(PowerVR)
+	SET_EXTLIB_PROPERTIES(pvrtc)
+ENDIF(ENABLE_PVRTC)
+
+# Compatibility library for older versions of Windows.
+IF(ENABLE_OLDWINCOMPAT)
+	SET(BUILD_STATIC_LIBS ON)
+	SET(BUILD_SHARED_LIBS OFF)
+	ADD_SUBDIRECTORY(oldwincompat)
+	SET_EXTLIB_PROPERTIES(oldwincompat)
+ENDIF(ENABLE_OLDWINCOMPAT)
+
+IF(USE_INTERNAL_LZ4)
+	# Use the internal copy of LZ4.
+	# On Windows and Mac OS X, this will build DLLs.
+	# On other systems, this will be statically-linked.
+	IF(WIN32 OR APPLE)
+		SET(SKIP_INSTALL_LIBRARIES OFF)
+		SET(SKIP_INSTALL_ALL ON)
+		SET(BUILD_SHARED_LIBS ON)
+		SET(BUILD_STATIC_LIBS OFF)
+	ELSE()
+		SET(SKIP_INSTALL_LIBRARIES ON)
+		SET(SKIP_INSTALL_ALL ON)
+		SET(BUILD_SHARED_LIBS OFF)
+		SET(BUILD_STATIC_LIBS ON)
+	ENDIF()
+	ADD_SUBDIRECTORY(lz4/contrib/cmake_unofficial)
+	# NOTE: Cannot remove targets from all builds
+	# if they're being installed.
+	#SET_EXTLIB_PROPERTIES(lz4_shared)
+	SET_EXTLIB_PROPERTIES(lz4_static)
+	# lz4 programs that we don't need.
+	SET_EXTLIB_PROPERTIES(lz4cli lz4c)
+ENDIF(USE_INTERNAL_LZ4)
+
+IF(USE_INTERNAL_LZO)
+	# Use the internal copy of LZO. (actually MiniLZO)
+	# On Windows and Mac OS X, this will build DLLs.
+	# On other systems, this will be statically-linked.
+	IF(WIN32 OR APPLE)
+		SET(SKIP_INSTALL_LIBRARIES OFF)
+		SET(SKIP_INSTALL_ALL ON)
+		SET(BUILD_SHARED_LIBS ON)
+		SET(BUILD_STATIC_LIBS OFF)
+	ELSE()
+		SET(SKIP_INSTALL_LIBRARIES ON)
+		SET(SKIP_INSTALL_ALL ON)
+		SET(BUILD_SHARED_LIBS OFF)
+		SET(BUILD_STATIC_LIBS ON)
+	ENDIF()
+	ADD_SUBDIRECTORY(minilzo)
+	# NOTE: Cannot remove targets from all builds
+	# if they're being installed.
+	#SET_EXTLIB_PROPERTIES(minilzo)
+ENDIF(USE_INTERNAL_LZO)
+
+# rapidjson
+SET(RAPIDJSON_BUILD_DOC OFF)
+SET(RAPIDJSON_BUILD_EXAMPLES OFF)
+SET(RAPIDJSON_BUILD_TESTS OFF)
+SET(RAPIDJSON_BUILD_THIRDPARTY_GTEST OFF)
+SET(RAPIDJSON_BUILD_CXX11 ON)
+SET(RAPIDJSON_BUILD_ASAN OFF)
+SET(RAPIDJSON_BUILD_UBSAN OFF)
+SET(RAPIDJSON_HAS_STDSTRING ON)
+ADD_SUBDIRECTORY(rapidjson)
+SET(RAPIDJSON_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/rapidjson/include" PARENT_SCOPE)
+
 # Google Test
 IF(BUILD_TESTING)
 	# Reference: http://stackoverflow.com/questions/12540970/how-to-make-gtest-build-mdd-instead-of-mtd-by-default-using-cmake
 	SET(gtest_force_shared_crt ON CACHE BOOL "Always use msvcrt.dll")
 	SET(SKIP_INSTALL_LIBRARIES ON)
 	SET(SKIP_INSTALL_ALL ON)
-	ADD_SUBDIRECTORY(googletest)
 
+	# Use shared libraries on Windows.
+	IF(WIN32)
+		SET(BUILD_STATIC_LIBS OFF)
+		SET(BUILD_SHARED_LIBS ON)
+	ELSE(WIN32)
+		SET(BUILD_STATIC_LIBS ON)
+		SET(BUILD_SHARED_LIBS OFF)
+	ENDIF(WIN32)
+
+	ADD_SUBDIRECTORY(googletest)
 	INCLUDE(SetMSVCDebugPath)
 	SET_EXTLIB_PROPERTIES(
 		gtest gtest_main gtest_no_exception gtest_main_no_exception
@@ -208,4 +309,9 @@ IF(BUILD_TESTING)
 		gmock gmock_main gmock_main_no_exception
 		gmock_main_no_rtti gmock_main_use_own_tuple
 		)
+	IF(WIN32)
+		# GTest is a DLL, so we need to set this.
+		TARGET_COMPILE_DEFINITIONS(gtest INTERFACE GTEST_LINKED_AS_SHARED_LIBRARY=1)
+		TARGET_COMPILE_DEFINITIONS(gtest_main INTERFACE GTEST_LINKED_AS_SHARED_LIBRARY=1)
+	ENDIF(WIN32)
 ENDIF(BUILD_TESTING)

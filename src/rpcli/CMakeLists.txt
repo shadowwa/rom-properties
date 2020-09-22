@@ -1,112 +1,76 @@
-PROJECT(rom-properties-rpcli)
+# Command line interface
+CMAKE_MINIMUM_REQUIRED(VERSION 3.0)
+CMAKE_POLICY(SET CMP0048 NEW)
+IF(POLICY CMP0063)
+	# CMake 3.3: Enable symbol visibility presets for all
+	# target types, including static libraries and executables.
+	CMAKE_POLICY(SET CMP0063 NEW)
+ENDIF(POLICY CMP0063)
+PROJECT(rpcli LANGUAGES C CXX)
 
-# Library checks.
-INCLUDE(CheckSymbolExists)
-MACRO(CHECK_SYMBOL_EXISTS_OR_INLINE _function _header _sample_code _variable)
-	# MinGW defines some reentrant functions as inline functions
-	# that are actually wrappers around MSVC "secure" functions.
-	# Check for the function as a regular function first, then check
-	# if it's available in the specified header.
-	IF(NOT DEFINED ${_variable})
+# Sources and headers.
+SET(rpcli_SRCS
+	rpcli.cpp
+	device.cpp
+	rpcli_secure.c
+	)
+SET(rpcli_H
+	device.hpp
+	rpcli_secure.h
+	)
 
-	CHECK_SYMBOL_EXISTS(${_function} ${_header} ${_variable})
-	IF(NOT ${_variable})
-		# Function does not exist normally.
-		# Check if it's an inline function in the specified header.
-		MESSAGE(STATUS "Looking for ${_function} as an inline function")
-		CHECK_C_SOURCE_COMPILES(
-			"#define _POSIX_SOURCE
-			#define _POSIX_C_SOURCE 1
-			#include <${_header}>
-			int main(void) { ${_sample_code} }"
-			${_variable}_INLINE)
-		IF(${_variable}_INLINE)
-			MESSAGE(STATUS "Looking for ${_variable} as an inline function - found")
-			SET(${_variable} 1 CACHE INTERNAL "Have function ${_variable} (inline)")
-		ELSE(${_variable}_INLINE)
-			MESSAGE(STATUS "Looking for ${_variable} as an inline function - not found")
-			# ${VARIABLE} is already cached by CHECK_FUNCTION_EXISTS().
-		ENDIF(${_variable}_INLINE)
-	ENDIF(NOT ${_variable})
+# Check for system security functionality.
+IF(WIN32)
+	SET(rpcli_RC resource.rc)
 
-	ENDIF(NOT DEFINED ${_variable})
-ENDMACRO(CHECK_SYMBOL_EXISTS_OR_INLINE _function _header _sample_code _variable)
+	# Create the manifest file.
+	CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/rpcli.exe.manifest.in" "${CMAKE_CURRENT_BINARY_DIR}/rpcli.exe.manifest" @ONLY)
+ENDIF(WIN32)
 
-# Check for reentrant functions.
-# NOTE: May be _gmtime32_s() or _gmtime64_s() on MSVC 2005+.
-# The "inline" part will detect that.
-# FIXME: CHECK_SYMBOL_EXISTS() works for macros like in MSVC,
-# but fails with inline functions like in MinGW-w64.
-CHECK_SYMBOL_EXISTS_OR_INLINE(gmtime_r "time.h" "time_t tm; gmtime_r(&tm, NULL);" HAVE_GMTIME_R)
-IF(NOT HAVE_GMTIME_R)
-	CHECK_SYMBOL_EXISTS_OR_INLINE(gmtime_s "time.h" "time_t tm; gmtime_s(NULL, &tm);" HAVE_GMTIME_S)
-ENDIF(NOT HAVE_GMTIME_R)
-CHECK_SYMBOL_EXISTS_OR_INLINE(localtime_r "time.h" "time_t tm; localtime_r(&tm, NULL);" HAVE_LOCALTIME_R)
-IF(NOT HAVE_LOCALTIME_R)
-	CHECK_SYMBOL_EXISTS_OR_INLINE(localtime_s "time.h" "time_t tm; localtime_s(NULL, &tm);" HAVE_LOCALTIME_S)
-ENDIF(NOT HAVE_LOCALTIME_R)
+IF(ENABLE_DECRYPTION)
+	SET(rpcli_CRYPTO_SRCS verifykeys.cpp)
+	SET(rpcli_CRYPTO_H verifykeys.hpp)
+ENDIF(ENABLE_DECRYPTION)
 
-# Create the manifest file.
-CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/rpcli.exe.manifest.in" "${CMAKE_CURRENT_BINARY_DIR}/rpcli.exe.manifest" @ONLY)
+IF(ENABLE_PCH)
+	# Precompiled headers.
+	INCLUDE(PrecompiledHeader)
+	SET(rpcli_PCH_C stdafx.c)
+	SET(rpcli_PCH_CXX stdafx.cpp)
+	SET(rpcli_PCH_SRC ${rpcli_PCH_C} ${rpcli_PCH_CXX})
+	SET(rpcli_PCH_H stdafx.h)
+ENDIF(ENABLE_PCH)
+
+IF(MSVC)
+	# Delay-load sources.
+	SET(rpcli-DELAYLOAD_SRC ../libwin32common/DelayLoadHelper.c)
+	SET(rpcli-DELAYLOAD_H ../libwin32common/DelayLoadHelper.h)
+ENDIF(MSVC)
 
 # Write the config.h file.
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/config.rpcli.h.in" "${CMAKE_CURRENT_BINARY_DIR}/config.rpcli.h")
-
-# Sources and headers.
-SET(rom-properties-rpcli_SRCS
-	rpcli.cpp
-	properties.cpp
-	bmp.cpp
-	resource.rc
-	)
-SET(rom-properties-rpcli_H
-	properties.hpp
-	bmp.hpp
-	)
-
-IF(ENABLE_DECRYPTION)
-	SET(rom-properties-rpcli_CRYPTO_SRCS verifykeys.cpp)
-	SET(rom-properties-rpcli_CRYPTO_H verifykeys.hpp)
-ENDIF(ENABLE_DECRYPTION)
-
-IF(MSVC)
-	# Precompiled headers.
-	# NOTE: Only enabling PCH for MSVC builds.
-	INCLUDE(PrecompiledHeader)
-	SET(rom-properties-rpcli_PCH_SRC stdafx.cpp)
-	SET(rom-properties-rpcli_PCH_H stdafx.h)
-
-	# Delay-load sources.
-	SET(rom-properties-rpcli-DELAY_LOAD_SRC ../libwin32common/DelayLoadHelper.cpp)
-	SET(rom-properties-rpcli-DELAY_LOAD_H ../libwin32common/DelayLoadHelper.hpp)
-ENDIF(MSVC)
 
 #########################
 # Build the executable. #
 #########################
 
-IF(MSVC)
-	# Delay-load extlibs.
-	INCLUDE(../libwin32common/DelayLoadHelper.cmake)
-	SET_DELAY_LOAD_FLAGS()
-ENDIF(MSVC)
+# Delay-load extlibs.
+INCLUDE(../libwin32common/DelayLoadHelper.cmake)
+SET_DELAYLOAD_EXTLIB_FLAGS()
 
 ADD_EXECUTABLE(rpcli
-	${rom-properties-rpcli_PCH_SRC}
-	${rom-properties-rpcli_PCH_H}
-	${rom-properties-rpcli-DELAY_LOAD_SRC}
-	${rom-properties-rpcli-DELAY_LOAD_H}
-	${rom-properties-rpcli_SRCS}
-	${rom-properties-rpcli_H}
-	${rom-properties-rpcli_CRYPTO_SRCS}
-	${rom-properties-rpcli_CRYPTO_H}
+	${rpcli_PCH_SRC} ${rpcli_PCH_H}
+	${rpcli-DELAYLOAD_SRC} ${rpcli-DELAYLOAD_H}
+	${rpcli_SRCS} ${rpcli_H}
+	${rpcli_CRYPTO_SRCS} ${rpcli_CRYPTO_H}
+	${rpcli_RC}
 	)
-# NOTE: Only enabling PCH for MSVC.
-IF(MSVC)
-	ADD_PRECOMPILED_HEADER(rpcli ${rom-properties-rpcli_PCH_H}
-		SOURCE_CXX ${rom-properties-rpcli_PCH_SRC}
+IF(ENABLE_PCH)
+	ADD_PRECOMPILED_HEADER(rpcli ${rpcli_PCH_H}
+		SOURCE_C ${rpcli_PCH_C}
+		SOURCE_CXX ${rpcli_PCH_CXX}
 		)
-ENDIF(MSVC)
+ENDIF(ENABLE_PCH)
 SET_TARGET_PROPERTIES(rpcli PROPERTIES PREFIX "")
 DO_SPLIT_DEBUG(rpcli)
 SET_WINDOWS_SUBSYSTEM(rpcli CONSOLE)
@@ -119,26 +83,42 @@ SET_WINDOWS_ENTRYPOINT(rpcli wmain ON)
 # - Private: Parent source and binary directories,
 #            and top-level binary directory for git_version.h.
 TARGET_INCLUDE_DIRECTORIES(rpcli
-	PUBLIC	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-		$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
-	PRIVATE	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
-		$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>
+	PUBLIC	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>		# rpcli
+		$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>		# rpcli
+	PRIVATE	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>	# src
+		$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>	# src
 		$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
 	)
-TARGET_LINK_LIBRARIES(rpcli romdata rpbase)
+TARGET_LINK_LIBRARIES(rpcli PRIVATE rpsecure romdata rpfile rpbase)
+IF(ENABLE_NLS)
+	TARGET_LINK_LIBRARIES(rpcli PRIVATE i18n)
+ENDIF(ENABLE_NLS)
+IF(WIN32)
+	TARGET_LINK_LIBRARIES(rpcli PRIVATE wmain)
+ENDIF(WIN32)
+
+# Make sure git_version.h is created before compiling this target.
+IF(TARGET git_version)
+	ADD_DEPENDENCIES(rpcli git_version)
+ENDIF(TARGET git_version)
 
 # CMake-3.7.2 doesn't add include paths to windres.
 IF(MINGW)
 	SET(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -I \"${CMAKE_CURRENT_SOURCE_DIR}/..\"")
 	SET(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -I \"${CMAKE_CURRENT_BINARY_DIR}/..\"")
-	SET(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -I \"${CMAKE_BINARY_DIR}\"")
+	SET(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -I \"${CMAKE_CURRENT_BINARY_DIR}\"")
 ENDIF(MINGW)
 
-# Delay-load some Windows system libraries.
-# TODO: MinGW delay-load?
+# Delay-load shell32.dll and ole32.dll to prevent a performance penalty due to gdi32.dll.
+# Reference: https://randomascii.wordpress.com/2018/12/03/a-not-called-function-can-cause-a-5x-slowdown/
+# This is also needed when disabling direct Win32k syscalls,
+# since loading gdi32.dll will crash in that case.
+# NOTE: ole32.dll is indirectly linked through libwin32common. (CoTaskMemFree())
+# FIXME: gdiplus.dll isn't linked in, though I'm pretty sure it's used...
+ADD_DELAYLOAD_FLAGS(rpcli shell32.dll ole32.dll)
 IF(MSVC)
-	SET(RP_SYS_DELAY_LOAD_FLAGS "/DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll")
-	TARGET_LINK_LIBRARIES(rpcli delayimp)
+	# Extended delay-load functionality.
+	TARGET_LINK_LIBRARIES(rpcli PRIVATE delayimp)
 ENDIF(MSVC)
 
 #################
@@ -156,7 +136,21 @@ INSTALL(TARGETS rpcli
 	#ARCHIVE DESTINATION "${DIR_INSTALL_LIB}"
 	COMPONENT "program"
 	)
+IF(INSTALL_APPARMOR)
+	# AppArmor profile (Linux only)
+	# Convert the full path to use '.' instead of '/'.
+	STRING(REPLACE "/" "." APPARMOR_CONF "${CMAKE_INSTALL_PREFIX}/${DIR_INSTALL_EXE}/rpcli")
+	# Remove the leading slash if present.
+	STRING(REGEX REPLACE "^\\." "" APPARMOR_CONF "${APPARMOR_CONF}")
+
+	INSTALL(FILES rpcli.apparmor.conf
+		RENAME "${APPARMOR_CONF}"
+		DESTINATION "${DIR_INSTALL_APPARMOR}"
+		COMPONENT "apparmor"
+		)
+ENDIF(INSTALL_APPARMOR)
 IF(INSTALL_DEBUG)
+	# Split debug file
 	# FIXME: Generator expression $<TARGET_PROPERTY:${_target},PDB> didn't work with CPack-3.6.1.
 	GET_TARGET_PROPERTY(DEBUG_FILENAME rpcli PDB)
 	INSTALL(FILES "${DEBUG_FILENAME}"

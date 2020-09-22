@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * TCreateThumbnail.hpp: Thumbnail creator template.                       *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBROMDATA_IMG_TCREATETHUMBNAIL_HPP__
@@ -43,6 +30,9 @@ typedef enum {
 	RPCT_SOURCE_FILE_NO_IMAGE	= 4,	// Source file has no image.
 	RPCT_OUTPUT_FILE_FAILED		= 5,	// Failed to save the output file.
 	RPCT_SOURCE_FILE_CLASS_DISABLED	= 6,	// User configuration has disabled thumbnails for this class.
+	RPCT_SOURCE_FILE_BAD_FS		= 7,	// Source file is located on a "bad" file system.
+	RPCT_RUNNING_AS_ROOT		= 8,	// Running as root is not supported.
+	RPCT_INVALID_IMAGE_SIZE		= 9,	// Invalid image size requested. (e.g. 0 or less)
 } RpCreateThumbnailError;
 
 /**
@@ -72,7 +62,7 @@ typedef enum {
  * @param maximum_size Maximum size.
  * @return 0 on success; non-zero on error.
  */
-typedef int (*PFN_RP_CREATE_THUMBNAIL)(const char *source_file, const char *output_file, int maximum_size);
+typedef int (RP_C_API *PFN_RP_CREATE_THUMBNAIL)(const char *source_file, const char *output_file, int maximum_size);
 
 #ifdef __cplusplus
 }
@@ -80,15 +70,17 @@ typedef int (*PFN_RP_CREATE_THUMBNAIL)(const char *source_file, const char *outp
 
 #ifdef __cplusplus
 #include "librpbase/RomData.hpp"
-#include "librpbase/img/rp_image.hpp"
+#include "librptexture/img/rp_image.hpp"
 
 // C++ includes.
 #include <string>
 
 namespace LibRpBase {
-	class IRpFile;
 	class RomData;
 };
+namespace LibRpFile {
+	class IRpFile;
+}
 
 namespace LibRomData {
 
@@ -121,7 +113,7 @@ class TCreateThumbnail
 		ImgClass getInternalImage(const LibRpBase::RomData *romData,
 			LibRpBase::RomData::ImageType imageType,
 			ImgSize *pOutSize = nullptr,
-			LibRpBase::rp_image::sBIT_t *sBIT = nullptr);
+			LibRpTexture::rp_image::sBIT_t *sBIT = nullptr);
 
 		/**
 		 * Get an external image.
@@ -135,40 +127,44 @@ class TCreateThumbnail
 		ImgClass getExternalImage(
 			const LibRpBase::RomData *romData, LibRpBase::RomData::ImageType imageType,
 			int req_size, ImgSize *pOutSize = nullptr,
-			LibRpBase::rp_image::sBIT_t *sBIT = nullptr);
+			LibRpTexture::rp_image::sBIT_t *sBIT = nullptr);
+
+		/**
+		 * getThumbnail() output parameters.
+		 */
+		struct GetThumbnailOutParams_t {
+			ImgSize thumbSize;			// [out] Thumbnail size.
+			ImgSize fullSize;			// [out] Full image size.
+			LibRpTexture::rp_image::sBIT_t sBIT;	// [out] sBIT metadata.
+			ImgClass retImg;			// [out] Returned image.
+		};
 
 		/**
 		 * Create a thumbnail for the specified ROM file.
 		 * @param romData	[in] RomData object.
-		 * @param req_size	[in] Requested image size.
-		 * @param ret_img	[out] Return image.
-		 * @param sBIT		[out,opt] sBIT metadata.
+		 * @param reqSize	[in] Requested image size. (single dimension; assuming square image)
+		 * @param pOutParams	[out] Output parameters.
 		 * @return 0 on success; non-zero on error.
 		 */
-		int getThumbnail(const LibRpBase::RomData *romData, int req_size, ImgClass &ret_img,
-			LibRpBase::rp_image::sBIT_t *sBIT = nullptr);
+		int getThumbnail(const LibRpBase::RomData *romData, int reqSize, GetThumbnailOutParams_t *pOutParams);
 
 		/**
 		 * Create a thumbnail for the specified ROM file.
 		 * @param file		[in] Open IRpFile object.
-		 * @param req_size	[in] Requested image size.
-		 * @param ret_img	[out] Return image.
-		 * @param sBIT		[out,opt] sBIT metadata.
+		 * @param reqSize	[in] Requested image size. (single dimension; assuming square image)
+		 * @param pOutParams	[out] Output parameters.
 		 * @return 0 on success; non-zero on error.
 		 */
-		int getThumbnail(LibRpBase::IRpFile *file, int req_size, ImgClass &ret_img,
-			LibRpBase::rp_image::sBIT_t *sBIT = nullptr);
+		int getThumbnail(LibRpFile::IRpFile *file, int reqSize, GetThumbnailOutParams_t *pOutParams);
 
 		/**
 		 * Create a thumbnail for the specified ROM file.
 		 * @param filename	[in] ROM file.
-		 * @param req_size	[in] Requested image size.
-		 * @param ret_img	[out] Return image.
-		 * @param sBIT		[out,opt] sBIT metadata.
+		 * @param reqSize	[in] Requested image size. (single dimension; assuming square image)
+		 * @param pOutParams	[out] Output parameters.
 		 * @return 0 on success; non-zero on error.
 		 */
-		int getThumbnail(const char *filename, int req_size, ImgClass &ret_img,
-			LibRpBase::rp_image::sBIT_t *sBIT = nullptr);
+		int getThumbnail(const char *filename, int reqSize, GetThumbnailOutParams_t *pOutParams);
 
 	protected:
 		/**
@@ -187,7 +183,7 @@ class TCreateThumbnail
 		 * @param img rp_image
 		 * @return ImgClass
 		 */
-		virtual ImgClass rpImageToImgClass(const LibRpBase::rp_image *img) const = 0;
+		virtual ImgClass rpImageToImgClass(const LibRpTexture::rp_image *img) const = 0;
 
 		/**
 		 * Wrapper function to check if an ImgClass is valid.
@@ -212,13 +208,19 @@ class TCreateThumbnail
 		 */
 		virtual void freeImgClass(ImgClass &imgClass) const = 0;
 
+		enum class ScalingMethod {
+			Nearest = 0,
+			Bilinear = 1,
+		};
+
 		/**
-		 * Rescale an ImgClass using nearest-neighbor scaling.
+		 * Rescale an ImgClass using the specified scaling method.
 		 * @param imgClass ImgClass object.
 		 * @param sz New size.
+		 * @param method Scaling method.
 		 * @return Rescaled ImgClass.
 		 */
-		virtual ImgClass rescaleImgClass(const ImgClass &imgClass, const ImgSize &sz) const = 0;
+		virtual ImgClass rescaleImgClass(const ImgClass &imgClass, const ImgSize &sz, ScalingMethod method = ScalingMethod::Nearest) const = 0;
 
 		/**
 		 * Get the size of the specified ImgClass.

@@ -2,28 +2,12 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * AesCAPI.cpp: AES decryption class using Win32 CryptoAPI.                *
  *                                                                         *
- * Copyright (c) 2016 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2019 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "AesCAPI.hpp"
-#include "../common.h"
-
-// C includes. (C++ namespace)
-#include <cerrno>
 
 // libwin32common
 #include "libwin32common/RpWin32_sdk.h"
@@ -82,7 +66,7 @@ class AesCAPIPrivate
 AesCAPIPrivate::AesCAPIPrivate()
 	: hProvider(0)
 	, hKey(0)
-	, chainingMode(IAesCipher::CM_ECB)
+	, chainingMode(IAesCipher::ChainingMode::ECB)
 {
 	// Clear the counter.
 	memset(ctr, 0, sizeof(ctr));
@@ -122,11 +106,11 @@ int AesCAPIPrivate::setChainingMode(HCRYPTKEY hKey, IAesCipher::ChainingMode mod
 {
 	DWORD dwMode;
 	switch (mode) {
-		case IAesCipher::CM_ECB:
-		case IAesCipher::CM_CTR:
+		case IAesCipher::ChainingMode::ECB:
+		case IAesCipher::ChainingMode::CTR:
 			dwMode = CRYPT_MODE_ECB;
 			break;
-		case IAesCipher::CM_CBC:
+		case IAesCipher::ChainingMode::CBC:
 			dwMode = CRYPT_MODE_CBC;
 			break;
 		default:
@@ -174,18 +158,18 @@ bool AesCAPI::isInit(void) const
 
 /**
  * Set the encryption key.
- * @param key Key data.
- * @param len Key length, in bytes.
+ * @param pKey	[in] Key data.
+ * @param size	[in] Size of pKey, in bytes.
  * @return 0 on success; negative POSIX error code on error.
  */
-int AesCAPI::setKey(const uint8_t *RESTRICT key, unsigned int len)
+int AesCAPI::setKey(const uint8_t *RESTRICT pKey, size_t size)
 {
 	// Acceptable key lengths:
 	// - 16 (AES-128)
 	// - 24 (AES-192)
 	// - 32 (AES-256)
 	RP_D(AesCAPI);
-	if (!key) {
+	if (!pKey) {
 		// No key specified.
 		return -EINVAL;
 	} else if (d->hProvider == 0) {
@@ -194,7 +178,7 @@ int AesCAPI::setKey(const uint8_t *RESTRICT key, unsigned int len)
 	}
 
 	ALG_ID alg_id;
-	switch (len) {
+	switch (size) {
 		case 16:
 			alg_id = CALG_AES_128;
 			break;
@@ -220,12 +204,12 @@ int AesCAPI::setKey(const uint8_t *RESTRICT key, unsigned int len)
 	blob.hdr.bVersion = CUR_BLOB_VERSION;
 	blob.hdr.reserved = 0;
 	blob.hdr.aiKeyAlg = alg_id;
-	blob.keySize = len;
-	memcpy(blob.bytes, key, len);
+	blob.keySize = static_cast<DWORD>(size);
+	memcpy(blob.bytes, pKey, size);
 
 	// Calculate the blob size based on the
 	// specified key size.
-	const DWORD blobSize = (DWORD)(sizeof(BLOBHEADER)+sizeof(DWORD)+len);
+	const DWORD blobSize = static_cast<DWORD>(sizeof(blob.hdr) + sizeof(blob.keySize) + size);
 
 	// Load the key.
 	HCRYPTKEY hNewKey;
@@ -284,14 +268,14 @@ int AesCAPI::setChainingMode(ChainingMode mode)
 
 /**
  * Set the IV (CBC mode) or counter (CTR mode).
- * @param iv IV/counter data.
- * @param len IV/counter length, in bytes.
+ * @param pIV	[in] IV/counter data.
+ * @param size	[in] Size of pIV, in bytes.
  * @return 0 on success; negative POSIX error code on error.
  */
-int AesCAPI::setIV(const uint8_t *RESTRICT iv, unsigned int len)
+int AesCAPI::setIV(const uint8_t *RESTRICT pIV, size_t size)
 {
 	RP_D(AesCAPI);
-	if (!iv || len != 16) {
+	if (!pIV || size != 16) {
 		return -EINVAL;
 	} else if (d->hKey == 0) {
 		// Key hasn't been set.
@@ -299,20 +283,20 @@ int AesCAPI::setIV(const uint8_t *RESTRICT iv, unsigned int len)
 	}
 
 	switch (d->chainingMode) {
-		case CM_ECB:
+		case ChainingMode::ECB:
 		default:
 			// No IV.
 			return -EINVAL;
-		case CM_CBC:
+		case ChainingMode::CBC:
 			// Set the IV.
-			if (!CryptSetKeyParam(d->hKey, KP_IV, iv, 0)) {
+			if (!CryptSetKeyParam(d->hKey, KP_IV, pIV, 0)) {
 				// Error setting the IV.
 				return -w32err_to_posix(GetLastError());
 			}
 			break;
-		case CM_CTR:
+		case ChainingMode::CTR:
 			// Set the counter.
-			memcpy(d->ctr, iv, len);
+			memcpy(d->ctr, pIV, size);
 			break;
 	}
 
@@ -321,11 +305,13 @@ int AesCAPI::setIV(const uint8_t *RESTRICT iv, unsigned int len)
 
 /**
  * Decrypt a block of data.
- * @param data Data block.
- * @param data_len Length of data block.
+ * Key and IV/counter must be set before calling this function.
+ *
+ * @param pData	[in/out] Data block.
+ * @param size	[in] Length of data block. (Must be a multiple of 16.)
  * @return Number of bytes decrypted on success; 0 on error.
  */
-unsigned int AesCAPI::decrypt(uint8_t *RESTRICT data, unsigned int data_len)
+size_t AesCAPI::decrypt(uint8_t *RESTRICT pData, size_t size)
 {
 	RP_D(AesCAPI);
 	if (d->hKey == 0) {
@@ -333,9 +319,16 @@ unsigned int AesCAPI::decrypt(uint8_t *RESTRICT data, unsigned int data_len)
 		return 0;
 	}
 
-	// FIXME: Nettle version doesn't do this, which allows
-	// calling decrypt() multiple times for CBC with large
-	// amounts of data.
+	if (size == 0) {
+		// Nothing to decrypt...
+		return 0;
+	}
+
+	assert(size % 16 == 0);
+	if (size % 16 != 0) {
+		// Not a multiple of the block size.
+		return 0;
+	}
 
 	// Temporarily duplicate the key so we don't overwrite
 	// the feedback register in the original key.
@@ -346,13 +339,20 @@ unsigned int AesCAPI::decrypt(uint8_t *RESTRICT data, unsigned int data_len)
 		return 0;
 	}
 
+	if (d->chainingMode == ChainingMode::CBC) {
+		// Ensure we have the correct IV afterwards.
+		// IV should be the last encrypted block.
+		// TODO: Optimize things so we don't have to do this...
+		setIV(&pData[size-16], 16);
+	}
+
 	// Decrypt the data.
 	// NOTE: Specifying TRUE as the Final parameter results in
 	// CryptDecrypt failing with NTE_BAD_DATA, even though the
 	// data has the correct block length.
 	DWORD dwLen;
 	BOOL bRet = FALSE;
-	if (d->chainingMode == CM_CTR) {
+	if (d->chainingMode == ChainingMode::CTR) {
 		// CTR isn't supported by CryptoAPI directly.
 		// Need to decrypt each block manually.
 
@@ -366,9 +366,9 @@ unsigned int AesCAPI::decrypt(uint8_t *RESTRICT data, unsigned int data_len)
 
 		// TODO: Verify data alignment.
 		ctr_block ctr_crypt;
-		ctr_block *ctr_data = reinterpret_cast<ctr_block*>(data);
+		ctr_block *ctr_data = reinterpret_cast<ctr_block*>(pData);
 		dwLen = 0;
-		for (; data_len > 0; data_len -= 16, ctr_data++) {
+		for (; size > 0; size -= 16, ctr_data++) {
 			// Encrypt the current counter.
 			memcpy(ctr_crypt.u8, d->ctr, sizeof(ctr_crypt.u8));
 			DWORD dwTempLen = 16;
@@ -393,42 +393,12 @@ unsigned int AesCAPI::decrypt(uint8_t *RESTRICT data, unsigned int data_len)
 		}
 	} else {
 		// EBC and/or CBC.
-		dwLen = data_len;
-		bRet = CryptDecrypt(hMyKey, 0, FALSE, 0, data, &dwLen);
+		dwLen = static_cast<DWORD>(size);
+		bRet = CryptDecrypt(hMyKey, 0, FALSE, 0, pData, &dwLen);
 		CryptDestroyKey(hMyKey);
 	}
 
 	return (bRet ? dwLen : 0);
-}
-
-/**
- * Decrypt a block of data using the specified IV (CBC mode) or counter (CTR mode).
- * @param data Data block.
- * @param data_len Length of data block.
- * @param iv IV/counter for the data block.
- * @param iv_len Length of the IV/counter.
- * @return Number of bytes decrypted on success; 0 on error.
- */
-unsigned int AesCAPI::decrypt(uint8_t *RESTRICT data, unsigned int data_len,
-	const uint8_t *RESTRICT iv, unsigned int iv_len)
-{
-	RP_D(AesCAPI);
-	if (!iv || iv_len != 16) {
-		// Invalid IV.
-		return 0;
-	} else if (d->hKey == 0) {
-		// Key hasn't been set.
-		return 0;
-	}
-
-	// Set the IV.
-	if (!CryptSetKeyParam(d->hKey, KP_IV, iv, 0)) {
-		// Error setting the IV.
-		return 0;
-	}
-
-	// Use the regular decrypt() function.
-	return decrypt(data, data_len);
 }
 
 }

@@ -2,25 +2,13 @@
  * ROM Properties Page shell extension. (libromdata/tests)                 *
  * CtrKeyScramblerTest.cpp: CtrKeyScrambler class test.                    *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 // Google Test
 #include "gtest/gtest.h"
+#include "tcharx.h"
 
 #include "librpbase/TextFuncs.hpp"
 
@@ -33,10 +21,8 @@
 
 // C++ includes.
 #include <iostream>
-#include <sstream>
 #include <string>
 #include <vector>
-using std::ostringstream;
 using std::string;
 using std::vector;
 
@@ -80,8 +66,8 @@ class CtrKeyScramblerTest : public ::testing::TestWithParam<CtrKeyScramblerTest_
 	protected:
 		CtrKeyScramblerTest() { }
 
-		virtual void SetUp(void) override final;
-		virtual void TearDown(void) override final;
+		void SetUp(void) final;
+		void TearDown(void) final;
 
 	public:
 		// TODO: Split into a separate file, since this is
@@ -90,15 +76,15 @@ class CtrKeyScramblerTest : public ::testing::TestWithParam<CtrKeyScramblerTest_
 		 * Compare two byte arrays.
 		 * The byte arrays are converted to hexdumps and then
 		 * compared using EXPECT_EQ().
-		 * @param expected Expected data.
-		 * @param actual Actual data.
-		 * @param size Size of both arrays.
-		 * @param data_type Data type.
+		 * @param expected	[in] Expected data.
+		 * @param actual	[in] Actual data.
+		 * @param size		[in] Size of both arrays.
+		 * @param data_type	[in] Data type.
 		 */
 		void CompareByteArrays(
 			const uint8_t *expected,
 			const uint8_t *actual,
-			unsigned int size,
+			size_t size,
 			const char *data_type);
 };
 
@@ -106,28 +92,27 @@ class CtrKeyScramblerTest : public ::testing::TestWithParam<CtrKeyScramblerTest_
  * Compare two byte arrays.
  * The byte arrays are converted to hexdumps and then
  * compared using EXPECT_EQ().
- * @param expected Expected data.
- * @param actual Actual data.
- * @param size Size of both arrays.
- * @param data_type Data type.
+ * @param expected	[in] Expected data.
+ * @param actual	[in] Actual data.
+ * @param size		[in] Size of both arrays.
+ * @param data_type	[in] Data type.
  */
 void CtrKeyScramblerTest::CompareByteArrays(
 	const uint8_t *expected,
 	const uint8_t *actual,
-	unsigned int size,
+	size_t size,
 	const char *data_type)
 {
 	// Output format: (assume ~64 bytes per line)
 	// 0000: 01 23 45 67 89 AB CD EF  01 23 45 67 89 AB CD EF
-	const unsigned int bufSize = ((size / 16) + !!(size % 16)) * 64;
+	const size_t bufSize = ((size / 16) + !!(size % 16)) * 64;
 	char printf_buf[16];
 	string s_expected, s_actual;
 	s_expected.reserve(bufSize);
 	s_actual.reserve(bufSize);
 
-	// TODO: Use stringstream instead?
 	const uint8_t *pE = expected, *pA = actual;
-	for (unsigned int i = 0; i < size; i++, pE++, pA++) {
+	for (size_t i = 0; i < size; i++, pE++, pA++) {
 		if (i % 16 == 0) {
 			// New line.
 			if (i > 0) {
@@ -136,7 +121,8 @@ void CtrKeyScramblerTest::CompareByteArrays(
 				s_actual += '\n';
 			}
 
-			snprintf(printf_buf, sizeof(printf_buf), "%04X: ", i);
+			// TODO: Print a 64-bit value.
+			snprintf(printf_buf, sizeof(printf_buf), "%04X: ", static_cast<unsigned int>(i));
 			s_expected += printf_buf;
 			s_actual += printf_buf;
 		}
@@ -223,7 +209,7 @@ static const uint8_t test_CtrScramble[16] = {
 	0x1B,0xBB,0x85,0x34,0x0E,0x5B,0x70,0xE4
 };
 
-INSTANTIATE_TEST_CASE_P(ctrScrambleTest, CtrKeyScramblerTest,
+INSTANTIATE_TEST_SUITE_P(ctrScrambleTest, CtrKeyScramblerTest,
 	::testing::Values(
 		CtrKeyScramblerTest_mode(test_CtrScramble, test_KeyX, test_KeyY)
 	));
@@ -232,7 +218,7 @@ INSTANTIATE_TEST_CASE_P(ctrScrambleTest, CtrKeyScramblerTest,
 /**
  * Test suite main function.
  */
-extern "C" int gtest_main(int argc, char *argv[])
+extern "C" int gtest_main(int argc, TCHAR *argv[])
 {
 	fprintf(stderr, "LibRomData test suite: CtrKeyScrambler tests.\n\n");
 	fflush(nullptr);

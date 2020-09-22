@@ -3,20 +3,7 @@
  * KeyStore_OwnerDataCallback.hpp: LVS_OWNERDATA callback for Vista.       *
  *                                                                         *
  * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 // Reference: https://www.codeproject.com/Articles/35197/Undocumented-List-View-Features#virtualgroups
@@ -33,11 +20,18 @@ KeyStore_OwnerDataCallback::KeyStore_OwnerDataCallback(const KeyStoreWin32 *keyS
 
 IFACEMETHODIMP KeyStore_OwnerDataCallback::QueryInterface(REFIID riid, LPVOID *ppvObj)
 {
+#ifdef _MSC_VER
+# pragma warning(push)
+# pragma warning(disable: 4365 4838)
+#endif /* _MSC_VER */
 	static const QITAB rgqit[] = {
 		QITABENT(KeyStore_OwnerDataCallback, IOwnerDataCallback),
-		{ 0 }
+		{ 0, 0 }
 	};
-	return LibWin32Common::pQISearch(this, rgqit, riid, ppvObj);
+#ifdef _MSC_VER
+# pragma warning(pop)
+#endif /* _MSC_VER */
+	return LibWin32Common::rp_QISearch(this, rgqit, riid, ppvObj);
 }
 
 /** KeyStore_OwnerDataCallback **/

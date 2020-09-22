@@ -1,5 +1,9 @@
 /* inih -- simple .INI file parser
 
+SPDX-License-Identifier: BSD-3-Clause
+
+Copyright (C) 2009-2020, Ben Hoyt
+
 inih is released under the New BSD license (see LICENSE.txt). Go to the project
 home page for more info:
 
@@ -57,12 +61,6 @@ typedef char* (INIHCALL *ini_reader)(char* str, int num, void* stream);
 */
 int ini_parse(const char* filename, ini_handler handler, void* user);
 
-#ifdef _WIN32
-/* Same as ini_parse(), but takes a wide character filename. Needed for
-   Unicode filenames on Windows. */
-int ini_parse_w(const wchar_t* filename, ini_handler handler, void* user);
-#endif /* _WIN32 */
-
 /* Same as ini_parse(), but takes a FILE* instead of filename. This doesn't
    close the file when it's finished -- the caller must do that. */
 int ini_parse_file(FILE* file, ini_handler handler, void* user);
@@ -82,13 +80,19 @@ int ini_parse_string(const char* string, ini_handler handler, void* user);
    configparser. If allowed, ini_parse() will call the handler with the same
    name for each subsequent line parsed. */
 #ifndef INI_ALLOW_MULTILINE
-#define INI_ALLOW_MULTILINE 0
+#define INI_ALLOW_MULTILINE 1
 #endif
 
 /* Nonzero to allow a UTF-8 BOM sequence (0xEF 0xBB 0xBF) at the start of
-   the file. See http://code.google.com/p/inih/issues/detail?id=21 */
+   the file. See https://github.com/benhoyt/inih/issues/21 */
 #ifndef INI_ALLOW_BOM
 #define INI_ALLOW_BOM 1
+#endif
+
+/* Chars that begin a start-of-line comment. Per Python configparser, allow
+   both ; and # comments at the start of a line by default. */
+#ifndef INI_START_COMMENT_PREFIXES
+#define INI_START_COMMENT_PREFIXES ";#"
 #endif
 
 /* Nonzero to allow inline comments (with valid inline comment characters
@@ -101,9 +105,28 @@ int ini_parse_string(const char* string, ini_handler handler, void* user);
 #define INI_INLINE_COMMENT_PREFIXES ";"
 #endif
 
-/* Nonzero to use stack, zero to use heap (malloc/free). */
+/* Nonzero to use stack for line buffer, zero to use heap (malloc/free). */
 #ifndef INI_USE_STACK
 #define INI_USE_STACK 1
+#endif
+
+/* Maximum line length for any line in INI file (stack or heap). Note that
+   this must be 3 more than the longest line (due to '\r', '\n', and '\0'). */
+#ifndef INI_MAX_LINE
+#define INI_MAX_LINE 200
+#endif
+
+/* Nonzero to allow heap line buffer to grow via realloc(), zero for a
+   fixed-size buffer of INI_MAX_LINE bytes. Only applies if INI_USE_STACK is
+   zero. */
+#ifndef INI_ALLOW_REALLOC
+#define INI_ALLOW_REALLOC 0
+#endif
+
+/* Initial size in bytes for heap line buffer. Only applies if INI_USE_STACK
+   is zero. */
+#ifndef INI_INITIAL_ALLOC
+#define INI_INITIAL_ALLOC 200
 #endif
 
 /* Stop parsing on first error (default is to keep parsing). */
@@ -111,9 +134,18 @@ int ini_parse_string(const char* string, ini_handler handler, void* user);
 #define INI_STOP_ON_FIRST_ERROR 0
 #endif
 
-/* Maximum line length for any line in INI file. */
-#ifndef INI_MAX_LINE
-#define INI_MAX_LINE 200
+/* Nonzero to call the handler at the start of each new section (with
+   name and value NULL). Default is to only call the handler on
+   each name=value pair. */
+#ifndef INI_CALL_HANDLER_ON_NEW_SECTION
+#define INI_CALL_HANDLER_ON_NEW_SECTION 0
+#endif
+
+/* Nonzero to allow a name without a value (no '=' or ':' on the line) and
+   call the handler with value NULL in this case. Default is to treat
+   no-value lines as an error. */
+#ifndef INI_ALLOW_NO_VALUE
+#define INI_ALLOW_NO_VALUE 0
 #endif
 
 #ifdef __cplusplus

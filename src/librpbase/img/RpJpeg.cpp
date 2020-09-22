@@ -2,67 +2,38 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * RpJpeg.cpp: JPEG image handler.                                         *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License       *
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.   *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
-#include "librpbase/config.librpbase.h"
+#include "stdafx.h"
+#include "config.librpbase.h"
 
 #include "RpJpeg.hpp"
 #include "RpJpeg_p.hpp"
-#include "../file/IRpFile.hpp"
-#include "../file/FileSystem.hpp"
+#include "librpfile/IRpFile.hpp"
+
+// libi18n
+#include "libi18n/i18n.h"
+
+// librpfile, librptexture
+using LibRpFile::IRpFile;
+using LibRpTexture::rp_image;
+using LibRpTexture::argb32_t;
 
 #ifdef RPJPEG_HAS_SSSE3
-# include "librpbase/cpuflags_x86.h"
+# include "librpcpu/cpuflags_x86.h"
 #endif /* RPJPEG_HAS_SSSE3 */
 
-// C includes.
-#include <stdint.h>
-
 // C includes. (C++ namespace)
-#include <cassert>
-#include <cstring>
-
-// C++ includes.
-#include <algorithm>
-#include <memory>
-using std::unique_ptr;
+#include <csetjmp>
 
 #ifdef _WIN32
 // For OutputDebugStringA().
 #include <windows.h>
 #endif /* _WIN32 */
 
-#ifdef _MSC_VER
-// NOTE: jpegint.h does not have extern "C".
-// We're using it for DELAYLOAD verification.
-extern "C" {
-#include <jpegint.h>
-}
-// MSVC: Exception handling for /DELAYLOAD.
-#include "libwin32common/DelayLoadHelper.hpp"
-#endif /* _MSC_VER */
-
 namespace LibRpBase {
-
-#ifdef _MSC_VER
-// DelayLoad test implementation.
-// TODO: jdiv_round_up() uses division. Find a better function?
-DELAYLOAD_TEST_FUNCTION_IMPL2(jdiv_round_up, 0, 1);
-#endif /* _MSC_VER */
 
 /** RpJpegPrivate **/
 
@@ -100,12 +71,14 @@ void JPEGCALL RpJpegPrivate::my_output_message(j_common_ptr cinfo)
 #ifdef _WIN32
 	// The default libjpeg error handler uses MessageBox() on Windows.
 	// This is bad design, so we'll use OutputDebugStringA() instead.
-	OutputDebugStringA("libjpeg error: ");
-	OutputDebugStringA(buffer);
+	char txtbuf[JMSG_LENGTH_MAX+64];
+	snprintf(txtbuf, sizeof(txtbuf), "libjpeg error: %s", buffer);
+	OutputDebugStringA(txtbuf);
 	OutputDebugStringA("\n");
 #else
 	// Print to stderr.
-	fprintf(stderr, "libjpeg error: %s\n", buffer);
+	fprintf(stderr, C_("RpJpeg", "libjpeg error: %s"), buffer);
+	fputc('\n', stderr);
 #endif
 }
 
@@ -144,8 +117,8 @@ boolean JPEGCALL RpJpegPrivate::fill_input_buffer(j_decompress_ptr cinfo)
 		}
 		WARNMS(cinfo, JWRN_JPEG_EOF);
 		/* Insert a fake EOI marker */
-		src->buffer[0] = (JOCTET)0xFF;
-		src->buffer[1] = (JOCTET)JPEG_EOI;
+		src->buffer[0] = static_cast<JOCTET>(0xFF);
+		src->buffer[1] = static_cast<JOCTET>(JPEG_EOI);
 		nbytes = 2;
 	}
 
@@ -170,15 +143,15 @@ void JPEGCALL RpJpegPrivate::skip_input_data(j_decompress_ptr cinfo, long num_by
 	 * any trouble anyway --- large skips are infrequent.
 	 */
 	if (num_bytes > 0) {
-		while (num_bytes > (long) src->bytes_in_buffer) {
-			num_bytes -= (long) src->bytes_in_buffer;
+		while (num_bytes > static_cast<long>(src->bytes_in_buffer)) {
+			num_bytes -= static_cast<long>(src->bytes_in_buffer);
 			(void) (*src->fill_input_buffer) (cinfo);
 			/* note we assume that fill_input_buffer will never return FALSE,
 			 * so suspension need not be handled.
 			 */
 		}
-		src->next_input_byte += (size_t) num_bytes;
-		src->bytes_in_buffer -= (size_t) num_bytes;
+		src->next_input_byte += static_cast<size_t>(num_bytes);
+		src->bytes_in_buffer -= static_cast<size_t>(num_bytes);
 	}
 }
 
@@ -246,15 +219,6 @@ rp_image *RpJpeg::loadUnchecked(IRpFile *file)
 	if (!file)
 		return nullptr;
 
-#if defined(_MSC_VER) && defined(JPEG_IS_DLL)
-	// Delay load verification.
-	// TODO: Only if linked with /DELAYLOAD?
-	if (DelayLoad_test_jdiv_round_up() != 0) {
-		// Delay load failed.
-		return nullptr;
-	}
-#endif /* defined(_MSC_VER) && defined(JPEG_IS_DLL) */
-
 	// Rewind the file.
 	file->rewind();
 
@@ -297,9 +261,7 @@ rp_image *RpJpeg::loadUnchecked(IRpFile *file)
 			// NOTE: buffer is allocated using JPEG allocation functions,
 			// so it's automatically freed when we destroy cinfo.
 			jpeg_destroy_decompress(&cinfo);
-			if (img) {
-				delete img;
-			}
+			img->unref();
 			return nullptr;
 		}
 	}
@@ -336,7 +298,7 @@ rp_image *RpJpeg::loadUnchecked(IRpFile *file)
 		case JCS_RGB:
 			// libjpeg-turbo supports RGB->BGRA conversion.
 			if (try_ext_bgra) {
-				cinfo.out_color_space = (J_COLOR_SPACE)MY_JCS_EXT_BGRA;
+				cinfo.out_color_space = static_cast<J_COLOR_SPACE>(MY_JCS_EXT_BGRA);
 				cinfo.output_components = 4;
 				direct_copy = true;
 				tried_ext_bgra = true;
@@ -346,7 +308,7 @@ rp_image *RpJpeg::loadUnchecked(IRpFile *file)
 			// libjpeg (standard) supports YCbCr->RGB conversion.
 			// libjpeg-turbo supports YCbCr->BGRA conversion.
 			if (try_ext_bgra) {
-				cinfo.out_color_space = (J_COLOR_SPACE)MY_JCS_EXT_BGRA;
+				cinfo.out_color_space = static_cast<J_COLOR_SPACE>(MY_JCS_EXT_BGRA);
 				cinfo.output_components = 4;
 				direct_copy = true;
 				tried_ext_bgra = true;
@@ -379,11 +341,11 @@ rp_image *RpJpeg::loadUnchecked(IRpFile *file)
 			}
 
 			// Create the image.
-			img = new rp_image(cinfo.output_width, cinfo.output_height, rp_image::FORMAT_CI8);
+			img = new rp_image(cinfo.output_width, cinfo.output_height, rp_image::Format::CI8);
 			if (!img->isValid()) {
 				// Could not allocate the image.
 				jpeg_destroy_decompress(&cinfo);
-				delete img;
+				img->unref();
 				return nullptr;
 			}
 
@@ -393,14 +355,14 @@ rp_image *RpJpeg::loadUnchecked(IRpFile *file)
 			if (!img_palette) {
 				// No palette...
 				jpeg_destroy_decompress(&cinfo);
-				delete img;
+				img->unref();
 				return nullptr;
 			}
 
 			for (int i = 0; i < std::min(256, img->palette_len());
 				i++, img_palette++)
 			{
-				uint8_t gray = (uint8_t)i;
+				uint8_t gray = static_cast<uint8_t>(i);
 				*img_palette = (gray | gray << 8 | gray << 16);
 				*img_palette |= 0xFF000000;
 			}
@@ -429,11 +391,11 @@ rp_image *RpJpeg::loadUnchecked(IRpFile *file)
 				return nullptr;
 			}
 
-			img = new rp_image(cinfo.image_width, cinfo.image_height, rp_image::FORMAT_ARGB32);
+			img = new rp_image(cinfo.image_width, cinfo.image_height, rp_image::Format::ARGB32);
 			if (!img->isValid()) {
 				// Could not allocate the image.
 				jpeg_destroy_decompress(&cinfo);
-				delete img;
+				img->unref();
 				return nullptr;
 			}
 			break;
@@ -450,11 +412,11 @@ rp_image *RpJpeg::loadUnchecked(IRpFile *file)
 				return nullptr;
 			}
 
-			img = new rp_image(cinfo.image_width, cinfo.image_height, rp_image::FORMAT_ARGB32);
+			img = new rp_image(cinfo.image_width, cinfo.image_height, rp_image::Format::ARGB32);
 			if (!img->isValid()) {
 				// Could not allocate the image.
 				jpeg_destroy_decompress(&cinfo);
-				delete img;
+				img->unref();
 				return nullptr;
 			}
 			break;
@@ -469,11 +431,11 @@ rp_image *RpJpeg::loadUnchecked(IRpFile *file)
 				return nullptr;
 			}
 
-			img = new rp_image(cinfo.image_width, cinfo.image_height, rp_image::FORMAT_ARGB32);
+			img = new rp_image(cinfo.image_width, cinfo.image_height, rp_image::Format::ARGB32);
 			if (!img->isValid()) {
 				// Could not allocate the image.
 				jpeg_destroy_decompress(&cinfo);
-				delete img;
+				img->unref();
 				return nullptr;
 			}
 			break;
@@ -483,7 +445,7 @@ rp_image *RpJpeg::loadUnchecked(IRpFile *file)
 			// Unsupported colorspace.
 			assert(!"Colorspace is not supported.");
 			jpeg_destroy_decompress(&cinfo);
-			delete img;
+			img->unref();
 			return nullptr;
 	}
 
@@ -495,7 +457,7 @@ rp_image *RpJpeg::loadUnchecked(IRpFile *file)
 		JSAMPARRAY buffer = (*cinfo.mem->alloc_sarray)
 			((j_common_ptr)&cinfo, JPOOL_IMAGE, row_stride + 16, 1);
 		buffer[0] = reinterpret_cast<JSAMPROW>(
-			(ALIGN(16, reinterpret_cast<uintptr_t>(buffer[0]))));
+			(ALIGN_BYTES(16, reinterpret_cast<uintptr_t>(buffer[0]))));
 
 		switch (cinfo.out_color_space) {
 			case JCS_RGB: {
@@ -587,7 +549,7 @@ rp_image *RpJpeg::loadUnchecked(IRpFile *file)
 				assert(!"Unsupported JPEG colorspace.");
 				jpeg_finish_decompress(&cinfo);
 				jpeg_destroy_decompress(&cinfo);
-				delete img;
+				img->unref();
 				return nullptr;
 		}
 

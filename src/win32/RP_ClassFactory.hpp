@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (Win32)                            *
  * RP_ClassFactory.hpp: IClassFactory implementation.                      *
  *                                                                         *
- * Copyright (c) 2016 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2018 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_WIN32_RP_CLASSFACTORY_HPP__
@@ -39,7 +26,7 @@ class RP_MultiCreator
 };
 
 template <class comObj, class creatorClass = RP_MultiCreator<comObj> >
-class RP_ClassFactory : public LibWin32Common::ComBase<IClassFactory>, public creatorClass
+class RP_ClassFactory final : public LibWin32Common::ComBase<IClassFactory>, public creatorClass
 {
 	public:
 		RP_ClassFactory() { }
@@ -51,28 +38,29 @@ class RP_ClassFactory : public LibWin32Common::ComBase<IClassFactory>, public cr
 	public:
 		/** IUnknown **/
 
-		IFACEMETHODIMP QueryInterface(REFIID riid, LPVOID *ppvObject) override final
+		IFACEMETHODIMP QueryInterface(REFIID riid, LPVOID *ppvObject) final
 		{
 			if (!ppvObject) {
 				return E_POINTER;
 			}
 
-			if (!LibWin32Common::pQISearch) {
-				// QISearch() could not be loaded.
-				*ppvObject = nullptr;
-				return E_UNEXPECTED;
-			}
-
+#ifdef _MSC_VER
+# pragma warning(push)
+# pragma warning(disable: 4365 4838)
+#endif /* _MSC_VER */
 			static const QITAB rgqit[] = {
 				QITABENT(RP_ClassFactory, IClassFactory),
 				{ 0, 0 }
 			};
-			return LibWin32Common::pQISearch(this, rgqit, riid, ppvObject);
+#ifdef _MSC_VER
+# pragma warning(pop)
+#endif /* _MSC_VER */
+			return LibWin32Common::rp_QISearch(this, rgqit, riid, ppvObject);
 		}
 
 		/** IClassFactory **/
 
-		IFACEMETHODIMP CreateInstance(LPUNKNOWN pUnkOuter, REFIID riid, LPVOID *ppvObject) override final
+		IFACEMETHODIMP CreateInstance(LPUNKNOWN pUnkOuter, REFIID riid, LPVOID *ppvObject) final
 		{
 			// Always set out parameter to NULL, validating it first.
 			if (!ppvObject)
@@ -97,7 +85,7 @@ class RP_ClassFactory : public LibWin32Common::ComBase<IClassFactory>, public cr
 			return hr;
 		}
 
-		IFACEMETHODIMP LockServer(BOOL fLock) override final
+		IFACEMETHODIMP LockServer(BOOL fLock) final
 		{
 			CoLockObjectExternal(this, fLock, TRUE);
 			return S_OK;

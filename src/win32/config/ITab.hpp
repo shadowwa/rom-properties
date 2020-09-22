@@ -2,27 +2,14 @@
  * ROM Properties Page shell extension. (Win32)                            *
  * ITab.hpp: Property sheet base class for rp-config.                      *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_WIN32_CONFIG_ITAB_HPP__
 #define __ROMPROPERTIES_WIN32_CONFIG_ITAB_HPP__
 
-#include "librpbase/common.h"
+#include "common.h"
 #include "libwin32common/RpWin32_sdk.h"
 
 class ITab
@@ -34,6 +21,37 @@ class ITab
 
 	private:
 		RP_DISABLE_COPY(ITab)
+
+	protected:
+		/**
+		 * Load a resource using the current i18n settings.
+		 * @param lpType Resource type.
+		 * @param dwResId Resource ID.
+		 * @return Pointer to resource, or nullptr if not found.
+		 */
+		static LPVOID LoadResource_i18n(LPCTSTR lpType, DWORD dwResId);
+
+		/**
+		 * Load a dialog resource using the current i18n settings.
+		 * @param dwResId Dialog resource ID.
+		 * @return Pointer to dialog resource, or nullptr if not found.
+		 */
+		static inline LPCDLGTEMPLATE LoadDialog_i18n(DWORD dwResId)
+		{
+			return reinterpret_cast<LPCDLGTEMPLATE>(LoadResource_i18n(RT_DIALOG, dwResId));
+		}
+
+		/**
+		 * Load a menu resource using the current i18n settings.
+		 * @param dwResId Menu resource ID.
+		 * @return HMENU created from the menu resource, or nullptr if not found.
+		 */
+		static inline HMENU LoadMenu_i18n(DWORD dwResId)
+		{
+			const MENUTEMPLATE *lpcMenuTemplate =
+				reinterpret_cast<const MENUTEMPLATE*>(LoadResource_i18n(RT_MENU, dwResId));
+			return (lpcMenuTemplate ? LoadMenuIndirect(lpcMenuTemplate) : nullptr);
+		}
 
 	public:
 		/**

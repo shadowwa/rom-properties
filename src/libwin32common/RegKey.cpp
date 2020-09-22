@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (libwin32common)                   *
  * RegKey.hpp: Registry key wrapper.                                       *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2019 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #include "RegKey.hpp"
@@ -31,10 +18,11 @@
 #include <string>
 using std::list;
 using std::unique_ptr;
-using std::wstring;
+using std::tstring;
 
 // Windows SDK.
 #include <objbase.h>
+#include "sdk/GUID_fn.h"
 
 namespace LibWin32Common {
 
@@ -45,7 +33,7 @@ namespace LibWin32Common {
  * @param samDesired Desired access rights.
  * @param create If true, create the key if it doesn't exist.
  */
-RegKey::RegKey(HKEY hKeyRoot, LPCWSTR path, REGSAM samDesired, bool create)
+RegKey::RegKey(HKEY hKeyRoot, LPCTSTR path, REGSAM samDesired, bool create)
 	: m_hKey(nullptr)
 	, m_lOpenRes(ERROR_SUCCESS)
 	, m_samDesired(samDesired)
@@ -72,7 +60,7 @@ RegKey::RegKey(HKEY hKeyRoot, LPCWSTR path, REGSAM samDesired, bool create)
  * @param samDesired Desired access rights.
  * @param create If true, create the key if it doesn't exist.
  */
-RegKey::RegKey(const RegKey& root, LPCWSTR path, REGSAM samDesired, bool create)
+RegKey::RegKey(const RegKey& root, LPCTSTR path, REGSAM samDesired, bool create)
 	: m_hKey(nullptr)
 	, m_lOpenRes(ERROR_SUCCESS)
 	, m_samDesired(samDesired)
@@ -100,42 +88,6 @@ RegKey::~RegKey()
 }
 
 /**
- * Get the handle to the opened registry key.
- * @return Handle to the opened registry key, or INVALID_HANDLE_VALUE if not open.
- */
-HKEY RegKey::handle(void) const
-{
-	return m_hKey;
-}
-
-/**
- * Was the key opened successfully?
- * @return True if the key was opened successfully; false if not.
- */
-bool RegKey::isOpen(void) const
-{
-	return (m_hKey != nullptr);
-}
-
-/**
- * Get the return value of RegCreateKeyEx() or RegOpenKeyEx().
- * @return Return value.
- */
-LONG RegKey::lOpenRes(void) const
-{
-	return m_lOpenRes;
-}
-
-/**
- * Get the key's desired access rights.
- * @return Desired access rights.
- */
-REGSAM RegKey::samDesired(void) const
-{
-	return m_samDesired;
-}
-
-/**
  * Close the key.
  */
 void RegKey::close(void)
@@ -155,14 +107,14 @@ void RegKey::close(void)
  * @param lpType	[out,opt] Variable to store the key type in. (REG_NONE, REG_SZ, or REG_EXPAND_SZ)
  * @return String value, or empty string on error. (check lpType)
  */
-wstring RegKey::read(LPCWSTR lpValueName, LPDWORD lpType) const
+tstring RegKey::read(LPCTSTR lpValueName, LPDWORD lpType) const
 {
 	if (!m_hKey) {
 		// Handle is invalid.
 		if (lpType) {
 			*lpType = REG_NONE;
 		}
-		return wstring();
+		return tstring();
 	}
 
 	// Determine the required buffer size.
@@ -173,23 +125,23 @@ wstring RegKey::read(LPCWSTR lpValueName, LPDWORD lpType) const
 		&dwType,	// lpType
 		nullptr,	// lpData
 		&cbData);	// lpcbData
-	if (lResult != ERROR_SUCCESS || cbData == 0 || (cbData % sizeof(wchar_t) != 0) ||
+	if (lResult != ERROR_SUCCESS || cbData == 0 || (cbData % sizeof(TCHAR) != 0) ||
 	    (dwType != REG_SZ && dwType != REG_EXPAND_SZ))
 	{
 		// Either an error occurred, or this isn't REG_SZ or REG_EXPAND_SZ.
 		if (lpType) {
 			*lpType = REG_NONE;
 		}
-		return wstring();
+		return tstring();
 	}
 
 	// Allocate a buffer and get the data.
-	unique_ptr<wchar_t[]> wbuf(new wchar_t[cbData/sizeof(wchar_t)]);
+	unique_ptr<TCHAR[]> tbuf(new TCHAR[cbData/sizeof(TCHAR)]);
 	lResult = RegQueryValueEx(m_hKey,
 		lpValueName,		// lpValueName
 		nullptr,		// lpReserved
 		&dwType,		// lpType
-		(LPBYTE)wbuf.get(),	// lpData
+		(LPBYTE)tbuf.get(),	// lpData
 		&cbData);		// lpcbData
 	if (lResult != ERROR_SUCCESS ||
 	    (dwType != REG_SZ && dwType != REG_EXPAND_SZ)) {
@@ -197,7 +149,7 @@ wstring RegKey::read(LPCWSTR lpValueName, LPDWORD lpType) const
 		if (lpType) {
 			*lpType = REG_NONE;
 		}
-		return wstring();
+		return tstring();
 	}
 
 	// Save the key type.
@@ -206,21 +158,21 @@ wstring RegKey::read(LPCWSTR lpValueName, LPDWORD lpType) const
 	}
 
 	// Convert cbData to cchData.
-	DWORD cchData = cbData / sizeof(wbuf[0]);
+	DWORD cchData = cbData / sizeof(tbuf[0]);
 
 	// Check for NULL terminators.
 	for (; cchData > 0; cchData--) {
-		if (wbuf[cchData-1] != 0)
+		if (tbuf[cchData-1] != 0)
 			break;
 	}
 
 	if (cchData == 0) {
 		// No actual string data.
-		return wstring();
+		return tstring();
 	}
 
 	// Return the string.
-	return wstring(wbuf.get(), cchData);
+	return tstring(tbuf.get(), cchData);
 }
 
 /**
@@ -230,10 +182,10 @@ wstring RegKey::read(LPCWSTR lpValueName, LPDWORD lpType) const
  * @param lpType	[out,opt] Variable to store the key type in. (REG_NONE, REG_SZ, or REG_EXPAND_SZ)
  * @return String value, or empty string on error. (check lpType)
  */
-wstring RegKey::read_expand(LPCWSTR lpValueName, LPDWORD lpType) const
+tstring RegKey::read_expand(LPCTSTR lpValueName, LPDWORD lpType) const
 {
 	DWORD dwType = 0;
-	wstring wstr = read(lpValueName, &dwType);
+	tstring wstr = read(lpValueName, &dwType);
 	if (wstr.empty() || dwType != REG_EXPAND_SZ) {
 		// Empty string, or not REG_EXPAND_SZ.
 		// Return immediately.
@@ -251,24 +203,24 @@ wstring RegKey::read_expand(LPCWSTR lpValueName, LPDWORD lpType) const
 		if (lpType) {
 			*lpType = 0;
 		}
-		return wstring();
+		return tstring();
 	}
 
-	unique_ptr<wchar_t[]> wbuf(new wchar_t[cchExpand]);
-	cchExpand = ExpandEnvironmentStrings(wstr.c_str(), wbuf.get(), cchExpand);
+	unique_ptr<TCHAR[]> tbuf(new TCHAR[cchExpand]);
+	cchExpand = ExpandEnvironmentStrings(wstr.c_str(), tbuf.get(), cchExpand);
 	if (cchExpand == 0) {
 		// Error expanding the strings.
 		if (lpType) {
 			*lpType = 0;
 		}
-		return wstring();
+		return tstring();
 	}
 
 	// String has been expanded.
 	if (lpType) {
 		*lpType = REG_EXPAND_SZ;
 	}
-	return wstring(wbuf.get(), cchExpand-1);
+	return tstring(tbuf.get(), cchExpand-1);
 }
 
 /**
@@ -277,7 +229,7 @@ wstring RegKey::read_expand(LPCWSTR lpValueName, LPDWORD lpType) const
  * @param lpType	[out,opt] Variable to store the key type in. (REG_NONE or REG_DWORD)
  * @return DWORD value, or 0 on error. (check lpType)
  */
-DWORD RegKey::read_dword(LPCWSTR lpValueName, LPDWORD lpType) const
+DWORD RegKey::read_dword(LPCTSTR lpValueName, LPDWORD lpType) const
 {
 	if (!m_hKey) {
 		// Handle is invalid.
@@ -318,7 +270,7 @@ DWORD RegKey::read_dword(LPCWSTR lpValueName, LPDWORD lpType) const
  * @param dwType Key type. (REG_SZ or REG_EXPAND_SZ)
  * @return RegSetValueEx() return value.
  */
-LONG RegKey::write(LPCWSTR lpValueName, LPCWSTR value, DWORD dwType)
+LONG RegKey::write(LPCTSTR lpValueName, LPCTSTR value, DWORD dwType)
 {
 	assert(m_hKey != nullptr);
 	assert(dwType == REG_SZ || dwType == REG_EXPAND_SZ);
@@ -336,8 +288,8 @@ LONG RegKey::write(LPCWSTR lpValueName, LPCWSTR value, DWORD dwType)
 		cbData = 0;
 	} else {
 		// Get the string length, add 1 for NULL,
-		// and multiply by sizeof(wchar_t).
-		cbData = (DWORD)((wcslen(value) + 1) * sizeof(wchar_t));
+		// and multiply by sizeof(TCHAR).
+		cbData = static_cast<DWORD>((_tcslen(value) + 1) * sizeof(TCHAR));
 	}
 
 	return RegSetValueEx(m_hKey,
@@ -355,7 +307,7 @@ LONG RegKey::write(LPCWSTR lpValueName, LPCWSTR value, DWORD dwType)
  * @param dwType Key type. (REG_SZ or REG_EXPAND_SZ)
  * @return RegSetValueEx() return value.
  */
-LONG RegKey::write(LPCWSTR lpValueName, const wstring& value, DWORD dwType)
+LONG RegKey::write(LPCTSTR lpValueName, const tstring& value, DWORD dwType)
 {
 	assert(m_hKey != nullptr);
 	assert(dwType == REG_SZ || dwType == REG_EXPAND_SZ);
@@ -368,8 +320,8 @@ LONG RegKey::write(LPCWSTR lpValueName, const wstring& value, DWORD dwType)
 	}
 
 	// Get the string length, add 1 for NULL,
-	// and multiply by sizeof(wchar_t).
-	DWORD cbData = (DWORD)((value.size() + 1) * sizeof(wchar_t));
+	// and multiply by sizeof(TCHAR).
+	DWORD cbData = static_cast<DWORD>((value.size() + 1) * sizeof(TCHAR));
 
 	return RegSetValueEx(m_hKey,
 		lpValueName,			// lpValueName
@@ -385,14 +337,14 @@ LONG RegKey::write(LPCWSTR lpValueName, const wstring& value, DWORD dwType)
  * @param value Value.
  * @return RegSetValueEx() return value.
  */
-LONG RegKey::write_dword(LPCWSTR lpValueName, DWORD value)
+LONG RegKey::write_dword(LPCTSTR lpValueName, DWORD value)
 {
 	if (!m_hKey) {
 		// Handle is invalid.
 		return ERROR_INVALID_HANDLE;
 	}
 
-	DWORD cbData = (DWORD)sizeof(value);
+	DWORD cbData = static_cast<DWORD>(sizeof(value));
 	return RegSetValueEx(m_hKey,
 		lpValueName,		// lpValueName
 		0,			// Reserved
@@ -406,7 +358,7 @@ LONG RegKey::write_dword(LPCWSTR lpValueName, DWORD value)
  * @param lpValueName Value name. (Use nullptr or an empty string for the default value.)
  * @return RegDeleteValue() return value.
  */
-LONG RegKey::deleteValue(LPCWSTR lpValueName)
+LONG RegKey::deleteValue(LPCTSTR lpValueName)
 {
 	if (!m_hKey) {
 		// Handle is invalid.
@@ -423,7 +375,7 @@ LONG RegKey::deleteValue(LPCWSTR lpValueName)
  * @param lpSubKey Subkey name.
  * @return ERROR_SUCCESS on success; Win32 error code on error.
  */
-LONG RegKey::deleteSubKey(HKEY hKeyRoot, LPCWSTR lpSubKey)
+LONG RegKey::deleteSubKey(HKEY hKeyRoot, LPCTSTR lpSubKey)
 {
 	// Reference: https://msdn.microsoft.com/en-us/library/windows/desktop/ms724235(v=vs.85).aspx
 	if (!hKeyRoot || !lpSubKey || !lpSubKey[0]) {
@@ -462,7 +414,7 @@ LONG RegKey::deleteSubKey(HKEY hKeyRoot, LPCWSTR lpSubKey)
 
 	// cMaxSubKeyLen doesn't include the NULL terminator, so add one.
 	++cMaxSubKeyLen;
-	unique_ptr<wchar_t[]> szName(new wchar_t[cMaxSubKeyLen]);
+	unique_ptr<TCHAR[]> szName(new TCHAR[cMaxSubKeyLen]);
 
 	// Enumerate the keys.
 	DWORD cchName = cMaxSubKeyLen;
@@ -501,26 +453,11 @@ LONG RegKey::deleteSubKey(HKEY hKeyRoot, LPCWSTR lpSubKey)
 }
 
 /**
- * Recursively delete a subkey.
- * @param lpSubKey Subkey name.
- * @return ERROR_SUCCESS on success; Win32 error code on error.
- */
-LONG RegKey::deleteSubKey(LPCWSTR lpSubKey)
-{
-	if (!m_hKey) {
-		// Handle is invalid.
-		return ERROR_INVALID_HANDLE;
-	}
-
-	return deleteSubKey(m_hKey, lpSubKey);
-}
-
-/**
  * Enumerate subkeys.
  * @param lstSubKeys List to place the subkey names in.
  * @return ERROR_SUCCESS on success; WinAPI error on error.
  */
-LONG RegKey::enumSubKeys(list<wstring> &lstSubKeys)
+LONG RegKey::enumSubKeys(list<tstring> &lstSubKeys)
 {
 	if (!m_hKey) {
 		// Handle is invalid.
@@ -547,12 +484,12 @@ LONG RegKey::enumSubKeys(list<wstring> &lstSubKeys)
 
 	// https://msdn.microsoft.com/en-us/library/windows/desktop/ms724872(v=vs.85).aspx says
 	// key names are limited to 255 characters, but who knows...
-	unique_ptr<wchar_t[]> szName(new wchar_t[cMaxSubKeyLen]);
+	unique_ptr<TCHAR[]> szName(new TCHAR[cMaxSubKeyLen]);
 
 	// Initialize the vector.
 	lstSubKeys.clear();
 
-	for (int i = 0; i < (int)cSubKeys; i++) {
+	for (int i = 0; i < static_cast<int>(cSubKeys); i++) {
 		DWORD cchName = cMaxSubKeyLen;
 		lResult = RegEnumKeyEx(m_hKey, i,
 			szName.get(),	// lpName
@@ -568,7 +505,7 @@ LONG RegKey::enumSubKeys(list<wstring> &lstSubKeys)
 		// Add the subkey name to the return vector.
 		// cchName contains the number of characters in the
 		// subkey name, NOT including the NULL terminator.
-		lstSubKeys.push_back(wstring(szName.get(), cchName));
+		lstSubKeys.emplace_back(tstring(szName.get(), cchName));
 	}
 
 	return ERROR_SUCCESS;
@@ -622,7 +559,7 @@ bool RegKey::isKeyEmpty(void)
  * @param pHkey_Assoc Pointer to RegKey* to store opened registry key on success. (If nullptr, key will be closed.)
  * @return ERROR_SUCCESS on success; WinAPI error on error.
  */
-LONG RegKey::RegisterFileType(LPCWSTR fileType, RegKey **pHkey_Assoc)
+LONG RegKey::RegisterFileType(LPCTSTR fileType, RegKey **pHkey_Assoc)
 {
 	// TODO: Handle cases where the user has already selected
 	// a file association?
@@ -658,20 +595,20 @@ LONG RegKey::RegisterFileType(LPCWSTR fileType, RegKey **pHkey_Assoc)
  * @param description Description of the COM object.
  * @return ERROR_SUCCESS on success; WinAPI error on error.
  */
-LONG RegKey::RegisterComObject(REFCLSID rclsid, LPCWSTR progID, LPCWSTR description)
+LONG RegKey::RegisterComObject(REFCLSID rclsid, LPCTSTR progID, LPCTSTR description)
 {
-	wchar_t clsid_str[48];	// maybe only 40 is needed?
-	LONG lResult = StringFromGUID2(rclsid, clsid_str, sizeof(clsid_str)/sizeof(clsid_str[0]));
+	TCHAR szClsid[40];
+	LONG lResult = StringFromGUID2(rclsid, szClsid, _countof(szClsid));
 	if (lResult <= 0)
 		return ERROR_INVALID_PARAMETER;
 
 	// Open HKCR\CLSID.
-	RegKey hkcr_CLSID(HKEY_CLASSES_ROOT, L"CLSID", KEY_WRITE, false);
+	RegKey hkcr_CLSID(HKEY_CLASSES_ROOT, _T("CLSID"), KEY_WRITE, false);
 	if (!hkcr_CLSID.isOpen())
 		return hkcr_CLSID.lOpenRes();
 
 	// Create a key using the CLSID.
-	RegKey hkcr_Obj_CLSID(hkcr_CLSID, clsid_str, KEY_WRITE, true);
+	RegKey hkcr_Obj_CLSID(hkcr_CLSID, szClsid, KEY_WRITE, true);
 	if (!hkcr_Obj_CLSID.isOpen())
 		return hkcr_Obj_CLSID.lOpenRes();
 	// Set the default value to the descirption of the COM object.
@@ -681,23 +618,35 @@ LONG RegKey::RegisterComObject(REFCLSID rclsid, LPCWSTR progID, LPCWSTR descript
 
 #ifndef NDEBUG
 	// Debug build: Disable process isolation to make debugging easier.
-	lResult = hkcr_Obj_CLSID.write_dword(L"DisableProcessIsolation", 1);
+	lResult = hkcr_Obj_CLSID.write_dword(_T("DisableProcessIsolation"), 1);
 	if (lResult != ERROR_SUCCESS)
 		return lResult;
 #else
 	// Release build: Enable process isolation for increased robustness.
-	lResult = hkcr_Obj_CLSID.deleteValue(L"DisableProcessIsolation");
+	lResult = hkcr_Obj_CLSID.deleteValue(_T("DisableProcessIsolation"));
 	if (lResult != ERROR_SUCCESS && lResult != ERROR_FILE_NOT_FOUND)
 		return lResult;
 #endif
 
 	// Create an InprocServer32 subkey.
-	RegKey hkcr_InprocServer32(hkcr_Obj_CLSID, L"InprocServer32", KEY_WRITE, true);
+	RegKey hkcr_InprocServer32(hkcr_Obj_CLSID, _T("InprocServer32"), KEY_WRITE, true);
 	if (!hkcr_InprocServer32.isOpen())
 		return hkcr_InprocServer32.lOpenRes();
 	// Set the default value to the DLL filename.
-	extern wchar_t dll_filename[MAX_PATH];
-	if (dll_filename[0] != 0) {
+	// TODO: Get this once and save it?
+	// TODO: Duplicated from win32/. Consolidate the two?
+	TCHAR dll_filename[MAX_PATH];
+	DWORD dwResult = GetModuleFileName(HINST_THISCOMPONENT, dll_filename, _countof(dll_filename));
+	if (dwResult == 0 || GetLastError() != ERROR_SUCCESS) {
+		// Cannot get the DLL filename.
+		// TODO: Windows XP doesn't SetLastError() if the
+		// filename is too big for the buffer.
+		lResult = GetLastError();
+		if (lResult == ERROR_SUCCESS) {
+			lResult = ERROR_INSUFFICIENT_BUFFER;
+		}
+		return lResult;
+	} else {
 		lResult = hkcr_InprocServer32.write(nullptr, dll_filename);
 		if (lResult != ERROR_SUCCESS)
 			return lResult;
@@ -705,12 +654,12 @@ LONG RegKey::RegisterComObject(REFCLSID rclsid, LPCWSTR progID, LPCWSTR descript
 
 	// Set the threading model to Apartment.
 	// Reference: https://msdn.microsoft.com/en-us/library/windows/desktop/cc144110%28v=vs.85%29.aspx?f=255&MSPPError=-2147217396
-	lResult = hkcr_InprocServer32.write(L"ThreadingModel", L"Apartment");
+	lResult = hkcr_InprocServer32.write(_T("ThreadingModel"), _T("Apartment"));
 	if (lResult != ERROR_SUCCESS)
 		return lResult;
 
 	// Create a ProgID subkey.
-	RegKey hkcr_Obj_CLSID_ProgID(hkcr_Obj_CLSID, L"ProgID", KEY_WRITE, true);
+	RegKey hkcr_Obj_CLSID_ProgID(hkcr_Obj_CLSID, _T("ProgID"), KEY_WRITE, true);
 	if (!hkcr_Obj_CLSID_ProgID.isOpen())
 		return hkcr_Obj_CLSID_ProgID.lOpenRes();
 	// Set the default value.
@@ -723,22 +672,24 @@ LONG RegKey::RegisterComObject(REFCLSID rclsid, LPCWSTR progID, LPCWSTR descript
  * @param description Description of the shell extension.
  * @return ERROR_SUCCESS on success; WinAPI error on error.
  */
-LONG RegKey::RegisterApprovedExtension(REFCLSID rclsid, LPCWSTR description)
+LONG RegKey::RegisterApprovedExtension(REFCLSID rclsid, LPCTSTR description)
 {
-	wchar_t clsid_str[48];	// maybe only 40 is needed?
-	LONG lResult = StringFromGUID2(rclsid, clsid_str, sizeof(clsid_str)/sizeof(clsid_str[0]));
+	TCHAR szClsid[40];
+	LONG lResult = StringFromGUID2(rclsid, szClsid, _countof(szClsid));
 	if (lResult <= 0)
 		return ERROR_INVALID_PARAMETER;
 
 	// Open the approved shell extensions key.
+	// NOTE: This key might not exist on ReactOS, so we should
+	// create it if it's not there.
 	RegKey hklm_Approved(HKEY_LOCAL_MACHINE,
-		L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Shell Extensions\\Approved",
-		KEY_WRITE, false);
+		_T("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Shell Extensions\\Approved"),
+		KEY_WRITE, true);
 	if (!hklm_Approved.isOpen())
 		return hklm_Approved.lOpenRes();
 
 	// Create a value for the specified CLSID.
-	return hklm_Approved.write(clsid_str, description);
+	return hklm_Approved.write(szClsid, description);
 }
 
 /**
@@ -747,34 +698,36 @@ LONG RegKey::RegisterApprovedExtension(REFCLSID rclsid, LPCWSTR description)
  * @param progID ProgID.
  * @return ERROR_SUCCESS on success; WinAPI error on error.
  */
-LONG RegKey::UnregisterComObject(REFCLSID rclsid, LPCWSTR progID)
+LONG RegKey::UnregisterComObject(REFCLSID rclsid, LPCTSTR progID)
 {
-	wchar_t clsid_str[48];	// maybe only 40 is needed?
-	LONG lResult = StringFromGUID2(rclsid, clsid_str, sizeof(clsid_str)/sizeof(clsid_str[0]));
+	((void)progID);
+
+	TCHAR szClsid[40];
+	LONG lResult = StringFromGUID2(rclsid, szClsid, _countof(szClsid));
 	if (lResult <= 0)
 		return ERROR_INVALID_PARAMETER;
 
 	// Open HKCR\CLSID.
-	RegKey hkcr_CLSID(HKEY_CLASSES_ROOT, L"CLSID", KEY_WRITE, false);
+	RegKey hkcr_CLSID(HKEY_CLASSES_ROOT, _T("CLSID"), KEY_WRITE, false);
 	if (!hkcr_CLSID.isOpen())
 		return hkcr_CLSID.lOpenRes();
 
         // Delete the CLSID key.
 	// NOTE: deleteSubKey() may return ERROR_FILE_NOT_FOUND,
 	// which indicates the object was already unregistered.
-	lResult = hkcr_CLSID.deleteSubKey(clsid_str);
+	lResult = hkcr_CLSID.deleteSubKey(szClsid);
 	if (lResult != ERROR_SUCCESS && lResult != ERROR_FILE_NOT_FOUND)
 		return lResult;
 
 	// Open the approved shell extensions key.
 	RegKey hklm_Approved(HKEY_LOCAL_MACHINE,
-		L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Shell Extensions\\Approved",
+		_T("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Shell Extensions\\Approved"),
 		KEY_WRITE, false);
 	if (!hklm_Approved.isOpen())
 		return hklm_Approved.lOpenRes();
 
 	// Remove the value for the specified CLSID.
-	lResult = hklm_Approved.deleteValue(clsid_str);
+	lResult = hklm_Approved.deleteValue(szClsid);
 	if (lResult != ERROR_SUCCESS && lResult != ERROR_FILE_NOT_FOUND)
 		return lResult;
 

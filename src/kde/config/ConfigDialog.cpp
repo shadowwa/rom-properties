@@ -2,46 +2,21 @@
  * ROM Properties Page shell extension. (KDE)                              *
  * ConfigDialog.cpp: Configuration dialog.                                 *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "librpbase/config.librpbase.h"
 #include "ConfigDialog.hpp"
 
-// librpbase
-#include "librpbase/config/Config.hpp"
-using LibRpBase::Config;
-
-// libi18n
-#include "libi18n/i18n.h"
-
-// U82Q()
-#include "RpQt.hpp"
-
-// C includes. (C++ namespace)
-#include <cassert>
-
-// Qt includes.
-#include <QPushButton>
-#include <QSettings>
+// librpbase, librpfile
+using namespace LibRpBase;
+using namespace LibRpFile;
 
 #ifdef ENABLE_DECRYPTION
-#include "KeyManagerTab.hpp"
-#include "librpbase/crypto/KeyManager.hpp"
+# include "KeyManagerTab.hpp"
+# include "librpbase/crypto/KeyManager.hpp"
 using LibRpBase::KeyManager;
 #endif
 
@@ -152,6 +127,7 @@ ConfigDialog::ConfigDialog(QWidget *parent)
 #else /* !Q_OS_MAC */
 	// Set the icon from the system theme.
 	// TODO: Fallback for older Qt?
+	// TODO: Make a custom icon instead of reusing the system icon.
 #if QT_VERSION >= 0x040600
 	QString iconName = QLatin1String("media-flash");
 	if (QIcon::hasThemeIcon(iconName)) {
@@ -165,9 +141,11 @@ ConfigDialog::ConfigDialog(QWidget *parent)
 	d->btnReset = d->ui.buttonBox->button(QDialogButtonBox::Reset);
 	d->btnDefaults = d->ui.buttonBox->button(QDialogButtonBox::RestoreDefaults);
 
-	// FIXME: Set the "Reset" button's icon to "edit-undo". (Also something for Defaults.)
-	// Attmepting to do this using d->btnApply->setIcon() doesn't seem to work...
-	// See KDE5's System Settings for the correct icons.
+	// Fix button icons. (Matches KDE)
+	// Qt uses "document-revert" for "Reset" and nothing for "Defaults".
+	// KDE uses "edit-undo" for "Reset" and "document-revert" for "Defaults".
+	d->btnReset->setIcon(QIcon::fromTheme(QLatin1String("edit-undo")));
+	d->btnDefaults->setIcon(QIcon::fromTheme(QLatin1String("document-revert")));
 
 	// Connect slots for "Apply" and "Reset".
 	connect(d->btnApply, SIGNAL(clicked()), this, SLOT(apply()));
@@ -179,9 +157,11 @@ ConfigDialog::ConfigDialog(QWidget *parent)
 	d->btnReset->setEnabled(false);
 
 	// Connect the modification signals.
-	// FIXME: Should be doable in Qt Designer...
+	// NOTE: Qt Designer doesn't want to let us connect
+	// signals from the QTabWidget child widgets.
 	connect(d->ui.tabImageTypes, SIGNAL(modified()), this, SLOT(tabModified()));
-	connect(d->ui.tabDownloads, SIGNAL(modified()), this, SLOT(tabModified()));
+	connect(d->ui.tabSystems, SIGNAL(modified()), this, SLOT(tabModified()));
+	connect(d->ui.tabOptions, SIGNAL(modified()), this, SLOT(tabModified()));
 #ifdef ENABLE_DECRYPTION
 	connect(d->tabKeyManager, SIGNAL(modified()), this, SLOT(tabModified()));
 #endif /* ENABLE_DECRYPTION */
@@ -193,13 +173,13 @@ ConfigDialog::ConfigDialog(QWidget *parent)
 	// This is needed in order to track focus in case
 	// the "Apply" button is clicked.
 	QList<QWidget*> widgets = this->findChildren<QWidget*>();
-	foreach (QWidget *widget, widgets) {
+	std::for_each(widgets.begin(), widgets.end(), [this](QWidget *widget) {
 		widget->installEventFilter(this);
-	}
+	});
 }
 
 /**
- * Shut down the save file editor.
+ * Shut down the configuration dialog.
  */
 ConfigDialog::~ConfigDialog()
 {
@@ -292,6 +272,15 @@ void ConfigDialog::apply(void)
 		return;
 	}
 
+	// Make sure the configuration directory exists.
+	// NOTE: The filename portion MUST be kept in config_path,
+	// since the last component is ignored by rmkdir().
+	int ret = FileSystem::rmkdir(filename);
+	if (ret != 0) {
+		// rmkdir() failed.
+		return;
+	}
+
 	QSettings settings(U82Q(filename), QSettings::IniFormat);
 	if (!settings.isWritable()) {
 		// Can't write to the file...
@@ -301,7 +290,8 @@ void ConfigDialog::apply(void)
 	// Save all tabs.
 	Q_D(ConfigDialog);
 	d->ui.tabImageTypes->save(&settings);
-	d->ui.tabDownloads->save(&settings);
+	d->ui.tabSystems->save(&settings);
+	d->ui.tabOptions->save(&settings);
 
 #ifdef ENABLE_DECRYPTION
 	// KeyManager needs to save to keys.conf.
@@ -335,7 +325,8 @@ void ConfigDialog::reset(void)
 	// Reset all tabs.
 	Q_D(ConfigDialog);
 	d->ui.tabImageTypes->reset();
-	d->ui.tabDownloads->reset();
+	d->ui.tabSystems->reset();
+	d->ui.tabOptions->reset();
 #ifdef ENABLE_DECRYPTION
 	d->tabKeyManager->reset();
 #endif /* ENABLE_DECRYPTION */
@@ -362,7 +353,10 @@ void ConfigDialog::loadDefaults(void)
 			d->ui.tabImageTypes->loadDefaults();
 			break;
 		case 1:
-			d->ui.tabDownloads->loadDefaults();
+			d->ui.tabSystems->loadDefaults();
+			break;
+		case 2:
+			d->ui.tabOptions->loadDefaults();
 			break;
 		default:
 			assert(!"Unrecognized tab index.");
@@ -375,7 +369,7 @@ void ConfigDialog::loadDefaults(void)
  */
 void ConfigDialog::tabModified(void)
 {
-	// Enable the "Apply" and "Reset" buttons.
+	// Disable the "Apply" and "Reset" buttons.
 	Q_D(ConfigDialog);
 	d->btnApply->setEnabled(true);
 	d->btnReset->setEnabled(true);

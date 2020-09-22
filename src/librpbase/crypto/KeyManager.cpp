@@ -2,48 +2,24 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * KeyManager.cpp: Encryption key manager.                                 *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
-#include "librpbase/config.librpbase.h"
+#include "stdafx.h"
+#include "config.librpbase.h"
 
 #include "KeyManager.hpp"
 #include "config/ConfReader_p.hpp"
 #include "libi18n/i18n.h"
 
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cerrno>
-#include <cstring>
-
-// C++ includes.
-#include <memory>
-#include <string>
-#include <unordered_map>
+// C++ STL classes.
 using std::string;
 using std::unique_ptr;
 using std::unordered_map;
 
 #include "IAesCipher.hpp"
 #include "AesCipherFactory.hpp"
-
-// Uninitialized vector class.
-// Reference: http://andreoffringa.org/?q=uvector
-#include "../uvector.h"
 
 namespace LibRpBase {
 
@@ -69,7 +45,7 @@ class KeyManagerPrivate : public ConfReaderPrivate
 		/**
 		 * Reset the configuration to the default values.
 		 */
-		void reset(void) override final;
+		void reset(void) final;
 
 		/**
 		 * Process a configuration line.
@@ -81,7 +57,7 @@ class KeyManagerPrivate : public ConfReaderPrivate
 		 * @return 1 on success; 0 on error.
 		 */
 		int processConfigLine(const char *section,
-			const char *name, const char *value) override final;
+			const char *name, const char *value) final;
 
 	public:
 #ifdef ENABLE_DECRYPTION
@@ -142,7 +118,7 @@ void KeyManagerPrivate::reset(void)
 
 	// Reserve 1 KB for the key store.
 	vKeys.reserve(1024);
-#if !defined(_MSC_VER) || _MSC_VER >= 1700
+#ifdef HAVE_UNORDERED_MAP_RESERVE
 	// Reserve entries for the key names map.
 	// NOTE: Not reserving entries for invalid key names.
 	mapKeyNames.reserve(64);
@@ -181,23 +157,24 @@ int KeyManagerPrivate::processConfigLine(const char *section, const char *name, 
 	// Is the value empty?
 	if (!value || value[0] == 0) {
 		// Value is empty.
-		mapInvalidKeyNames.insert(std::make_pair(string(name), KeyManager::VERIFY_KEY_INVALID));
+		// Treat it as if the key wasn't found.
 		return 1;
 	}
 
 	// Check the value length.
-	int value_len = (int)strlen(value);
-	if ((value_len % 2) != 0) {
-		// Value is an odd length, which is invalid.
-		// This means we have an extra nybble.
-		mapInvalidKeyNames.insert(std::make_pair(string(name), KeyManager::VERIFY_KEY_INVALID));
+	// TODO: Check for <= 0?
+	const size_t value_len = strlen(value);
+	if (value_len > 255) {
+		// Key is long.
 		return 1;
 	}
-	const uint8_t len = (uint8_t)(value_len / 2);
+
+	const bool is_odd_len = ((value_len % 2) != 0);
+	uint8_t len = static_cast<uint8_t>(value_len / 2);
 
 	// Parse the value.
-	unsigned int vKeys_start_pos = (unsigned int)vKeys.size();
-	unsigned int vKeys_pos = vKeys_start_pos;
+	const uint32_t vKeys_start_pos = static_cast<uint32_t>(vKeys.size());
+	uint32_t vKeys_pos = vKeys_start_pos;
 	// Reserve space for half of the key string.
 	// Key string is ASCII hex, so two characters make up one byte.
 	vKeys.resize(vKeys.size() + len);
@@ -207,6 +184,22 @@ int KeyManagerPrivate::processConfigLine(const char *section, const char *name, 
 		vKeys.resize(vKeys_start_pos);
 		return 1;
 	}
+	if (is_odd_len) {
+		// Odd length. Parse the last nybble and append a 0.
+		// This is better than simply discarding it entirely.
+		char buf[2];
+		buf[0] = value[value_len-1];
+		buf[1] = '0';
+		vKeys.resize(vKeys.size() + 2);
+		ret = KeyManager::hexStringToBytes(buf, &vKeys[vKeys_pos+len], 1);
+		if (ret != 0) {
+			// Invalid character(s) encountered.
+			vKeys.resize(vKeys_start_pos);
+			return 1;
+		}
+		// Add the extra byte.
+		len++;
+	}
 
 	// Value parsed successfully.
 	uint32_t keyIdx = vKeys_start_pos;
@@ -214,6 +207,9 @@ int KeyManagerPrivate::processConfigLine(const char *section, const char *name, 
 	mapKeyNames.insert(std::make_pair(string(name), keyIdx));
 	return 1;
 #else /* !ENABLE_DECRYPTION */
+	RP_UNUSED(section);
+	RP_UNUSED(name);
+	RP_UNUSED(value);
 	assert(!"Should not be called in no-decryption builds.");
 	return 0;
 #endif /* ENABLE_DECRYPTION */
@@ -233,33 +229,33 @@ KeyManager::KeyManager()
 const char *KeyManager::verifyResultToString(VerifyResult res)
 {
 	static const char *const errTbl[] = {
-		// tr: VERIFY_OK
+		// tr: VerifyResult::OK
 		NOP_C_("KeyManager|VerifyResult", "Something happened."),
-		// tr: VERIFY_INVALID_PARAMS
+		// tr: VerifyResult::InvalidParams
 		NOP_C_("KeyManager|VerifyResult", "Invalid parameters. (THIS IS A BUG!)"),
-		// tr: VERIFY_NO_SUPPORT
+		// tr: VerifyResult::NoSupport
 		NOP_C_("KeyManager|VerifyResult", "Decryption is not supported in this build."),
-		// tr: VERIFY_KEY_DB_NOT_LOADED
+		// tr: VerifyResult::KeyDBNotLoaded
 		NOP_C_("KeyManager|VerifyResult", "keys.conf was not found."),
-		// tr: VERIFY_KEY_DB_ERROR
+		// tr: VerifyResult::KeyDBError
 		NOP_C_("KeyManager|VerifyResult", "keys.conf has an error and could not be loaded."),
-		// tr: VERIFY_KEY_NOT_FOUND
+		// tr: VerifyResult::KeyNotFound
 		NOP_C_("KeyManager|VerifyResult", "Required key was not found in keys.conf."),
-		// tr: VERIFY_KEY_INVALID
+		// tr: VerifyResult::KeyInvalid
 		NOP_C_("KeyManager|VerifyResult", "The key in keys.conf is not a valid key."),
-		// tr: VERFIY_IAESCIPHER_INIT_ERR
+		// tr: VerifyResult::IAesCipherInitErr
 		NOP_C_("KeyManager|VerifyResult", "AES decryption could not be initialized."),
-		// tr: VERIFY_IAESCIPHER_DECRYPT_ERR
+		// tr: VerifyResult::IAesCipherDecryptErr
 		NOP_C_("KeyManager|VerifyResult", "AES decryption failed."),
-		// tr: VERIFY_WRONG_KEY
+		// tr: VerifyResult::WrongKey
 		NOP_C_("KeyManager|VerifyResult", "The key in keys.conf is incorrect."),
 	};
-	static_assert(ARRAY_SIZE(errTbl) == KeyManager::VERIFY_MAX, "Update errTbl[].");
+	static_assert(ARRAY_SIZE(errTbl) == (int)KeyManager::VerifyResult::Max, "Update errTbl[].");
 
-	assert(res >= 0);
-	assert(res < ARRAY_SIZE(errTbl));
-	return ((res >= 0 && res < ARRAY_SIZE(errTbl))
-		? dpgettext_expr(RP_I18N_DOMAIN, "KeyManager|VerifyResult", errTbl[res])
+	assert(res >= (KeyManager::VerifyResult)0);
+	assert(res < (KeyManager::VerifyResult)ARRAY_SIZE(errTbl));
+	return ((res >= (KeyManager::VerifyResult)0 && res < (KeyManager::VerifyResult)ARRAY_SIZE(errTbl))
+		? dpgettext_expr(RP_I18N_DOMAIN, "KeyManager|VerifyResult", errTbl[(int)res])
 		: nullptr);
 }
 
@@ -286,7 +282,7 @@ KeyManager::VerifyResult KeyManager::get(const char *keyName, KeyData_t *pKeyDat
 	assert(keyName[0] != 0);
 	if (!keyName || keyName[0] == 0) {
 		// Invalid parameters.
-		return VERIFY_INVALID_PARAMS;
+		return VerifyResult::InvalidParams;
 	}
 
 	// Check if keys.conf needs to be reloaded.
@@ -296,7 +292,7 @@ KeyManager::VerifyResult KeyManager::get(const char *keyName, KeyData_t *pKeyDat
 	const_cast<KeyManager*>(this)->load();
 	if (!isLoaded()) {
 		// Keys are not loaded.
-		return VERIFY_KEY_DB_NOT_LOADED;
+		return VerifyResult::KeyDBNotLoaded;
 	}
 
 	// Attempt to get the key from the map.
@@ -304,14 +300,14 @@ KeyManager::VerifyResult KeyManager::get(const char *keyName, KeyData_t *pKeyDat
 	auto iter = d->mapKeyNames.find(keyName);
 	if (iter == d->mapKeyNames.end()) {
 		// Key was not parsed. Figure out why.
-		auto iter = d->mapInvalidKeyNames.find(keyName);
-		if (iter != d->mapInvalidKeyNames.end()) {
+		auto iter2 = d->mapInvalidKeyNames.find(keyName);
+		if (iter2 != d->mapInvalidKeyNames.end()) {
 			// An error occurred when parsing the key.
-			return (VerifyResult)iter->second;
+			return (VerifyResult)iter2->second;
 		}
 
 		// Key was not found.
-		return VERIFY_KEY_NOT_FOUND;
+		return VerifyResult::KeyNotFound;
 	}
 
 	// Found the key.
@@ -323,14 +319,14 @@ KeyManager::VerifyResult KeyManager::get(const char *keyName, KeyData_t *pKeyDat
 	assert(idx + len <= d->vKeys.size());
 	if (idx + len > d->vKeys.size()) {
 		// Should not happen...
-		return VERIFY_KEY_DB_ERROR;
+		return VerifyResult::KeyDBError;
 	}
 
 	if (pKeyData) {
 		pKeyData->key = d->vKeys.data() + idx;
 		pKeyData->length = len;
 	}
-	return VERIFY_OK;
+	return VerifyResult::OK;
 }
 
 /**
@@ -357,29 +353,29 @@ KeyManager::VerifyResult KeyManager::getAndVerify(const char *keyName, KeyData_t
 	assert(verifyLen == 16);
 	if (!keyName || !pVerifyData || verifyLen != 16) {
 		// Invalid parameters.
-		return VERIFY_INVALID_PARAMS;
+		return VerifyResult::InvalidParams;
 	}
 
 	// Temporary KeyData_t in case pKeyData is nullptr.
-	KeyData_t tmp_key_data;
+	KeyData_t tmp_key_data = {nullptr, 0};
 	if (!pKeyData) {
 		pKeyData = &tmp_key_data;
 	}
 
 	// Get the key first.
 	VerifyResult res = get(keyName, pKeyData);
-	if (res != VERIFY_OK) {
+	if (res != VerifyResult::OK) {
 		// Error obtaining the key.
 		return res;
 	} else if (!pKeyData->key || pKeyData->length == 0) {
 		// Key is invalid.
-		return VERIFY_KEY_INVALID;
+		return VerifyResult::KeyInvalid;
 	}
 
 	// Verify the key length.
 	if (pKeyData->length != 16 && pKeyData->length != 24 && pKeyData->length != 32) {
 		// Key length is invalid.
-		return VERIFY_KEY_INVALID;
+		return VerifyResult::KeyInvalid;
 	}
 
 	// Decrypt the test data.
@@ -387,17 +383,17 @@ KeyManager::VerifyResult KeyManager::getAndVerify(const char *keyName, KeyData_t
 	unique_ptr<IAesCipher> cipher(AesCipherFactory::create());
 	if (!cipher) {
 		// Unable to create the IAesCipher.
-		return VERFIY_IAESCIPHER_INIT_ERR;
+		return VerifyResult::IAesCipherInitErr;
 	}
 
 	// Set cipher parameters.
-	int ret = cipher->setChainingMode(IAesCipher::CM_ECB);
+	int ret = cipher->setChainingMode(IAesCipher::ChainingMode::ECB);
 	if (ret != 0) {
-		return VERFIY_IAESCIPHER_INIT_ERR;
+		return VerifyResult::IAesCipherInitErr;
 	}
 	ret = cipher->setKey(pKeyData->key, pKeyData->length);
 	if (ret != 0) {
-		return VERFIY_IAESCIPHER_INIT_ERR;
+		return VerifyResult::IAesCipherInitErr;
 	}
 
 	// Decrypt the test data.
@@ -405,20 +401,20 @@ KeyManager::VerifyResult KeyManager::getAndVerify(const char *keyName, KeyData_t
 	// make a temporary copy.
 	unique_ptr<uint8_t[]> tmpData(new uint8_t[verifyLen]);
 	memcpy(tmpData.get(), pVerifyData, verifyLen);
-	unsigned int size = cipher->decrypt(tmpData.get(), verifyLen);
+	size_t size = cipher->decrypt(tmpData.get(), verifyLen);
 	if (size != verifyLen) {
 		// Decryption failed.
-		return VERIFY_IAESCIPHER_DECRYPT_ERR;
+		return VerifyResult::IAesCipherDecryptErr;
 	}
 
 	// Verify the test data.
 	if (memcmp(tmpData.get(), verifyTestString, verifyLen) != 0) {
 		// Verification failed.
-		return VERIFY_WRONG_KEY;
+		return VerifyResult::WrongKey;
 	}
 
 	// Test data verified.
-	return VERIFY_OK;
+	return VerifyResult::OK;
 }
 
 /**
@@ -448,13 +444,15 @@ int KeyManager::hexStringToBytes(const Char *str, uint8_t *buf, unsigned int len
 	for (; len > 0; len--, str += 2, buf++) {
 		// Process two characters at a time.
 		// Two hexadecimal digits == one byte.
-		if ((unsigned int)str[0] > 0x80 || (unsigned int)str[1] > 0x80) {
+		if (static_cast<unsigned int>(str[0]) >= 0x80 ||
+			static_cast<unsigned int>(str[1]) >= 0x80)
+		{
 			// Invalid character.
 			return -EINVAL;
 		}
 
-		uint8_t chr0 = ascii_to_hex[(uint8_t)str[0]];
-		uint8_t chr1 = ascii_to_hex[(uint8_t)str[1]];
+		uint8_t chr0 = ascii_to_hex[static_cast<uint8_t>(str[0])];
+		uint8_t chr1 = ascii_to_hex[static_cast<uint8_t>(str[1])];
 		if (chr0 > 0x0F || chr1 > 0x0F) {
 			// Invalid character.
 			return -EINVAL;

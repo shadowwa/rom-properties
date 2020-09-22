@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (Win32)                            *
  * RP_ShellPropSheetExt.hpp: IShellPropSheetExt implementation.            *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_WIN32_RP_SHELLPROPSHEETEXT_HPP__
@@ -24,7 +11,7 @@
 
 // librpbase
 #include "librpbase/config.librpbase.h"
-#include "librpbase/common.h"
+#include "common.h"
 
 // References:
 // - http://www.codeproject.com/Articles/338268/COM-in-C
@@ -47,10 +34,11 @@ extern "C" {
 class RP_ShellPropSheetExt_Private;
 
 class UUID_ATTR("{2443C158-DF7C-4352-B435-BC9F885FFD52}")
-RP_ShellPropSheetExt : public LibWin32Common::ComBase2<IShellExtInit, IShellPropSheetExt>
+RP_ShellPropSheetExt final : public LibWin32Common::ComBase2<IShellExtInit, IShellPropSheetExt>
 {
 	public:
 		RP_ShellPropSheetExt();
+	protected:
 		virtual ~RP_ShellPropSheetExt();
 
 	private:
@@ -58,11 +46,11 @@ RP_ShellPropSheetExt : public LibWin32Common::ComBase2<IShellExtInit, IShellProp
 		RP_DISABLE_COPY(RP_ShellPropSheetExt)
 	private:
 		friend class RP_ShellPropSheetExt_Private;
-		RP_ShellPropSheetExt_Private *const d_ptr;
+		RP_ShellPropSheetExt_Private *d_ptr;
 
 	public:
 		// IUnknown
-		IFACEMETHODIMP QueryInterface(REFIID riid, LPVOID *ppvObj) override final;
+		IFACEMETHODIMP QueryInterface(REFIID riid, LPVOID *ppvObj) final;
 
 	private:
 		/**
@@ -100,7 +88,7 @@ RP_ShellPropSheetExt : public LibWin32Common::ComBase2<IShellExtInit, IShellProp
 		 * @param ext File extension, including the leading dot.
 		 * @return ERROR_SUCCESS on success; Win32 error code on error.
 		 */
-		static LONG RegisterFileType(LibWin32Common::RegKey &hkcr, LPCWSTR ext);
+		static LONG RegisterFileType(LibWin32Common::RegKey &hkcr, LPCTSTR ext);
 
 		/**
 		 * Unregister the COM object.
@@ -114,20 +102,20 @@ RP_ShellPropSheetExt : public LibWin32Common::ComBase2<IShellExtInit, IShellProp
 		 * @param ext File extension, including the leading dot.
 		 * @return ERROR_SUCCESS on success; Win32 error code on error.
 		 */
-		static LONG UnregisterFileType(LibWin32Common::RegKey &hkcr, LPCWSTR ext);
+		static LONG UnregisterFileType(LibWin32Common::RegKey &hkcr, LPCTSTR ext);
 
 	public:
 		// IShellExtInit
-		IFACEMETHODIMP Initialize(LPCITEMIDLIST pidlFolder, LPDATAOBJECT pDataObj, HKEY hKeyProgID) override final;
+		IFACEMETHODIMP Initialize(LPCITEMIDLIST pidlFolder, LPDATAOBJECT pDataObj, HKEY hKeyProgID) final;
 
 		// IShellPropSheetExt
-		IFACEMETHODIMP AddPages(LPFNADDPROPSHEETPAGE pfnAddPage, LPARAM lParam) override final;
-		IFACEMETHODIMP ReplacePage(UINT uPageID, LPFNADDPROPSHEETPAGE pfnReplaceWith, LPARAM lParam) override final;
+		IFACEMETHODIMP AddPages(LPFNADDPROPSHEETPAGE pfnAddPage, LPARAM lParam) final;
+		IFACEMETHODIMP ReplacePage(UINT uPageID, LPFNADDPROPSHEETPAGE pfnReplaceWith, LPARAM lParam) final;
 };
 
 #ifdef __CRT_UUID_DECL
 // Required for MinGW-w64 __uuidof() emulation.
-__CRT_UUID_DECL(RP_ShellPropSheetExt, 0x2443c158, 0xdf7c, 0x4352, 0xb4, 0x35, 0xbc, 0x9f, 0x88, 0x5f, 0xfd, 0x52)
+__CRT_UUID_DECL(RP_ShellPropSheetExt, __MSABI_LONG(0x2443c158), 0xdf7c, 0x4352, 0xb4,0x35, 0xbc, 0x9f, 0x88, 0x5f, 0xfd, 0x52)
 #endif
 
 #endif /* __ROMPROPERTIES_WIN32_RP_SHELLPROPSHEETEXT_HPP__ */

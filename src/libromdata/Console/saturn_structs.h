@@ -1,26 +1,13 @@
 /***************************************************************************
  * ROM Properties Page shell extension. (libromdata)                       *
- * dc_structs.h: Sega Dreamcast data structures.                           *
+ * saturn_structs.h: Sega Saturn data structures.                          *
  *                                                                         *
- * Copyright (c) 2017 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2017-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
-#ifndef __ROMPROPERTIES_LIBROMDATA_DC_STRUCTS_H__
-#define __ROMPROPERTIES_LIBROMDATA_DC_STRUCTS_H__
+#ifndef __ROMPROPERTIES_LIBROMDATA_SATURN_STRUCTS_H__
+#define __ROMPROPERTIES_LIBROMDATA_SATURN_STRUCTS_H__
 
 /**
  * References:
@@ -29,14 +16,12 @@
  * - https://www.gamefaqs.com/saturn/916393-sega-saturn/faqs/26021
  */
 
-#include "librpbase/common.h"
+#include "common.h"
 #include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#pragma pack(1)
 
 /**
  * IP0000.BIN
@@ -46,7 +31,7 @@ extern "C" {
  */
 #define SATURN_IP0000_BIN_HW_ID		"SEGA SEGASATURN "
 #define SATURN_IP0000_BIN_MAKER_ID	"SEGA ENTERPRISES"
-typedef struct PACKED _Saturn_IP0000_BIN_t {
+typedef struct _Saturn_IP0000_BIN_t {
 	char hw_id[16];			// "SEGA SEGASATURN "
 	char maker_id[16];		// Sega:  "SEGA ENTERPRISES"
 					// Other: "SEGA TP T-999   "
@@ -95,54 +80,8 @@ typedef enum {
 	SATURN_IO_MPEG_CARD		= 'P',
 } Saturn_Peripherals;
 
-/**
- * Dreamcast peripherals bitfield.
- * For most items, indicates support for that feature.
- * For Windows CE, indicates the game uses it.
- *
- * For controller buttons, indicates a minimum requirement.
- * Example: If "Z" is listed, then the game must have a
- * controller with a "Z" button; otherwise, it won't work.
- *
- * Reference: http://mc.pp.se/dc/ip0000.bin.html
- */
-typedef enum {
-	DCP_WINDOWS_CE		= (1 << 0),	// Uses Windows CE
-	DCP_VGA_BOX		= (1 << 4),	// Supports VGA Box
-
-	// Supported expansion units.
-	DCP_EXP_OTHER		= (1 << 8),	// Other expansions.
-	DCP_PURU_PURU		= (1 << 9),	// Puru Puru pack (Jump Pack)
-	DCP_MICROPHONE		= (1 << 10),	// Microphone
-	DCP_MEMORY_CARD		= (1 << 11),	// Memory Card (VMU)
-
-	// Controller requirements.
-	// If any of these bits are set, the game *requires*
-	// a controller with the specified functionality,
-	DCP_CTRL_START_A_B_DPAD	= (1 << 12),	// Start, A, B, D-Pad
-	DCP_CTRL_C		= (1 << 13),	// C button
-	DCP_CTRL_D		= (1 << 14),	// D button
-	DCP_CTRL_X		= (1 << 15),	// X button
-	DCP_CTRL_Y		= (1 << 16),	// Y button
-	DCP_CTRL_Z		= (1 << 17),	// Z button
-	DCP_CTRL_DPAD_2		= (1 << 18),	// Second D-Pad
-	DCP_CTRL_ANALOG_RT	= (1 << 19),	// Analog R trigger
-	DCP_CTRL_ANALOG_LT	= (1 << 20),	// Analog L trigger
-	DCP_CTRL_ANALOG_H1	= (1 << 21),	// Analog horizontal controller
-	DCP_CTRL_ANALOG_V1	= (1 << 22),	// Analog vertical controller
-	DCP_CTRL_ANALOG_H2	= (1 << 23),	// Analog horizontal controller #2
-	DCP_CTRL_ANALOG_V2	= (1 << 24),	// Analog vertical controller #2
-
-	// Optional expansion peripherals.
-	DCP_CTRL_GUN		= (1 << 25),	// Light Gun
-	DCP_CTRL_KEYBOARD	= (1 << 26),	// Keyboard
-	DCP_CTRL_MOUSE		= (1 << 27),	// Mouse
-} DC_IP0000_BIN_Peripherals;
-
-#pragma pack()
-
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* __ROMPROPERTIES_LIBROMDATA_DC_STRUCTS_H__ */
+#endif /* __ROMPROPERTIES_LIBROMDATA_SATURN_STRUCTS_H__ */

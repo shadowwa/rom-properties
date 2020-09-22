@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (rp-stub)                          *
  * rp-stub.c: Stub program to invoke the rom-properties library.           *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 /**
@@ -30,6 +17,10 @@
 
 #include "libunixcommon/dll-search.h"
 #include "libi18n/i18n.h"
+
+// OS-specific security options.
+#include "rp-stub_secure.h"
+#include "stdboolx.h"
 
 // C includes.
 #include <dlfcn.h>
@@ -50,27 +41,27 @@
  * @param maximum_size Maximum size.
  * @return 0 on success; non-zero on error.
  */
-typedef int (*PFN_RP_CREATE_THUMBNAIL)(const char *source_file, const char *output_file, int maximum_size);
+typedef int (RP_C_API *PFN_RP_CREATE_THUMBNAIL)(const char *source_file, const char *output_file, int maximum_size);
 
 /**
- * rp_show_config_dialog() function pointer.
+ * rp_show_config_dialog() function pointer. (Unix/Linux version)
  * @param argc
  * @param argv
  * @return 0 on success; non-zero on error.
  */
-typedef int (*PFN_RP_SHOW_CONFIG_DIALOG)(int argc, char *argv[]);
+typedef int (RP_C_API *PFN_RP_SHOW_CONFIG_DIALOG)(int argc, char *argv[]);
 
 // Are we running as rp-config?
-static uint8_t is_rp_config = 0;
+static bool is_rp_config = false;
 // Is debug logging enabled?
-static uint8_t is_debug = 0;
+static bool is_debug = false;
 
 static void show_version(void)
 {
 	puts(RP_DESCRIPTION);
 	puts(C_("rp_stub",
 		"Shared library stub program.\n"
-		"Copyright (c) 2016-2017 by David Korth."));
+		"Copyright (c) 2016-2020 by David Korth."));
 	putchar('\n');
 	printf(C_("rp-stub", "rom-properties version: %s"), RP_VERSION_STRING);
 	putchar('\n');
@@ -81,10 +72,9 @@ static void show_version(void)
 # endif /* RP_GIT_DESCRIBE */
 #endif /* RP_GIT_VERSION */
 	putchar('\n');
-	printf("%s", C_("rp-stub",
+	puts(C_("rp-stub",
 		"This program is licensed under the GNU GPL v2.\n"
-		"See http://www.gnu.org/licenses/gpl-2.0.html for more information."));
-	putchar('\n');
+		"See https://www.gnu.org/licenses/old-licenses/gpl-2.0.html for more information."));
 }
 
 static void show_help(const char *argv0)
@@ -150,6 +140,11 @@ int main(int argc, char *argv[])
 	 * TODO: Support URIs in addition to paths?
 	 */
 
+	if (getuid() == 0 || geteuid() == 0) {
+		fprintf(stderr, "*** %s does not support running as root.\n", argv[0]);
+		return EXIT_FAILURE;
+	}
+
 	// Set the C locale.
 	// TODO: Stub may need to set the C++ locale.
 	setlocale(LC_ALL, "");
@@ -166,19 +161,22 @@ int main(int argc, char *argv[])
 	}
 	if (!strcmp(argv0, "rp-config")) {
 		// Invoked as rp-config.
-		is_rp_config = 1;
+		is_rp_config = true;
 	}
 
 	static const struct option long_options[] = {
-		{"size",	required_argument,	nullptr, 's'},
-		{"config",	no_argument,		nullptr, 'c'},
-		{"debug",	no_argument,		nullptr, 'd'},
-		{"help",	no_argument,		nullptr, 'h'},
-		{"version",	no_argument,		nullptr, 'V'},
+		{"size",	required_argument,	NULL, 's'},
+		{"config",	no_argument,		NULL, 'c'},
+		{"debug",	no_argument,		NULL, 'd'},
+		{"help",	no_argument,		NULL, 'h'},
+		{"version",	no_argument,		NULL, 'V'},
 		// TODO: Option to scan for installed plugins.
 
 		{NULL, 0, NULL, 0}
 	};
+
+	// "More Information" string.
+	const char *const str_help_more_info = C_("rp-stub", "Try '%s --help' for more information.");
 
 	// Default to 256x256.
 	uint8_t config = is_rp_config;
@@ -187,19 +185,23 @@ int main(int argc, char *argv[])
 	while ((c = getopt_long(argc, argv, "s:cdhV", long_options, &option_index)) != -1) {
 		switch (c) {
 			case 's': {
-				char *endptr;
+				char *endptr = NULL;
 				errno = 0;
 				long lTmp = (int)strtol(optarg, &endptr, 10);
 				if (errno == ERANGE || *endptr != 0) {
+					// tr: %1$s == program name, %2%s == invalid size
 					fprintf_p(stderr, C_("rp-stub", "%1$s: invalid size '%2$s'"), argv[0], optarg);
 					putc('\n', stderr);
-					fprintf(stderr, C_("rp-stub", "Try '%s --help' for more information."), argv[0]);
+					// tr: %s == program name
+					fprintf(stderr, str_help_more_info, argv[0]);
 					putc('\n', stderr);
 					return EXIT_FAILURE;
 				} else if (lTmp <= 0 || lTmp > 32768) {
+					// tr: %1$s == program name, %2%s == invalid size
 					fprintf_p(stderr, C_("rp-stub", "%1$s: size '%2$s' is out of range"), argv[0], optarg);
 					putc('\n', stderr);
-					fprintf(stderr, C_("rp-stub", "Try '%s --help' for more information."), argv[0]);
+					// tr: %s == program name
+					fprintf(stderr, str_help_more_info, argv[0]);
 					putc('\n', stderr);
 					return EXIT_FAILURE;
 				}
@@ -209,12 +211,12 @@ int main(int argc, char *argv[])
 
 			case 'c':
 				// Show the configuration dialog.
-				config = 1;
+				config = true;
 				break;
 
 			case 'd':
 				// Enable debug output.
-				is_debug = 1;
+				is_debug = true;
 				break;
 
 			case 'h':
@@ -228,30 +230,42 @@ int main(int argc, char *argv[])
 			case '?':
 			default:
 				// Unrecognized option.
-				fprintf(stderr, C_("rp-stub", "Try '%s --help' for more information."), argv[0]);
+				fprintf(stderr, str_help_more_info, argv[0]);
 				putc('\n', stderr);
 				return EXIT_FAILURE;
 		}
 	}
 
+	// Enable security options.
+	// TODO: Check for '-c' first, then enable options
+	// and reparse?
+	rp_stub_do_security_options(config);
+
 	if (!config) {
+		// Thumbnailing mode.
 		// We must have 2 filenames specified.
 		if (optind == argc) {
+			// tr: %s == program name
 			fprintf(stderr, C_("rp-stub", "%s: missing source and output file parameters"), argv[0]);
 			putc('\n', stderr);
-			fprintf(stderr, C_("rp-stub", "Try '%s --help' for more information."), argv[0]);
+			// tr: %s == program name
+			fprintf(stderr, str_help_more_info, argv[0]);
 			putc('\n', stderr);
 			return EXIT_FAILURE;
 		} else if (optind+1 == argc) {
+			// tr: %s == program name
 			fprintf(stderr, C_("rp-stub", "%s: missing output file parameter"), argv[0]);
 			putc('\n', stderr);
-			fprintf(stderr, C_("rp-stub", "Try '%s --help' for more information."), argv[0]);
+			// tr: %s == program name
+			fprintf(stderr, str_help_more_info, argv[0]);
 			putc('\n', stderr);
 			return EXIT_FAILURE;
 		} else if (optind+3 < argc) {
+			// tr: %s == program name
 			fprintf(stderr, C_("rp-stub", "%s: too many parameters specified"), argv[0]);
 			putc('\n', stderr);
-			fprintf(stderr, C_("rp-stub", "Try '%s --help' for more information."), argv[0]);
+			// tr: %s == program name
+			fprintf(stderr, str_help_more_info, argv[0]);
 			putc('\n', stderr);
 			return EXIT_FAILURE;
 		}
@@ -272,6 +286,7 @@ int main(int argc, char *argv[])
 		const char *const output_file = argv[optind+1];
 		if (is_debug) {
 			// tr: NOTE: Not positional. Don't change argument positions!
+			// tr: Only localize "Calling function:".
 			fprintf(stderr, C_("rp-stub", "Calling function: %s(\"%s\", \"%s\", %d);"),
 				symname, source_file, output_file, maximum_size);
 			putc('\n', stderr);
@@ -283,17 +298,19 @@ int main(int argc, char *argv[])
 			fprintf(stderr, C_("rp-stub", "Calling function: %s();"), symname);
 			putc('\n', stderr);
 		}
-		// FIXME: argc/argv may be manipulated by getopt().
+		// NOTE: argc/argv may be manipulated by getopt().
 		ret = ((PFN_RP_SHOW_CONFIG_DIALOG)pfn)(argc, argv);
 	}
 
 	dlclose(pDll);
 	if (ret == 0) {
 		if (is_debug) {
+			// tr: %1$s == function name, %2$d == return value
 			fprintf_p(stderr, C_("rp-stub", "%1$s() returned %2$d."), symname, ret);
 			putc('\n', stderr);
 		}
 	} else {
+		// tr: %1$s == function name, %2$d == return value
 		fprintf_p(stderr, C_("rp-stub", "*** ERROR: %1$s() returned %2$d."), symname, ret);
 		putc('\n', stderr);
 	}

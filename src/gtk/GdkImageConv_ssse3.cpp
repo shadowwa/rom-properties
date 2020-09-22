@@ -2,35 +2,15 @@
  * ROM Properties Page shell extension. (GTK+ common)                      *
  * GdkImageConv.cpp: Helper functions to convert from rp_image to GDK.     *
  *                                                                         *
- * Copyright (c) 2017 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License       *
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.   *
+ * Copyright (c) 2017-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "GdkImageConv.hpp"
 
-// C includes.
-#include <stdint.h>
-
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cstring>
-
-// librpbase
-#include "librpbase/aligned_malloc.h"
-#include "librpbase/img/rp_image.hpp"
-using LibRpBase::rp_image;
+// librptexture
+using LibRpTexture::rp_image;
 
 // SSSE3 headers.
 #include <xmmintrin.h>
@@ -64,7 +44,7 @@ GdkPixbuf *GdkImageConv::rp_image_to_GdkPixbuf_ssse3(const rp_image *img)
 	// only guarantees 4-byte alignment.
 	const int width = img->width();
 	const int height = img->height();
-	const int rowstride = ALIGN(16, width * sizeof(uint32_t));
+	const int rowstride = ALIGN_BYTES(16, width * sizeof(uint32_t));
 	uint32_t *px_dest = static_cast<uint32_t*>(aligned_malloc(16, height * rowstride));
 	assert(px_dest != nullptr);
 	if (unlikely(!px_dest)) {
@@ -74,7 +54,7 @@ GdkPixbuf *GdkImageConv::rp_image_to_GdkPixbuf_ssse3(const rp_image *img)
 
 	GdkPixbuf *pixbuf = gdk_pixbuf_new_from_data(
 		reinterpret_cast<const guchar*>(px_dest),
-		GDK_COLORSPACE_RGB, TRUE, 8, width, height,
+		GDK_COLORSPACE_RGB, true, 8, width, height,
 		rowstride, rp_gdkPixbufDestroyNotify, nullptr);
 	assert(pixbuf != nullptr);
 	if (unlikely(!pixbuf)) {
@@ -88,10 +68,10 @@ GdkPixbuf *GdkImageConv::rp_image_to_GdkPixbuf_ssse3(const rp_image *img)
 	const int dest_stride_adj = (rowstride / sizeof(*px_dest)) - img->width();
 
 	// ABGR shuffle mask.
-	static const __m128i shuf_mask = _mm_setr_epi8(2,1,0,3, 6,5,4,7, 10,9,8,11, 14,13,12,15);
+	const __m128i shuf_mask = _mm_setr_epi8(2,1,0,3, 6,5,4,7, 10,9,8,11, 14,13,12,15);
 
 	switch (img->format()) {
-		case rp_image::FORMAT_ARGB32: {
+		case rp_image::Format::ARGB32: {
 			// Copy the image data.
 			const uint32_t *img_buf = static_cast<const uint32_t*>(img->bits());
 			const int src_stride_adj = (img->stride() / sizeof(uint32_t)) - width;
@@ -102,22 +82,22 @@ GdkPixbuf *GdkImageConv::rp_image_to_GdkPixbuf_ssse3(const rp_image *img)
 					const __m128i *xmm_src = reinterpret_cast<const __m128i*>(img_buf);
 					__m128i *xmm_dest = reinterpret_cast<__m128i*>(px_dest);
 
-					__m128i sa = _mm_load_si128(xmm_src);
-					__m128i sb = _mm_load_si128(xmm_src+1);
-					__m128i sc = _mm_load_si128(xmm_src+2);
-					__m128i sd = _mm_load_si128(xmm_src+3);
+					__m128i sa = _mm_load_si128(&xmm_src[0]);
+					__m128i sb = _mm_load_si128(&xmm_src[1]);
+					__m128i sc = _mm_load_si128(&xmm_src[2]);
+					__m128i sd = _mm_load_si128(&xmm_src[3]);
 
 					__m128i val = _mm_shuffle_epi8(sa, shuf_mask);
-					_mm_store_si128(xmm_dest, val);
+					_mm_store_si128(&xmm_dest[0], val);
 
 					val = _mm_shuffle_epi8(sb, shuf_mask);
-					_mm_store_si128(xmm_dest+1, val);
+					_mm_store_si128(&xmm_dest[1], val);
 
 					val = _mm_shuffle_epi8(sc, shuf_mask);
-					_mm_store_si128(xmm_dest+2, val);
+					_mm_store_si128(&xmm_dest[2], val);
 
 					val = _mm_shuffle_epi8(sd, shuf_mask);
-					_mm_store_si128(xmm_dest+3, val);
+					_mm_store_si128(&xmm_dest[3], val);
 				}
 
 				// Remaining pixels.
@@ -137,7 +117,7 @@ GdkPixbuf *GdkImageConv::rp_image_to_GdkPixbuf_ssse3(const rp_image *img)
 			break;
 		}
 
-		case rp_image::FORMAT_CI8: {
+		case rp_image::Format::CI8: {
 			const uint32_t *src_pal = img->palette();
 			const int src_pal_len = img->palette_len();
 			assert(src_pal != nullptr);
@@ -162,22 +142,22 @@ GdkPixbuf *GdkImageConv::rp_image_to_GdkPixbuf_ssse3(const rp_image *img)
 				const __m128i *xmm_src = reinterpret_cast<const __m128i*>(src_pal);
 				__m128i *xmm_dest = reinterpret_cast<__m128i*>(dest_pal);
 
-				__m128i sa = _mm_load_si128(xmm_src);
-				__m128i sb = _mm_load_si128(xmm_src+1);
-				__m128i sc = _mm_load_si128(xmm_src+2);
-				__m128i sd = _mm_load_si128(xmm_src+3);
+				__m128i sa = _mm_load_si128(&xmm_src[0]);
+				__m128i sb = _mm_load_si128(&xmm_src[1]);
+				__m128i sc = _mm_load_si128(&xmm_src[2]);
+				__m128i sd = _mm_load_si128(&xmm_src[3]);
 
 				__m128i val = _mm_shuffle_epi8(sa, shuf_mask);
-				_mm_store_si128(xmm_dest, val);
+				_mm_store_si128(&xmm_dest[0], val);
 
 				val = _mm_shuffle_epi8(sb, shuf_mask);
-				_mm_store_si128(xmm_dest+1, val);
+				_mm_store_si128(&xmm_dest[1], val);
 
 				val = _mm_shuffle_epi8(sc, shuf_mask);
-				_mm_store_si128(xmm_dest+2, val);
+				_mm_store_si128(&xmm_dest[2], val);
 
 				val = _mm_shuffle_epi8(sd, shuf_mask);
-				_mm_store_si128(xmm_dest+3, val);
+				_mm_store_si128(&xmm_dest[3], val);
 			}
 
 			// Remaining colors.

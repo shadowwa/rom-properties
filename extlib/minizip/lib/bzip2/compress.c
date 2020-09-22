@@ -158,6 +158,7 @@ void generateMTFValues ( EState* s )
 
    wr = 0;
    zPend = 0;
+   yy[0] = 0;
    for (i = 0; i < s->nInUse; i++) yy[i] = (UChar) i;
 
    for (i = 0; i < s->nblock; i++) {
@@ -579,7 +580,7 @@ void sendMTFValues ( EState* s )
 #           undef BZ_ITAH
 
       } else {
-	 /*--- slow version which correctly handles all situations ---*/
+      /*--- slow version which correctly handles all situations ---*/
          for (i = gs; i <= ge; i++) {
             bsW ( s, 
                   s->len  [s->selector[selCtr]] [mtfv[i]],
@@ -595,6 +596,8 @@ void sendMTFValues ( EState* s )
 
    if (s->verbosity >= 3)
       VPrintf1( "codes %d\n", s->numZ-nBytes );
+
+    (void)nBytes;
 }
 
 

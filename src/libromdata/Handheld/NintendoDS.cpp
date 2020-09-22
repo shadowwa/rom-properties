@@ -2,174 +2,33 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * NintendoDS.hpp: Nintendo DS(i) ROM reader.                              *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "librpbase/config.librpbase.h"
 
 #include "NintendoDS.hpp"
-#include "librpbase/RomData_p.hpp"
-
-#include "nds_structs.h"
+#include "NintendoDS_p.hpp"
 #include "data/NintendoPublishers.hpp"
 #include "data/NintendoLanguage.hpp"
 
-#include "librpbase/common.h"
-#include "librpbase/byteswap.h"
-#include "librpbase/TextFuncs.hpp"
-#include "librpbase/file/IRpFile.hpp"
-
-#include "librpbase/img/rp_image.hpp"
-#include "librpbase/img/ImageDecoder.hpp"
-#include "librpbase/img/IconAnimData.hpp"
-
-#include "libi18n/i18n.h"
+// librpbase, librpfile, librptexture
 using namespace LibRpBase;
+using LibRpFile::IRpFile;
+using LibRpFile::RpFile;
+using namespace LibRpTexture;
 
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cctype>
-#include <cerrno>
-#include <cstring>
-
-// C++ includes.
-#include <algorithm>
-#include <string>
-#include <vector>
+// C++ STL classes.
+using std::array;
 using std::string;
 using std::vector;
 
 namespace LibRomData {
 
-class NintendoDSPrivate : public RomDataPrivate
-{
-	public:
-		NintendoDSPrivate(NintendoDS *q, IRpFile *file, bool cia);
-		virtual ~NintendoDSPrivate();
-
-	private:
-		typedef RomDataPrivate super;
-		RP_DISABLE_COPY(NintendoDSPrivate)
-
-	public:
-		// Animated icon data.
-		// This class owns all of the icons in here, so we
-		// must delete all of them.
-		IconAnimData *iconAnimData;
-
-		// Pointer to the first frame in iconAnimData.
-		// Used when showing a static icon.
-		const rp_image *icon_first_frame;
-
-	public:
-		/** RomFields **/
-
-		// Hardware type. (RFT_BITFIELD)
-		enum NDS_HWType {
-			DS_HW_DS	= (1 << 0),
-			DS_HW_DSi	= (1 << 1),
-		};
-
-		// DS region. (RFT_BITFIELD)
-		enum NDS_Region {
-			NDS_REGION_FREE		= (1 << 0),
-			NDS_REGION_SKOREA	= (1 << 1),
-			NDS_REGION_CHINA	= (1 << 2),
-		};
-
-	public:
-		// ROM type.
-		enum RomType {
-			ROM_UNKNOWN	= -1,	// Unknown ROM type.
-			ROM_NDS		= 0,	// Nintendo DS ROM.
-			ROM_NDS_SLOT2	= 1,	// Nintendo DS ROM. (Slot-2)
-			ROM_DSi_ENH	= 2,	// Nintendo DSi-enhanced ROM.
-			ROM_DSi_ONLY	= 3,	// Nintendo DSi-only ROM.
-		};
-
-		// ROM type.
-		int romType;
-
-		// ROM header.
-		// NOTE: Must be byteswapped on access.
-		NDS_RomHeader romHeader;
-
-		// Icon/title data from the ROM header.
-		// NOTE: Must be byteswapped on access.
-		NDS_IconTitleData nds_icon_title;
-		bool nds_icon_title_loaded;
-
-		// If true, this is an SRL in a 3DS CIA.
-		// Some fields shouldn't be displayed.
-		bool cia;
-
-		/**
-		 * Load the icon/title data.
-		 * @return 0 on success; negative POSIX error code on error.
-		 */
-		int loadIconTitleData(void);
-
-		/**
-		 * Load the ROM image's icon.
-		 * @return Icon, or nullptr on error.
-		 */
-		const rp_image *loadIcon(void);
-
-		/**
-		 * Get the title index.
-		 * The title that most closely matches the
-		 * host system language will be selected.
-		 * @return Title index, or -1 on error.
-		 */
-		int getTitleIndex(void) const;
-
-		/**
-		 * Check the NDS Mask ROM area.
-		 *
-		 * $1000-$3FFF is normally unreadable on hardware, so this
-		 * area is usually blank in dumped ROMs. However, the official
-		 * SDK puts unknown pseudo-random data here, so DSiWare and
-		 * Wii U VC SRLs will have non-zero data here.
-		 *
-		 * @return True if the mask ROM area has non-zero data; false if not.
-		 */
-		bool checkNDSMaskROMArea(void);
-
-		/**
-		 * Check the NDS Secure Area type.
-		 * @return Secure area type.
-		 */
-		const char *checkNDSSecureArea(void);
-
-		/**
-		 * Convert a Nintendo DS(i) region value to a GameTDB region code.
-		 * @param ndsRegion Nintendo DS region.
-		 * @param dsiRegion Nintendo DSi region.
-		 * @param idRegion Game ID region.
-		 *
-		 * NOTE: Mulitple GameTDB region codes may be returned, including:
-		 * - User-specified fallback region. [TODO]
-		 * - General fallback region.
-		 *
-		 * @return GameTDB region code(s), or empty vector if the region value is invalid.
-		 */
-		static vector<const char*> ndsRegionToGameTDB(
-			uint8_t ndsRegion, uint32_t dsiRegion, char idRegion);
-};
+ROMDATA_IMPL(NintendoDS)
+ROMDATA_IMPL_IMG(NintendoDS)
 
 /** NintendoDSPrivate **/
 
@@ -177,9 +36,14 @@ NintendoDSPrivate::NintendoDSPrivate(NintendoDS *q, IRpFile *file, bool cia)
 	: super(q, file)
 	, iconAnimData(nullptr)
 	, icon_first_frame(nullptr)
-	, romType(ROM_UNKNOWN)
+	, romType(RomType::Unknown)
+	, romSize(0)
+	, secData(0)
+	, secArea(NDS_SECAREA_UNKNOWN)
 	, nds_icon_title_loaded(false)
 	, cia(cia)
+	, fieldIdx_secData(-1)
+	, fieldIdx_secArea(-1)
 {
 	// Clear the various structs.
 	memset(&romHeader, 0, sizeof(romHeader));
@@ -188,12 +52,7 @@ NintendoDSPrivate::NintendoDSPrivate(NintendoDS *q, IRpFile *file, bool cia)
 
 NintendoDSPrivate::~NintendoDSPrivate()
 {
-	if (iconAnimData) {
-		for (int i = iconAnimData->count-1; i >= 0; i--) {
-			delete iconAnimData->frames[i];
-		}
-		delete iconAnimData;
-	}
+	UNREF(iconAnimData);
 }
 
 /**
@@ -211,6 +70,11 @@ int NintendoDSPrivate::loadIconTitleData(void)
 
 	// Get the address of the icon/title information.
 	const uint32_t icon_offset = le32_to_cpu(romHeader.icon_offset);
+	// Icon must be located after the "secure area".
+	if (icon_offset <= 0x8000) {
+		// No icon/title information.
+		return -ENOENT;
+	}
 
 	// Read the icon/title data.
 	size_t size = this->file->seekAndRead(icon_offset, &nds_icon_title, sizeof(nds_icon_title));
@@ -226,11 +90,11 @@ int NintendoDSPrivate::loadIconTitleData(void)
 		case NDS_ICON_VERSION_ORIGINAL:
 			req_size = NDS_ICON_SIZE_ORIGINAL;
 			break;
-		case NDS_ICON_VERSION_ZH:
-			req_size = NDS_ICON_SIZE_ZH;
+		case NDS_ICON_VERSION_HANS:
+			req_size = NDS_ICON_SIZE_HANS;
 			break;
-		case NDS_ICON_VERSION_ZH_KO:
-			req_size = NDS_ICON_SIZE_ZH_KO;
+		case NDS_ICON_VERSION_HANS_KO:
+			req_size = NDS_ICON_SIZE_HANS_KO;
 			break;
 		case NDS_ICON_VERSION_DSi:
 			req_size = NDS_ICON_SIZE_DSi;
@@ -294,11 +158,21 @@ const rp_image *NintendoDSPrivate::loadIcon(void)
 	} else {
 		// Animated icon is present.
 
-		// Which bitmaps are used?
-		std::array<bool, IconAnimData::MAX_FRAMES> bmp_used;
-		bmp_used.fill(false);
+		// Maximum number of combinations based on bitmap index,
+		// palette index, and flip bits is 256. We don't want to
+		// reserve 256 images, so we'll use a map to determine
+		// which combinations go to which bitmap.
+
+		// dsi_icon_seq is limited to 64, so there's still a maximum
+		// of 64 possible bitmaps.
+
+		// Index: High byte of token.
+		// Value: Bitmap index. (0xFF for unused)
+		array<uint8_t, 256> arr_bmpUsed;
+		arr_bmpUsed.fill(0xFF);
 
 		// Parse the icon sequence.
+		uint8_t bmp_idx = 0;
 		int seq_idx;
 		for (seq_idx = 0; seq_idx < ARRAY_SIZE(nds_icon_title.dsi_icon_seq); seq_idx++) {
 			const uint16_t seq = le16_to_cpu(nds_icon_title.dsi_icon_seq[seq_idx]);
@@ -319,29 +193,42 @@ const rp_image *NintendoDSPrivate::loadIcon(void)
 			// of palette and bitmap. As a workaround, we'll make each
 			// combination a unique bitmap, which means we have a maximum
 			// of 64 bitmaps.
-			uint8_t bmp_pal_idx = ((seq >> 8) & 0x3F);
-			bmp_used[bmp_pal_idx] = true;
-			iconAnimData->seq_index[seq_idx] = bmp_pal_idx;
-			iconAnimData->delays[seq_idx].numer = (uint16_t)delay;
-			iconAnimData->delays[seq_idx].denom = 60;
-			iconAnimData->delays[seq_idx].ms = delay * 1000 / 60;
-		}
-		iconAnimData->seq_count = seq_idx;
-
-		// Convert the required bitmaps.
-		for (int i = 0; i < (int)bmp_used.size(); i++) {
-			if (bmp_used[i]) {
-				iconAnimData->count = i + 1;
-
-				const uint8_t bmp = (i & 7);
-				const uint8_t pal = (i >> 3) & 7;
-				iconAnimData->frames[i] = ImageDecoder::fromNDS_CI4(32, 32,
+			uint8_t high_token = (seq >> 8);
+			if (arr_bmpUsed[high_token] == 0xFF) {
+				// Not used yet. Create the bitmap.
+				const uint8_t bmp = (high_token & 7);
+				const uint8_t pal = (high_token >> 3) & 7;
+				rp_image *img = ImageDecoder::fromNDS_CI4(32, 32,
 					nds_icon_title.dsi_icon_data[bmp],
 					sizeof(nds_icon_title.dsi_icon_data[bmp]),
 					nds_icon_title.dsi_icon_pal[pal],
 					sizeof(nds_icon_title.dsi_icon_pal[pal]));
+				if (high_token & (3U << 6)) {
+					// At least one flip bit is set.
+					rp_image::FlipOp flipOp = rp_image::FLIP_NONE;
+					if (high_token & (1U << 6)) {
+						// H-flip
+						flipOp = rp_image::FLIP_H;
+					}
+					if (high_token & (1U << 7)) {
+						// V-flip
+						flipOp = static_cast<rp_image::FlipOp>(flipOp | rp_image::FLIP_V);
+					}
+					rp_image *const flipimg = img->flip(flipOp);
+					img->unref();
+					img = flipimg;
+				}
+				iconAnimData->frames[bmp_idx] = img;
+				arr_bmpUsed[high_token] = bmp_idx;
+				bmp_idx++;
 			}
+			iconAnimData->seq_index[seq_idx] = arr_bmpUsed[high_token];
+			iconAnimData->delays[seq_idx].numer = static_cast<uint16_t>(delay);
+			iconAnimData->delays[seq_idx].denom = 60;
+			iconAnimData->delays[seq_idx].ms = delay * 1000 / 60;
 		}
+		iconAnimData->count = bmp_idx;
+		iconAnimData->seq_count = seq_idx;
 	}
 
 	// NOTE: We're not deleting iconAnimData even if we only have
@@ -354,129 +241,89 @@ const rp_image *NintendoDSPrivate::loadIcon(void)
 }
 
 /**
- * Get the title index.
- * The title that most closely matches the
- * host system language will be selected.
- * @return Title index, or -1 on error.
+ * Get the maximum supported language for an icon/title version.
+ * @param version Icon/title version.
+ * @return Maximum supported language.
  */
-int NintendoDSPrivate::getTitleIndex(void) const
+NDS_Language_ID NintendoDSPrivate::getMaxSupportedLanguage(uint16_t version)
+{
+	NDS_Language_ID maxID;
+	if (version >= NDS_ICON_VERSION_HANS_KO) {
+		maxID = NDS_LANG_KOREAN;
+	} else if (version >= NDS_ICON_VERSION_HANS) {
+		maxID = NDS_LANG_CHINESE_SIMP;
+	} else {
+		maxID = NDS_LANG_SPANISH;
+	}
+	return maxID;
+}
+
+/**
+ * Get the language ID to use for the title fields.
+ * @return NDS language ID.
+ */
+NDS_Language_ID NintendoDSPrivate::getLanguageID(void) const
 {
 	if (!nds_icon_title_loaded) {
 		// Attempt to load the icon/title data.
 		if (const_cast<NintendoDSPrivate*>(this)->loadIconTitleData() != 0) {
 			// Error loading the icon/title data.
-			return -1;
+			return (NDS_Language_ID)-1;
 		}
 
 		// Make sure it was actually loaded.
 		if (!nds_icon_title_loaded) {
 			// Icon/title data was not loaded.
-			return -1;
+			return (NDS_Language_ID)-1;
 		}
 	}
 
 	// Version number check is required for ZH and KO.
 	const uint16_t version = le16_to_cpu(nds_icon_title.version);
-	int lang = NintendoLanguage::getNDSLanguage(version);
+	NDS_Language_ID langID = (NDS_Language_ID)NintendoLanguage::getNDSLanguage(version);
 
 	// Check that the field is valid.
-	if (nds_icon_title.title[lang][0] == cpu_to_le16(0)) {
+	if (nds_icon_title.title[langID][0] == cpu_to_le16('\0')) {
 		// Not valid. Check English.
-		if (nds_icon_title.title[NDS_LANG_ENGLISH][0] != cpu_to_le16(0)) {
+		if (nds_icon_title.title[NDS_LANG_ENGLISH][0] != cpu_to_le16('\0')) {
 			// English is valid.
-			lang = NDS_LANG_ENGLISH;
+			langID = NDS_LANG_ENGLISH;
 		} else {
 			// Not valid. Check Japanese.
-			if (nds_icon_title.title[NDS_LANG_JAPANESE][0] != cpu_to_le16(0)) {
+			if (nds_icon_title.title[NDS_LANG_JAPANESE][0] != cpu_to_le16('\0')) {
 				// Japanese is valid.
-				lang = NDS_LANG_JAPANESE;
+				langID = NDS_LANG_JAPANESE;
 			} else {
 				// Not valid...
-				// TODO: Check other languages?
-				lang = -1;
+				// Default to English anyway.
+				langID = NDS_LANG_ENGLISH;
 			}
 		}
 	}
 
-	return lang;
+	return langID;
 }
 
 /**
- * Check the NDS Mask ROM area.
- *
- * $1000-$3FFF is normally unreadable on hardware, so this
- * area is usually blank in dumped ROMs. However, the official
- * SDK puts unknown pseudo-random data here, so DSiWare and
- * Wii U VC SRLs will have non-zero data here.
- *
- * @return True if the mask ROM area has non-zero data; false if not.
+ * Get the default language code for the multi-string fields.
+ * @return Language code, e.g. 'en' or 'es'.
  */
-bool NintendoDSPrivate::checkNDSMaskROMArea(void)
+inline uint32_t NintendoDSPrivate::getDefaultLC(void) const
 {
-	// Make sure 0x1000-0x3FFF is blank.
-	// NOTE: ndstool checks 0x0200-0x0FFF, but this may
-	// contain extra data for DSi-enhanced ROMs, or even
-	// for regular DS games released after the DSi.
-	uintptr_t blank_area[0x3000/sizeof(uintptr_t)];
-	size_t size = file->seekAndRead(0x1000, blank_area, sizeof(blank_area));
-	if (size != sizeof(blank_area)) {
-		// Seek and/or read error.
-		return false;
+	// Get the system language.
+	// TODO: Verify against the game's region code?
+	NDS_Language_ID langID = getLanguageID();
+
+	// Version number check is required for ZH and KO.
+	const NDS_Language_ID maxID = getMaxSupportedLanguage(
+		le16_to_cpu(nds_icon_title.version));
+	uint32_t lc = NintendoLanguage::getNDSLanguageCode(langID, maxID);
+	if (lc == 0) {
+		// Invalid language code...
+		// Default to English.
+		lc = 'en';
 	}
-
-	const uintptr_t *const end = &blank_area[ARRAY_SIZE(blank_area)-1];
-	for (const uintptr_t *p = blank_area; p < end; p += 2) {
-		if (p[0] != 0 || p[1] != 0) {
-			// Not zero. This isn't a dumped ROM.
-			return true;
-		}
-	}
-
-	// The Mask ROM area is zero. This is a dumped ROM.
-	return false;
-}
-
-/**
- * Check the NDS Secure Area type.
- * @return Secure area type, or nullptr if unknown.
- */
-const char *NintendoDSPrivate::checkNDSSecureArea(void)
-{
-	// Read the start of the Secure Area.
-	// NOTE: We only need to check the first two DWORDs, but
-	// we're reading the first four because CIAReader only
-	// supports multiples of 16 bytes right now.
-	uint32_t secure_area[4];
-	size_t size = file->seekAndRead(0x4000, secure_area, sizeof(secure_area));
-	if (size != sizeof(secure_area)) {
-		// Seek and/or read error.
-		return nullptr;
-	}
-
-	// Reference: https://github.com/devkitPro/ndstool/blob/master/source/header.cpp#L39
-
-	const char *secType = nullptr;
-	//bool needs_encryption = false;	// TODO
-	if (le32_to_cpu(romHeader.arm9.rom_offset) < 0x4000) {
-		// ARM9 secure area is not present.
-		// This is only valid for homebrew.
-		secType = C_("NintendoDS|SecureArea", "Homebrew");
-	} else if (secure_area[0] == cpu_to_le32(0x00000000) && secure_area[1] == cpu_to_le32(0x00000000)) {
-		// Secure area is empty. (DS Download Play)
-		secType = C_("NintendoDS|SecureArea", "Multiboot");
-	} else if (secure_area[0] == cpu_to_le32(0xE7FFDEFF) && secure_area[1] == cpu_to_le32(0xE7FFDEFF)) {
-		// Secure area is decrypted.
-		// Probably dumped using wooddumper or Decrypt9WIP.
-		secType = C_("NintendoDS|SecureArea", "Decrypted");
-		//needs_encryption = true;	// CRC requires encryption.
-	} else {
-		// Secure area is encrypted.
-		secType = C_("NintendoDS|SecureArea", "Encrypted");
-	}
-
-	// TODO: Verify the CRC?
-	// For decrypted ROMs, this requires re-encrypting the secure area.
-	return secType;
+	return lc;
 }
 
 /**
@@ -522,10 +369,10 @@ vector<const char*> NintendoDSPrivate::ndsRegionToGameTDB(
 	int fallback_region = 0;
 	switch (dsiRegion) {
 		case DSi_REGION_JAPAN:
-			ret.push_back("JA");
+			ret.emplace_back("JA");
 			return ret;
 		case DSi_REGION_USA:
-			ret.push_back("US");
+			ret.emplace_back("US");
 			return ret;
 		case DSi_REGION_EUROPE:
 		case DSi_REGION_EUROPE | DSi_REGION_AUSTRALIA:
@@ -537,14 +384,15 @@ vector<const char*> NintendoDSPrivate::ndsRegionToGameTDB(
 			fallback_region = 2;
 			break;
 		case DSi_REGION_CHINA:
-			ret.push_back("ZHCN");
-			ret.push_back("JA");
-			ret.push_back("EN");
+			// NOTE: GameTDB only has "ZH" for boxart, not "ZHCN" or "ZHTW".
+			ret.emplace_back("ZH");
+			ret.emplace_back("JA");
+			ret.emplace_back("EN");
 			return ret;
 		case DSi_REGION_SKOREA:
-			ret.push_back("KO");
-			ret.push_back("JA");
-			ret.push_back("EN");
+			ret.emplace_back("KO");
+			ret.emplace_back("JA");
+			ret.emplace_back("EN");
 			return ret;
 		case 0:
 		default:
@@ -557,30 +405,31 @@ vector<const char*> NintendoDSPrivate::ndsRegionToGameTDB(
 
 	// Check for China/Korea.
 	if (ndsRegion & NDS_REGION_CHINA) {
-		ret.push_back("ZHCN");
-		ret.push_back("JA");
-		ret.push_back("EN");
+		// NOTE: GameTDB only has "ZH" for boxart, not "ZHCN" or "ZHTW".
+		ret.emplace_back("ZH");
+		ret.emplace_back("JA");
+		ret.emplace_back("EN");
 		return ret;
 	} else if (ndsRegion & NDS_REGION_SKOREA) {
-		ret.push_back("KO");
-		ret.push_back("JA");
-		ret.push_back("EN");
+		ret.emplace_back("KO");
+		ret.emplace_back("JA");
+		ret.emplace_back("EN");
 		return ret;
 	}
 
 	// Check for region-specific game IDs.
 	switch (idRegion) {
 		case 'E':	// USA
-			ret.push_back("US");
+			ret.emplace_back("US");
 			break;
 		case 'J':	// Japan
-			ret.push_back("JA");
+			ret.emplace_back("JA");
 			break;
 		case 'O':
 			// TODO: US/EU.
 			// Compare to host system region.
 			// For now, assuming US.
-			ret.push_back("US");
+			ret.emplace_back("US");
 			break;
 		case 'P':	// PAL
 		case 'X':	// Multi-language release
@@ -596,22 +445,22 @@ vector<const char*> NintendoDSPrivate::ndsRegionToGameTDB(
 
 		// European regions.
 		case 'D':	// Germany
-			ret.push_back("DE");
+			ret.emplace_back("DE");
 			break;
 		case 'F':	// France
-			ret.push_back("FR");
+			ret.emplace_back("FR");
 			break;
 		case 'H':	// Netherlands
-			ret.push_back("NL");
+			ret.emplace_back("NL");
 			break;
 		case 'I':	// Italy
-			ret.push_back("NL");
+			ret.emplace_back("IT");
 			break;
 		case 'R':	// Russia
-			ret.push_back("RU");
+			ret.emplace_back("RU");
 			break;
 		case 'S':	// Spain
-			ret.push_back("ES");
+			ret.emplace_back("ES");
 			break;
 		case 'U':	// Australia
 			if (fallback_region == 0) {
@@ -625,12 +474,12 @@ vector<const char*> NintendoDSPrivate::ndsRegionToGameTDB(
 	switch (fallback_region) {
 		case 1:
 			// Europe
-			ret.push_back("EN");
+			ret.emplace_back("EN");
 			break;
 		case 2:
 			// Australia
-			ret.push_back("AU");
-			ret.push_back("EN");
+			ret.emplace_back("AU");
+			ret.emplace_back("EN");
 			break;
 
 		case 0:	// None
@@ -641,13 +490,46 @@ vector<const char*> NintendoDSPrivate::ndsRegionToGameTDB(
 	return ret;
 }
 
+/**
+ * Get the DSi flags string vector.
+ * @return DSi flags string vector.
+ */
+RomFields::ListData_t *NintendoDSPrivate::getDSiFlagsStringVector(void)
+{
+	static const char *const dsi_flags_bitfield_names[] = {
+		// tr: Uses the DSi-specific touchscreen protocol.
+		NOP_C_("NintendoDS|DSi_Flags", "DSi Touchscreen"),
+		// tr: Game requires agreeing to the Nintendo online services agreement.
+		NOP_C_("NintendoDS|DSi_Flags", "Require EULA"),
+		// tr: Custom icon is used from the save file.
+		NOP_C_("NintendoDS|DSi_Flags", "Custom Icon"),
+		// tr: Game supports Nintendo Wi-Fi Connection.
+		NOP_C_("NintendoDS|DSi_Flags", "Nintendo WFC"),
+		NOP_C_("NintendoDS|DSi_Flags", "DS Wireless"),
+		NOP_C_("NintendoDS|DSi_Flags", "NDS Icon SHA-1"),
+		NOP_C_("NintendoDS|DSi_Flags", "NDS Header RSA"),
+		NOP_C_("NintendoDS|DSi_Flags", "Developer"),
+	};
+
+	// Convert to RomFields::ListData_t for RFT_LISTDATA.
+	auto vv_dsi_flags = new RomFields::ListData_t(ARRAY_SIZE(dsi_flags_bitfield_names));
+	for (int i = ARRAY_SIZE(dsi_flags_bitfield_names)-1; i >= 0; i--) {
+		auto &data_row = vv_dsi_flags->at(i);
+		data_row.emplace_back(
+			dpgettext_expr(RP_I18N_DOMAIN, "NintendoDS|DSi_Flags",
+				dsi_flags_bitfield_names[i]));
+	}
+
+	return vv_dsi_flags;
+}
+
 /** NintendoDS **/
 
 /**
  * Read a Nintendo DS ROM image.
  *
  * A ROM image must be opened by the caller. The file handle
- * will be dup()'d and must be kept open in order to load
+ * will be ref()'d and must be kept open in order to load
  * data from the ROM image.
  *
  * To close the file, either delete this object or call close().
@@ -663,7 +545,7 @@ NintendoDS::NintendoDS(IRpFile *file)
 	d->className = "NintendoDS";
 
 	if (!d->file) {
-		// Could not dup() the file handle.
+		// Could not ref() the file handle.
 		return;
 	}
 
@@ -674,7 +556,7 @@ NintendoDS::NintendoDS(IRpFile *file)
  * Read a Nintendo DS ROM image.
  *
  * A ROM image must be opened by the caller. The file handle
- * will be dup()'d and must be kept open in order to load
+ * will be ref()'d and must be kept open in order to load
  * data from the ROM image.
  *
  * To close the file, either delete this object or call close().
@@ -691,7 +573,7 @@ NintendoDS::NintendoDS(IRpFile *file, bool cia)
 	d->className = "NintendoDS";
 
 	if (!d->file) {
-		// Could not dup() the file handle.
+		// Could not ref() the file handle.
 		return;
 	}
 
@@ -708,18 +590,37 @@ void NintendoDS::init(void)
 	// Read the ROM header.
 	d->file->rewind();
 	size_t size = d->file->read(&d->romHeader, sizeof(d->romHeader));
-	if (size != sizeof(d->romHeader))
+	if (size != sizeof(d->romHeader)) {
+		UNREF_AND_NULL_NOCHK(d->file);
 		return;
+	}
+
+	// Get the ROM size for later.
+	d->romSize = d->file->size();
 
 	// Check if this ROM image is supported.
 	DetectInfo info;
 	info.header.addr = 0;
 	info.header.size = sizeof(d->romHeader);
 	info.header.pData = reinterpret_cast<const uint8_t*>(&d->romHeader);
-	info.ext = nullptr;	// Not needed for NDS.
-	info.szFile = 0;	// Not needed for NDS.
-	d->romType = isRomSupported_static(&info);
-	d->isValid = (d->romType >= 0);
+	info.ext = nullptr;		// Not needed for NDS.
+	info.szFile = d->romSize;	// Not needed for NDS.
+	d->romType = static_cast<NintendoDSPrivate::RomType>(isRomSupported_static(&info));
+	d->isValid = ((int)d->romType >= 0);
+
+	if (!d->isValid) {
+		UNREF_AND_NULL_NOCHK(d->file);
+		return;
+	}
+
+	// Check the secure area status.
+	d->secData = d->checkNDSSecurityData();
+	d->secArea = d->checkNDSSecureArea();
+
+	// Set the MIME type. (unofficial)
+	d->mimeType = (d->romType == NintendoDSPrivate::RomType::DSi_Exclusive)
+			? "application/x-nintendo-dsi-rom"	// (not on fd.o)
+			: "application/x-nintendo-ds-rom";
 }
 
 /**
@@ -738,7 +639,7 @@ int NintendoDS::isRomSupported_static(const DetectInfo *info)
 	{
 		// Either no detection information was specified,
 		// or the header is too small.
-		return -1;
+		return static_cast<int>(NintendoDSPrivate::RomType::Unknown);
 	}
 
 	// Check the first 16 bytes of the Nintendo logo.
@@ -756,32 +657,22 @@ int NintendoDS::isRomSupported_static(const DetectInfo *info)
 	if (!memcmp(romHeader->nintendo_logo, nintendo_gba_logo, sizeof(nintendo_gba_logo)) &&
 	    romHeader->nintendo_logo_checksum == cpu_to_le16(0xCF56)) {
 		// Nintendo logo is valid. (Slot-1)
-		static const uint8_t nds_romType[] = {
-			NintendoDSPrivate::ROM_NDS,		// 0x00 == Nintendo DS
-			NintendoDSPrivate::ROM_NDS,		// 0x01 == invalid (assuming DS)
-			NintendoDSPrivate::ROM_DSi_ENH,		// 0x02 == DSi-enhanced
-			NintendoDSPrivate::ROM_DSi_ONLY,	// 0x03 == DSi-only
+		static const int8_t nds_romType[] = {
+			(int8_t)NintendoDSPrivate::RomType::NDS,		// 0x00 == Nintendo DS
+			(int8_t)NintendoDSPrivate::RomType::NDS,		// 0x01 == invalid (assuming DS)
+			(int8_t)NintendoDSPrivate::RomType::DSi_Enhanced,	// 0x02 == DSi-enhanced
+			(int8_t)NintendoDSPrivate::RomType::DSi_Exclusive,	// 0x03 == DSi-only
 		};
 		return nds_romType[romHeader->unitcode & 3];
 	} else if (!memcmp(romHeader->nintendo_logo, nintendo_ds_logo_slot2, sizeof(nintendo_ds_logo_slot2)) &&
 		   romHeader->nintendo_logo_checksum == cpu_to_le16(0x9E1A)) {
 		// Nintendo logo is valid. (Slot-2)
 		// NOTE: Slot-2 is NDS only.
-		return NintendoDSPrivate::ROM_NDS_SLOT2;
+		return static_cast<int>(NintendoDSPrivate::RomType::NDS_Slot2);
 	}
 
 	// Not supported.
-	return -1;
-}
-
-/**
- * Is a ROM image supported by this object?
- * @param info DetectInfo containing ROM detection information.
- * @return Class-specific system ID (>= 0) if supported; -1 if not.
- */
-int NintendoDS::isRomSupported(const DetectInfo *info) const
-{
-	return isRomSupported_static(info);
+	return static_cast<int>(NintendoDSPrivate::RomType::Unknown);
 }
 
 /**
@@ -798,10 +689,10 @@ const char *NintendoDS::systemName(unsigned int type) const
 	// NDS/DSi are mostly the same worldwide, except for China.
 	static_assert(SYSNAME_TYPE_MASK == 3,
 		"NintendoDS::systemName() array index optimization needs to be updated.");
-	static_assert(SYSNAME_REGION_MASK == (1 << 2),
+	static_assert(SYSNAME_REGION_MASK == (1U << 2),
 		"NintendoDS::systemName() array index optimization needs to be updated.");
 
-	// Bits 0-1: Type. (short, long, abbreviation)
+	// Bits 0-1: Type. (long, short, abbreviation)
 	// Bit 2: 0 for NDS, 1 for DSi-exclusive.
 	// Bit 3: 0 for worldwide, 1 for China. (iQue DS)
 	static const char *const sysNames[16] = {
@@ -814,16 +705,18 @@ const char *NintendoDS::systemName(unsigned int type) const
 		"iQue DSi", "iQue DSi", "DSi", nullptr
 	};
 
+	// "iQue" is only used if the localized system name is requested
+	// *and* the ROM's region code is China only.
 	unsigned int idx = (type & SYSNAME_TYPE_MASK);
-	if (d->romType == NintendoDSPrivate::ROM_DSi_ONLY) {
+	if (d->romType == NintendoDSPrivate::RomType::DSi_Exclusive) {
 		// DSi-exclusive game.
-		idx |= (1 << 2);
+		idx |= (1U << 2);
 		if ((type & SYSNAME_REGION_MASK) == SYSNAME_REGION_ROM_LOCAL) {
-			if ((d->romHeader.dsi.region_code & cpu_to_le32(DSi_REGION_CHINA)) ||
+			if ((d->romHeader.dsi.region_code == cpu_to_le32(DSi_REGION_CHINA)) ||
 			    (d->romHeader.nds_region & 0x80))
 			{
 				// iQue DSi.
-				idx |= (1 << 3);
+				idx |= (1U << 3);
 			}
 		}
 	} else {
@@ -831,7 +724,7 @@ const char *NintendoDS::systemName(unsigned int type) const
 		if ((type & SYSNAME_REGION_MASK) == SYSNAME_REGION_ROM_LOCAL) {
 			if (d->romHeader.nds_region & 0x80) {
 				// iQue DS.
-				idx |= (1 << 3);
+				idx |= (1U << 3);
 			}
 		}
 	}
@@ -866,21 +759,28 @@ const char *const *NintendoDS::supportedFileExtensions_static(void)
 }
 
 /**
- * Get a list of all supported file extensions.
- * This is to be used for file type registration;
- * subclasses don't explicitly check the extension.
+ * Get a list of all supported MIME types.
+ * This is to be used for metadata extractors that
+ * must indicate which MIME types they support.
  *
- * NOTE: The extensions include the leading dot,
- * e.g. ".bin" instead of "bin".
- *
- * NOTE 2: The array and the strings in the array should
+ * NOTE: The array and the strings in the array should
  * *not* be freed by the caller.
  *
  * @return NULL-terminated array of all supported file extensions, or nullptr on error.
  */
-const char *const *NintendoDS::supportedFileExtensions(void) const
+const char *const *NintendoDS::supportedMimeTypes_static(void)
 {
-	return supportedFileExtensions_static();
+	static const char *const mimeTypes[] = {
+		// Unofficial MIME types from FreeDesktop.org.
+		"application/x-nintendo-ds-rom",
+
+		// Unofficial MIME types.
+		// TODO: Get these upstreamed on FreeDesktop.org.
+		"application/x-nintendo-dsi-rom",
+
+		nullptr
+	};
+	return mimeTypes;
 }
 
 /**
@@ -898,26 +798,13 @@ uint32_t NintendoDS::supportedImageTypes_static(void)
 }
 
 /**
- * Get a bitfield of image types this class can retrieve.
- * @return Bitfield of supported image types. (ImageTypesBF)
- */
-uint32_t NintendoDS::supportedImageTypes(void) const
-{
-	return supportedImageTypes_static();
-}
-
-/**
  * Get a list of all available image sizes for the specified image type.
  * @param imageType Image type.
  * @return Vector of available image sizes, or empty vector if no images are available.
  */
-std::vector<RomData::ImageSizeDef> NintendoDS::supportedImageSizes_static(ImageType imageType)
+vector<RomData::ImageSizeDef> NintendoDS::supportedImageSizes_static(ImageType imageType)
 {
-	assert(imageType >= IMG_INT_MIN && imageType <= IMG_EXT_MAX);
-	if (imageType < IMG_INT_MIN || imageType > IMG_EXT_MAX) {
-		// ImageType is out of range.
-		return std::vector<ImageSizeDef>();
-	}
+	ASSERT_supportedImageSizes(imageType);
 
 	switch (imageType) {
 		case IMG_INT_ICON: {
@@ -961,17 +848,7 @@ std::vector<RomData::ImageSizeDef> NintendoDS::supportedImageSizes_static(ImageT
 	}
 
 	// Unsupported image type.
-	return std::vector<ImageSizeDef>();
-}
-
-/**
- * Get a list of all available image sizes for the specified image type.
- * @param imageType Image type.
- * @return Vector of available image sizes, or empty vector if no images are available.
- */
-std::vector<RomData::ImageSizeDef> NintendoDS::supportedImageSizes(ImageType imageType) const
-{
-	return supportedImageSizes_static(imageType);
+	return vector<ImageSizeDef>();
 }
 
 /**
@@ -985,11 +862,7 @@ std::vector<RomData::ImageSizeDef> NintendoDS::supportedImageSizes(ImageType ima
  */
 uint32_t NintendoDS::imgpf(ImageType imageType) const
 {
-	assert(imageType >= IMG_INT_MIN && imageType <= IMG_EXT_MAX);
-	if (imageType < IMG_INT_MIN || imageType > IMG_EXT_MAX) {
-		// ImageType is out of range.
-		return 0;
-	}
+	ASSERT_imgpf(imageType);
 
 	RP_D(const NintendoDS);
 	uint32_t ret = 0;
@@ -1023,20 +896,38 @@ uint32_t NintendoDS::imgpf(ImageType imageType) const
 int NintendoDS::loadFieldData(void)
 {
 	RP_D(NintendoDS);
-	if (d->fields->isDataLoaded()) {
+	if (!d->fields->empty()) {
 		// Field data *has* been loaded...
 		return 0;
 	} else if (!d->file) {
 		// File isn't open.
 		return -EBADF;
-	} else if (!d->isValid || d->romType < 0) {
+	} else if (!d->isValid || (int)d->romType < 0) {
 		// ROM image isn't valid.
 		return -EIO;
 	}
 
+#ifdef _WIN32
+	// Windows: 6 visible rows per RFT_LISTDATA.
+	static const int rows_visible = 6;
+#else
+	// Linux: 4 visible rows per RFT_LISTDATA.
+	static const int rows_visible = 4;
+#endif
+
 	// Nintendo DS ROM header.
 	const NDS_RomHeader *const romHeader = &d->romHeader;
-	d->fields->reserve(13);	// Maximum of 13 fields.
+	const bool hasDSi = !!(romHeader->unitcode & NintendoDSPrivate::DS_HW_DSi);
+	if (hasDSi) {
+		// DSi-enhanced or DSi-exclusive.
+		d->fields->reserve(10+7);
+	} else {
+		// NDS only.
+		d->fields->reserve(10);
+	}
+
+	// NDS common fields.
+	d->fields->setTabName(0, "NDS");
 
 	// Type.
 	// TODO:
@@ -1044,13 +935,14 @@ int NintendoDS::loadFieldData(void)
 	//   Reference: http://imrannazar.com/The-Smallest-NDS-File
 	// - Show IR cart and/or other accessories? (NAND ROM, etc.)
 	const char *nds_romType;
+	const uint16_t dsi_filetype = le16_to_cpu(romHeader->dsi.title_id.catID);
 	if (d->cia || ((romHeader->unitcode & NintendoDSPrivate::DS_HW_DSi) &&
-		romHeader->dsi.filetype != DSi_FTYPE_CARTRIDGE))
+		dsi_filetype != DSi_FTYPE_CARTRIDGE))
 	{
 		// DSiWare.
 		// TODO: Verify games that are available as both
 		// cartridge and DSiWare.
-		if (romHeader->dsi.filetype == DSi_FTYPE_DSiWARE) {
+		if (dsi_filetype == DSi_FTYPE_DSiWARE) {
 			nds_romType = "DSiWare";
 		} else {
 			nds_romType = "DSi System Software";
@@ -1058,7 +950,7 @@ int NintendoDS::loadFieldData(void)
 	} else {
 		// TODO: Identify NDS Download Play titles.
 		switch (d->romType) {
-			case NintendoDSPrivate::ROM_NDS_SLOT2:
+			case NintendoDSPrivate::RomType::NDS_Slot2:
 				nds_romType = "Slot-2 (PassMe)";
 				break;
 			default:
@@ -1068,45 +960,105 @@ int NintendoDS::loadFieldData(void)
 	}
 	d->fields->addField_string(C_("NintendoDS", "Type"), nds_romType);
 
-	// Game title.
-	d->fields->addField_string(C_("NintendoDS", "Title"),
+	// Title.
+	d->fields->addField_string(C_("RomData", "Title"),
 		latin1_to_utf8(romHeader->title, ARRAY_SIZE(romHeader->title)));
 
-	// Full game title.
-	// TODO: Where should this go?
-	int lang = d->getTitleIndex();
-	if (lang >= 0 && lang < ARRAY_SIZE(d->nds_icon_title.title)) {
-		d->fields->addField_string(C_("NintendoDS", "Full Title"),
-			utf16le_to_utf8(d->nds_icon_title.title[lang],
-				ARRAY_SIZE(d->nds_icon_title.title[lang])));
+	if (!d->nds_icon_title_loaded) {
+		// Attempt to load the icon/title data.
+		const_cast<NintendoDSPrivate*>(d)->loadIconTitleData();
+	}
+	if (d->nds_icon_title_loaded) {
+		// Full title: Check if English is valid.
+		// If it is, we'll de-duplicate fields.
+		bool dedupe_titles = (d->nds_icon_title.title[NDS_LANG_ENGLISH][0] != cpu_to_le16(0));
+
+		// Full title field.
+		RomFields::StringMultiMap_t *const pMap_full_title = new RomFields::StringMultiMap_t();
+		const NDS_Language_ID maxID = d->getMaxSupportedLanguage(
+			le16_to_cpu(d->nds_icon_title.version));
+		for (int langID = 0; langID <= maxID; langID++) {
+			// Check for empty strings first.
+			if (d->nds_icon_title.title[langID][0] == 0) {
+				// Strings are empty.
+				continue;
+			}
+
+			if (dedupe_titles && langID != NDS_LANG_ENGLISH) {
+				// Check if the title matches English.
+				// NOTE: Not converting to host-endian first, since
+				// u16_strncmp() checks for equality and for 0.
+				if (!u16_strncmp(d->nds_icon_title.title[langID],
+						d->nds_icon_title.title[NDS_LANG_ENGLISH],
+						ARRAY_SIZE(d->nds_icon_title.title[NDS_LANG_ENGLISH])))
+				{
+					// Full title field matches English.
+					continue;
+				}
+			}
+
+			const uint32_t lc = NintendoLanguage::getNDSLanguageCode(langID, maxID);
+			assert(lc != 0);
+			if (lc == 0)
+				continue;
+
+			if (d->nds_icon_title.title[langID][0] != cpu_to_le16('\0')) {
+				pMap_full_title->insert(std::make_pair(lc,
+					utf16_to_utf8(
+						d->nds_icon_title.title[langID],
+						ARRAY_SIZE(d->nds_icon_title.title[langID]))));
+			}
+		}
+
+		if (!pMap_full_title->empty()) {
+			const uint32_t def_lc = d->getDefaultLC();
+			d->fields->addField_string_multi(C_("NintendoDS", "Full Title"), pMap_full_title, def_lc);
+		} else {
+			delete pMap_full_title;
+		}
 	}
 
-	// Game ID and publisher.
-	d->fields->addField_string(C_("NintendoDS", "Game ID"),
+	// Game ID.
+	d->fields->addField_string(C_("RomData", "Game ID"),
 		latin1_to_utf8(romHeader->id6, ARRAY_SIZE(romHeader->id6)));
 
-	// Look up the publisher.
-	const char *publisher = NintendoPublishers::lookup(romHeader->company);
-	d->fields->addField_string(C_("NintendoDS", "Publisher"),
-		publisher ? publisher : C_("NintendoDS", "Unknown"));
+	// Publisher.
+	const char *const publisher_title = C_("RomData", "Publisher");
+	const char *const publisher = NintendoPublishers::lookup(romHeader->company);
+	if (publisher) {
+		d->fields->addField_string(publisher_title, publisher);
+	} else {
+		if (ISALNUM(romHeader->company[0]) && ISALNUM(romHeader->company[1])) {
+			d->fields->addField_string(publisher_title,
+				rp_sprintf(C_("RomData", "Unknown (%.2s)"), romHeader->company));
+		} else {
+			d->fields->addField_string(publisher_title,
+				rp_sprintf(C_("RomData", "Unknown (%02X %02X)"),
+					romHeader->company[0], romHeader->company[1]));
+		}
+	}
 
 	// ROM version.
-	d->fields->addField_string_numeric(C_("NintendoDS", "Revision"),
-		romHeader->rom_version, RomFields::FB_DEC, 2);
+	d->fields->addField_string_numeric(C_("RomData", "Revision"),
+		romHeader->rom_version, RomFields::Base::Dec, 2);
 
-	// Is this a Mask ROM?
-	// TODO: Better way to represent a boolean.
-	d->fields->addField_string(C_("NintendoDS", "Mask ROM"),
-		d->checkNDSMaskROMArea() ? "Yes" : "No");
+	// Is the security data present?
+	static const char *const nds_security_data_names[] = {
+		NOP_C_("NintendoDS|SecurityData", "Blowfish Tables"),
+		NOP_C_("NintendoDS|SecurityData", "Static Data"),
+		NOP_C_("NintendoDS|SecurityData", "Random Data"),
+	};
+	vector<string> *const v_nds_security_data_names = RomFields::strArrayToVector_i18n(
+		"NintendoDS|SecurityData", nds_security_data_names, ARRAY_SIZE(nds_security_data_names));
+	d->fields->addField_bitfield(C_("NintendoDS", "Security Data"),
+		v_nds_security_data_names, 0, d->secData);
+	d->fieldIdx_secData = static_cast<int>(d->fields->count()-1);
 
 	// Secure Area.
 	// TODO: Verify the CRC.
-	const char *secure_area = d->checkNDSSecureArea();
-	if (secure_area) {
-		d->fields->addField_string(C_("NintendoDS", "Secure Area"), secure_area);
-	} else {
-		d->fields->addField_string(C_("NintendoDS", "Secure Area"), C_("NintendoDS", "Unknown"));
-	}
+	d->fields->addField_string(C_("NintendoDS", "Secure Area"),
+		d->getNDSSecureAreaString());
+	d->fieldIdx_secArea = static_cast<int>(d->fields->count()-1);
 
 	// Hardware type.
 	// NOTE: DS_HW_DS is inverted bit0; DS_HW_DSi is normal bit1.
@@ -1116,144 +1068,317 @@ int NintendoDS::loadFieldData(void)
 		hw_type = NintendoDSPrivate::DS_HW_DS;
 	}
 
-	if (!d->cia) {
-		static const char *const hw_bitfield_names[] = {
-			"Nintendo DS", "Nintendo DSi"
-		};
-		vector<string> *v_hw_bitfield_names = RomFields::strArrayToVector(
-			hw_bitfield_names, ARRAY_SIZE(hw_bitfield_names));
-		d->fields->addField_bitfield(C_("NintendoDS", "Hardware"),
-			v_hw_bitfield_names, 0, hw_type);
+	static const char *const hw_bitfield_names[] = {
+		"Nintendo DS", "Nintendo DSi"
+	};
+	vector<string> *const v_hw_bitfield_names = RomFields::strArrayToVector(
+		hw_bitfield_names, ARRAY_SIZE(hw_bitfield_names));
+	d->fields->addField_bitfield(C_("NintendoDS", "Hardware"),
+		v_hw_bitfield_names, 0, hw_type);
 
-		// NDS Region.
-		// Only used for region locking on Chinese iQue DS consoles.
-		// Not displayed for DSiWare wrapped in 3DS CIA packages.
-		uint32_t nds_region = 0;
-		if (romHeader->nds_region & 0x80) {
-			nds_region |= NintendoDSPrivate::NDS_REGION_CHINA;
-		}
-		if (romHeader->nds_region & 0x40) {
-			nds_region |= NintendoDSPrivate::NDS_REGION_SKOREA;
-		}
-		if (nds_region == 0) {
-			// No known region flags.
-			// Note that the Sonic Colors demo has 0x02 here.
-			nds_region = NintendoDSPrivate::NDS_REGION_FREE;
-		}
-
-		static const char *const nds_region_bitfield_names[] = {
-			NOP_C_("Region", "Region-Free"),
-			NOP_C_("Region", "South Korea"),
-			NOP_C_("Region", "China"),
-		};
-		vector<string> *v_nds_region_bitfield_names = RomFields::strArrayToVector_i18n(
-			"Region", nds_region_bitfield_names, ARRAY_SIZE(nds_region_bitfield_names));
-		d->fields->addField_bitfield("DS Region",
-			v_nds_region_bitfield_names, 0, nds_region);
+	// NDS Region.
+	// Only used for region locking on Chinese iQue DS consoles.
+	// Not displayed for DSiWare wrapped in 3DS CIA packages.
+	uint32_t nds_region = 0;
+	if (romHeader->nds_region & 0x80) {
+		nds_region |= NintendoDSPrivate::NDS_REGION_CHINA;
+	}
+	if (romHeader->nds_region & 0x40) {
+		nds_region |= NintendoDSPrivate::NDS_REGION_SKOREA;
+	}
+	if (nds_region == 0) {
+		// No known region flags.
+		// Note that the Sonic Colors demo has 0x02 here.
+		nds_region = NintendoDSPrivate::NDS_REGION_FREE;
 	}
 
-	if (hw_type & NintendoDSPrivate::DS_HW_DSi) {
-		// DSi-specific fields.
-		const char *const region_code_name = (d->cia
-				? C_("NintendoDS", "Region Code")
-				: C_("NintendoDS", "DSi Region"));
+	static const char *const nds_region_bitfield_names[] = {
+		NOP_C_("Region", "Region-Free"),
+		NOP_C_("Region", "South Korea"),
+		NOP_C_("Region", "China"),
+	};
+	vector<string> *const v_nds_region_bitfield_names = RomFields::strArrayToVector_i18n(
+		"Region", nds_region_bitfield_names, ARRAY_SIZE(nds_region_bitfield_names));
+	d->fields->addField_bitfield(C_("NintendoDS", "DS Region Code"),
+		v_nds_region_bitfield_names, 0, nds_region);
 
-		// DSi Region.
-		// Maps directly to the header field.
-		static const char *const dsi_region_bitfield_names[] = {
-			NOP_C_("Region", "Japan"),
-			NOP_C_("Region", "USA"),
-			NOP_C_("Region", "Europe"),
-			NOP_C_("Region", "Australia"),
-			NOP_C_("Region", "China"),
-			NOP_C_("Region", "South Korea"),
-		};
-		vector<string> *v_dsi_region_bitfield_names = RomFields::strArrayToVector_i18n(
-			"Region", dsi_region_bitfield_names, ARRAY_SIZE(dsi_region_bitfield_names));
-		d->fields->addField_bitfield(region_code_name,
-			v_dsi_region_bitfield_names, 3, le32_to_cpu(romHeader->dsi.region_code));
-
-		// Title ID.
-		d->fields->addField_string(C_("NintendoDS", "Title ID"),
-			rp_sprintf("%08X-%08X",
-				le32_to_cpu(romHeader->dsi.title_id.hi),
-				le32_to_cpu(romHeader->dsi.title_id.lo)));
-
-		// DSi filetype.
-		// TODO: String table?
-		const char *filetype = nullptr;
-		switch (romHeader->dsi.filetype) {
-			case DSi_FTYPE_CARTRIDGE:
-				filetype = C_("NintendoDS", "Cartridge");
-				break;
-			case DSi_FTYPE_DSiWARE:
-				filetype = C_("NintendoDS", "DSiWare");
-				break;
-			case DSi_FTYPE_SYSTEM_FUN_TOOL:
-				filetype = C_("NintendoDS", "System Fun Tool");
-				break;
-			case DSi_FTYPE_NONEXEC_DATA:
-				filetype = C_("NintendoDS", "Non-Executable Data File");
-				break;
-			case DSi_FTYPE_SYSTEM_BASE_TOOL:
-				filetype = C_("NintendoDS", "System Base Tool");
-				break;
-			case DSi_FTYPE_SYSTEM_MENU:
-				filetype = C_("NintendoDS", "System Menu");
-				break;
-			default:
-				break;
+	if (!(hw_type & NintendoDSPrivate::DS_HW_DSi)) {
+		// Not a DSi-enhanced or DSi-exclusive ROM image.
+		if (romHeader->dsi.flags != 0) {
+			// DSi flags.
+			// NOTE: These are present in NDS games released after the DSi,
+			// even if the game isn't DSi-enhanced.
+			d->fields->addTab("DSi");
+			auto vv_dsi_flags = d->getDSiFlagsStringVector();
+			RomFields::AFLD_PARAMS params(RomFields::RFT_LISTDATA_CHECKBOXES, 8);
+			params.headers = nullptr;
+			params.data.single = vv_dsi_flags;
+			params.mxd.checkboxes = romHeader->dsi.flags;
+			d->fields->addField_listData(C_("NintendoDS", "Flags"), &params);
 		}
-
-		// TODO: Is the field name too long?
-		if (filetype) {
-			d->fields->addField_string(C_("NintendoDS", "DSi ROM Type"), filetype);
-		} else {
-			// Invalid file type.
-			d->fields->addField_string(C_("NintendoDS", "DSi ROM Type"),
-				rp_sprintf(C_("NintendoDS", "Unknown (0x%02X)"), romHeader->dsi.filetype));
-		}
-
-		// Age rating(s).
-		// Note that not all 16 fields are present on DSi,
-		// though the fields do match exactly, so no
-		// mapping is necessary.
-		RomFields::age_ratings_t age_ratings;
-		// Valid ratings: 0-1, 3-9
-		// TODO: Not sure if Finland is valid for DSi.
-		static const uint16_t valid_ratings = 0x3FB;
-
-		for (int i = (int)age_ratings.size()-1; i >= 0; i--) {
-			if (!(valid_ratings & (1 << i))) {
-				// Rating is not applicable for NintendoDS.
-				age_ratings[i] = 0;
-				continue;
-			}
-
-			// DSi ratings field:
-			// - 0x1F: Age rating.
-			// - 0x40: Prohibited in area. (TODO: Verify)
-			// - 0x80: Rating is valid if set.
-			const uint8_t dsi_rating = romHeader->dsi.age_ratings[i];
-			if (!(dsi_rating & 0x80)) {
-				// Rating is unused.
-				age_ratings[i] = 0;
-				continue;
-			}
-
-			// Set active | age value.
-			age_ratings[i] = RomFields::AGEBF_ACTIVE | (dsi_rating & 0x1F);
-
-			// Is the game prohibited?
-			if (dsi_rating & 0x40) {
-				age_ratings[i] |= RomFields::AGEBF_PROHIBITED;
-			}
-		}
-		d->fields->addField_ageRatings(C_("NintendoDS", "Age Rating"), age_ratings);
+		return static_cast<int>(d->fields->count());
 	}
+
+	/** DSi-specific fields. **/
+	d->fields->addTab("DSi");
+
+	// Title ID.
+	const uint32_t tid_hi = le32_to_cpu(romHeader->dsi.title_id.hi);
+	d->fields->addField_string(C_("NintendoDS", "Title ID"),
+		rp_sprintf("%08X-%08X",
+			tid_hi, le32_to_cpu(romHeader->dsi.title_id.lo)));
+
+	// DSi filetype.
+	static const struct {
+		uint8_t dsi_filetype;
+		const char *s_dsi_filetype;
+	} dsi_filetype_lkup_tbl[] = {
+		// tr: DSi-enhanced or DSi-exclusive cartridge.
+		{DSi_FTYPE_CARTRIDGE,		NOP_C_("NintendoDS|DSiFileType", "Cartridge")},
+		// tr: DSiWare (download-only title)
+		{DSi_FTYPE_DSiWARE,		NOP_C_("NintendoDS|DSiFileType", "DSiWare")},
+		// tr: DSi_FTYPE_SYSTEM_FUN_TOOL
+		{DSi_FTYPE_SYSTEM_FUN_TOOL,	NOP_C_("NintendoDS|DSiFileType", "System Fun Tool")},
+		// tr: Data file, e.g. DS cartridge whitelist.
+		{DSi_FTYPE_NONEXEC_DATA,	NOP_C_("NintendoDS|DSiFileType", "Non-Executable Data File")},
+		// tr: DSi_FTYPE_SYSTEM_BASE_TOOL
+		{DSi_FTYPE_SYSTEM_BASE_TOOL,	NOP_C_("NintendoDS|DSiFileType", "System Base Tool")},
+		// tr: System Menu
+		{DSi_FTYPE_SYSTEM_MENU,		NOP_C_("NintendoDS|DSiFileType", "System Menu")},
+
+		{0, nullptr}
+	};
+
+	const char *s_dsi_filetype = nullptr;
+	for (const auto *p = dsi_filetype_lkup_tbl; p->s_dsi_filetype != nullptr; p++) {
+		if (p->dsi_filetype == dsi_filetype) {
+			// Found a match.
+			s_dsi_filetype = p->s_dsi_filetype;
+			break;
+		}
+	}
+
+	// TODO: Is the field name too long?
+	const char *const dsi_rom_type_title = C_("NintendoDS", "DSi ROM Type");
+	if (s_dsi_filetype) {
+		d->fields->addField_string(dsi_rom_type_title,
+			dpgettext_expr(RP_I18N_DOMAIN, "NintendoDS|DSiFileType", s_dsi_filetype));
+	} else {
+		// Invalid file type.
+		d->fields->addField_string(dsi_rom_type_title,
+			rp_sprintf(C_("RomData", "Unknown (0x%02X)"), dsi_filetype));
+	}
+
+	// Key index. Determined by title ID.
+	int key_idx;
+	if (tid_hi & 0x00000010) {
+		// System application.
+		key_idx = 2;
+	} else if (tid_hi & 0x00000001) {
+		// Applet.
+		key_idx = 1;
+	} else {
+		// Cartridge and/or DSiWare.
+		key_idx = 3;
+	}
+
+	// TODO: Keyset is determined by the system.
+	// There might be some indicator in the cartridge header...
+	d->fields->addField_string_numeric(C_("NintendoDS", "Key Index"), key_idx);
+
+	const char *const region_code_name = (d->cia
+			? C_("RomData", "Region Code")
+			: C_("NintendoDS", "DSi Region Code"));
+
+	// DSi Region.
+	// Maps directly to the header field.
+	static const char *const dsi_region_bitfield_names[] = {
+		NOP_C_("Region", "Japan"),
+		NOP_C_("Region", "USA"),
+		NOP_C_("Region", "Europe"),
+		NOP_C_("Region", "Australia"),
+		NOP_C_("Region", "China"),
+		NOP_C_("Region", "South Korea"),
+	};
+	vector<string> *const v_dsi_region_bitfield_names = RomFields::strArrayToVector_i18n(
+		"Region", dsi_region_bitfield_names, ARRAY_SIZE(dsi_region_bitfield_names));
+	d->fields->addField_bitfield(region_code_name,
+		v_dsi_region_bitfield_names, 3, le32_to_cpu(romHeader->dsi.region_code));
+
+	// Age rating(s).
+	// Note that not all 16 fields are present on DSi,
+	// though the fields do match exactly, so no
+	// mapping is necessary.
+	RomFields::age_ratings_t age_ratings;
+	// Valid ratings: 0-1, 3-9
+	// TODO: Not sure if Finland is valid for DSi.
+	static const uint16_t valid_ratings = 0x3FB;
+
+	for (int i = static_cast<int>(age_ratings.size())-1; i >= 0; i--) {
+		if (!(valid_ratings & (1U << i))) {
+			// Rating is not applicable for NintendoDS.
+			age_ratings[i] = 0;
+			continue;
+		}
+
+		// DSi ratings field:
+		// - 0x1F: Age rating.
+		// - 0x40: Prohibited in area. (TODO: Verify)
+		// - 0x80: Rating is valid if set.
+		const uint8_t dsi_rating = romHeader->dsi.age_ratings[i];
+		if (!(dsi_rating & 0x80)) {
+			// Rating is unused.
+			age_ratings[i] = 0;
+			continue;
+		}
+
+		// Set active | age value.
+		age_ratings[i] = RomFields::AGEBF_ACTIVE | (dsi_rating & 0x1F);
+
+		// Is the game prohibited?
+		if (dsi_rating & 0x40) {
+			age_ratings[i] |= RomFields::AGEBF_PROHIBITED;
+		}
+	}
+	d->fields->addField_ageRatings(C_("RomData", "Age Ratings"), age_ratings);
+
+	// Permissions and flags.
+	d->fields->addTab("Permissions");
+
+	// Permissions.
+	static const char *const dsi_permissions_bitfield_names[] = {
+		NOP_C_("NintendoDS|DSi_Permissions", "Common Key"),
+		NOP_C_("NintendoDS|DSi_Permissions", "AES Slot B"),
+		NOP_C_("NintendoDS|DSi_Permissions", "AES Slot C"),
+		NOP_C_("NintendoDS|DSi_Permissions", "SD Card"),
+		NOP_C_("NintendoDS|DSi_Permissions", "eMMC Access"),
+		NOP_C_("NintendoDS|DSi_Permissions", "Game Card Power On"),
+		NOP_C_("NintendoDS|DSi_Permissions", "Shared2 File"),
+		NOP_C_("NintendoDS|DSi_Permissions", "Sign JPEG for Launcher"),
+		NOP_C_("NintendoDS|DSi_Permissions", "Game Card NTR Mode"),
+		NOP_C_("NintendoDS|DSi_Permissions", "SSL Client Cert"),
+		NOP_C_("NintendoDS|DSi_Permissions", "Sign JPEG for User"),
+		NOP_C_("NintendoDS|DSi_Permissions", "Photo Read Access"),
+		NOP_C_("NintendoDS|DSi_Permissions", "Photo Write Access"),
+		NOP_C_("NintendoDS|DSi_Permissions", "SD Card Read Access"),
+		NOP_C_("NintendoDS|DSi_Permissions", "SD Card Write Access"),
+		NOP_C_("NintendoDS|DSi_Permissions", "Game Card Save Read Access"),
+		NOP_C_("NintendoDS|DSi_Permissions", "Game Card Save Write Access"),
+
+		// FIXME: How to handle unused entries for RFT_LISTDATA?
+		/*
+		// Bits 17-30 are not used.
+		nullptr, nullptr, nullptr,
+		nullptr, nullptr, nullptr, nullptr,
+		nullptr, nullptr, nullptr, nullptr,
+		nullptr, nullptr, nullptr,
+
+		NOP_C_("NintendoDS|DSi_Permissions", "Debug Key"),
+		*/
+	};
+
+	// Convert to RomFields::ListData_t for RFT_LISTDATA.
+	auto vv_dsi_perm = new RomFields::ListData_t(ARRAY_SIZE(dsi_permissions_bitfield_names));
+	for (int i = ARRAY_SIZE(dsi_permissions_bitfield_names)-1; i >= 0; i--) {
+		auto &data_row = vv_dsi_perm->at(i);
+		data_row.emplace_back(
+			dpgettext_expr(RP_I18N_DOMAIN, "NintendoDS|DSi_Permissions",
+				dsi_permissions_bitfield_names[i]));
+	}
+
+	RomFields::AFLD_PARAMS params(RomFields::RFT_LISTDATA_CHECKBOXES, rows_visible);
+	params.headers = nullptr;
+	params.data.single = vv_dsi_perm;
+	params.mxd.checkboxes = le32_to_cpu(romHeader->dsi.access_control);
+	d->fields->addField_listData(C_("NintendoDS", "Permissions"), &params);
+
+	// DSi flags.
+	auto vv_dsi_flags = d->getDSiFlagsStringVector();
+	params.headers = nullptr;
+	params.data.single = vv_dsi_flags;
+	params.mxd.checkboxes = romHeader->dsi.flags;
+	d->fields->addField_listData(C_("NintendoDS", "Flags"), &params);
 
 	// Finished reading the field data.
-	return (int)d->fields->count();
+	return static_cast<int>(d->fields->count());
+}
+
+/**
+ * Load metadata properties.
+ * Called by RomData::metaData() if the field data hasn't been loaded yet.
+ * @return Number of metadata properties read on success; negative POSIX error code on error.
+ */
+int NintendoDS::loadMetaData(void)
+{
+	RP_D(NintendoDS);
+	if (d->metaData != nullptr) {
+		// Metadata *has* been loaded...
+		return 0;
+	} else if (!d->file) {
+		// File isn't open.
+		return -EBADF;
+	} else if (!d->isValid || (int)d->romType < 0) {
+		// ROM image isn't valid.
+		return -EIO;
+	}
+
+	// Create the metadata object.
+	d->metaData = new RomMetaData();
+	d->metaData->reserve(2);	// Maximum of 2 metadata properties.
+
+	// ROM header is read in the constructor.
+	const NDS_RomHeader *const romHeader = &d->romHeader;
+
+	// Title.
+	string s_title;
+	if (!d->nds_icon_title_loaded) {
+		// Attempt to load the icon/title data.
+		const_cast<NintendoDSPrivate*>(d)->loadIconTitleData();
+	}
+	if (d->nds_icon_title_loaded) {
+		// Full title.
+		// TODO: Use the default LC if it's available.
+		// For now, default to English.
+		if (d->nds_icon_title.title[NDS_LANG_ENGLISH][0] != cpu_to_le16(0)) {
+			s_title = utf16_to_utf8(d->nds_icon_title.title[NDS_LANG_ENGLISH],
+			                        ARRAY_SIZE(d->nds_icon_title.title[NDS_LANG_ENGLISH]));
+
+			// Adjust the title based on the number of lines.
+			size_t nl_1 = s_title.find('\n');
+			if (nl_1 != string::npos) {
+				// Found the first newline.
+				size_t nl_2 = s_title.find('\n', nl_1+1);
+				if (nl_2 != string::npos) {
+					// Found the second newline.
+					// Change the first to a space, and remove the third line.
+					s_title[nl_1] = ' ';
+					s_title.resize(nl_2);
+				} else {
+					// Only two lines.
+					// Remove the second line.
+					s_title.resize(nl_1);
+				}
+			}
+		}
+	}
+
+	if (s_title.empty()) {
+		// Full title is not available.
+		// Use the short title from the NDS header.
+		s_title = latin1_to_utf8(romHeader->title, ARRAY_SIZE(romHeader->title));
+	}
+
+	d->metaData->addMetaData_string(Property::Title, s_title);
+
+	// Publisher.
+	// TODO: Use publisher from the full title?
+	const char *const publisher = NintendoPublishers::lookup(romHeader->company);
+	d->metaData->addMetaData_string(Property::Publisher,
+		publisher ? publisher :
+			rp_sprintf(C_("RomData", "Unknown (%.2s)"), romHeader->company));
+
+	// Finished reading the metadata.
+	return static_cast<int>(d->metaData->count());
 }
 
 /**
@@ -1265,39 +1390,15 @@ int NintendoDS::loadFieldData(void)
  */
 int NintendoDS::loadInternalImage(ImageType imageType, const rp_image **pImage)
 {
-	assert(imageType >= IMG_INT_MIN && imageType <= IMG_INT_MAX);
-	assert(pImage != nullptr);
-	if (!pImage) {
-		// Invalid parameters.
-		return -EINVAL;
-	} else if (imageType < IMG_INT_MIN || imageType > IMG_INT_MAX) {
-		// ImageType is out of range.
-		*pImage = nullptr;
-		return -ERANGE;
-	}
-
+	ASSERT_loadInternalImage(imageType, pImage);
 	RP_D(NintendoDS);
-	if (imageType != IMG_INT_ICON) {
-		// Only IMG_INT_ICON is supported by DS.
-		*pImage = nullptr;
-		return -ENOENT;
-	} else if (d->icon_first_frame) {
-		// Image has already been loaded.
-		*pImage = d->icon_first_frame;
-		return 0;
-	} else if (!d->file) {
-		// File isn't open.
-		*pImage = nullptr;
-		return -EBADF;
-	} else if (!d->isValid || d->romType < 0) {
-		// ROM image isn't valid.
-		*pImage = nullptr;
-		return -EIO;
-	}
-
-	// Load the icon.
-	*pImage = d->loadIcon();
-	return (*pImage != nullptr ? 0 : -EIO);
+	ROMDATA_loadInternalImage_single(
+		IMG_INT_ICON,		// ourImageType
+		d->file,		// file
+		d->isValid,		// isValid
+		d->romType,		// romType
+		d->icon_first_frame,	// imgCache
+		d->loadIcon);		// func
 }
 
 /**
@@ -1305,6 +1406,9 @@ int NintendoDS::loadInternalImage(ImageType imageType, const rp_image **pImage)
  *
  * Check imgpf for IMGPF_ICON_ANIMATED first to see if this
  * object has an animated icon.
+ *
+ * The retrieved IconAnimData must be ref()'d by the caller if the
+ * caller stores it instead of using it immediately.
  *
  * @return Animated icon data, or nullptr if no animated icon is present.
  */
@@ -1349,40 +1453,31 @@ const IconAnimData *NintendoDS::iconAnimData(void) const
  */
 int NintendoDS::extURLs(ImageType imageType, vector<ExtURL> *pExtURLs, int size) const
 {
-	assert(imageType >= IMG_EXT_MIN && imageType <= IMG_EXT_MAX);
-	if (imageType < IMG_EXT_MIN || imageType > IMG_EXT_MAX) {
-		// ImageType is out of range.
-		return -ERANGE;
-	}
-	assert(pExtURLs != nullptr);
-	if (!pExtURLs) {
-		// No vector.
-		return -EINVAL;
-	}
+	ASSERT_extURLs(imageType, pExtURLs);
 	pExtURLs->clear();
 
 	// Check for DS ROMs that don't have boxart.
 	RP_D(const NintendoDS);
-	if (!memcmp(d->romHeader.id4, "NTRJ", 4) ||
-	    !memcmp(d->romHeader.id4, "####", 4))
+	if (!d->isValid || (int)d->romType < 0) {
+		// ROM image isn't valid.
+		return -EIO;
+	} else if (!memcmp(d->romHeader.id4, "NTRJ", 4) ||
+	           !memcmp(d->romHeader.id4, "####", 4))
 	{
 		// This is either a prototype, a download demo, or homebrew.
 		// No external images are available.
 		return -ENOENT;
-	} else if ((d->romHeader.unitcode & NintendoDSPrivate::DS_HW_DSi) &&
-		d->romHeader.dsi.filetype != DSi_FTYPE_CARTRIDGE)
-	{
-		// This is a DSi SRL that isn't a cartridge dump.
-		// No external images are available.
-		return -ENOENT;
 	}
 
-	if (!d->file || !d->file->isOpen()) {
-		// File isn't open.
-		return -EBADF;
-	} else if (!d->isValid || d->romType < 0) {
-		// ROM image isn't valid.
-		return -EIO;
+	if (d->romHeader.unitcode & NintendoDSPrivate::DS_HW_DSi) {
+		// Check for DSi SRLs that aren't cartridge dumps.
+		// TODO: Does GameTDB have DSiWare covers?
+		const uint16_t dsi_filetype = le16_to_cpu(d->romHeader.dsi.title_id.catID);
+		if (dsi_filetype != DSi_FTYPE_CARTRIDGE) {
+			// Not a cartridge dump.
+			// No external images are available.
+			return -ENOENT;
+		}
 	}
 
 	// Get the image sizes and sort them based on the
@@ -1394,7 +1489,7 @@ int NintendoDS::extURLs(ImageType imageType, vector<ExtURL> *pExtURLs, int size)
 	}
 
 	// Select the best size.
-	const ImageSizeDef *sizeDef = d->selectBestSize(sizeDefs, size);
+	const ImageSizeDef *const sizeDef = d->selectBestSize(sizeDefs, size);
 	if (!sizeDef) {
 		// No size available...
 		return -ENOENT;
@@ -1429,20 +1524,11 @@ int NintendoDS::extURLs(ImageType imageType, vector<ExtURL> *pExtURLs, int size)
 			return -ENOENT;
 	}
 
-	// Determine the GameTDB region code(s).
-	vector<const char*> tdb_regions = d->ndsRegionToGameTDB(
-		d->romHeader.nds_region,
-		((d->romHeader.unitcode & NintendoDSPrivate::DS_HW_DSi)
-			? le32_to_cpu(d->romHeader.dsi.region_code)
-			: 0 /* not a DSi-enhanced/exclusive ROM */
-			),
-		d->romHeader.id4[3]);
-
 	// Game ID. (GameTDB uses ID4 for Nintendo DS.)
 	// The ID4 cannot have non-printable characters.
 	char id4[5];
 	for (int i = ARRAY_SIZE(d->romHeader.id4)-1; i >= 0; i--) {
-		if (!isprint(d->romHeader.id4[i])) {
+		if (!ISPRINT(d->romHeader.id4[i])) {
 			// Non-printable character found.
 			return -ENOENT;
 		}
@@ -1451,6 +1537,15 @@ int NintendoDS::extURLs(ImageType imageType, vector<ExtURL> *pExtURLs, int size)
 	// NULL-terminated ID4 is needed for the
 	// GameTDB URL functions.
 	id4[4] = 0;
+
+	// Determine the GameTDB region code(s).
+	vector<const char*> tdb_regions = d->ndsRegionToGameTDB(
+		d->romHeader.nds_region,
+		((d->romHeader.unitcode & NintendoDSPrivate::DS_HW_DSi)
+			? le32_to_cpu(d->romHeader.dsi.region_code)
+			: 0 /* not a DSi-enhanced/exclusive ROM */
+			),
+		d->romHeader.id4[3]);
 
 	// If we're downloading a "high-resolution" image (M or higher),
 	// also add the default image to ExtURLs in case the user has
@@ -1468,7 +1563,9 @@ int NintendoDS::extURLs(ImageType imageType, vector<ExtURL> *pExtURLs, int size)
 	}
 
 	// Add the URLs.
-	pExtURLs->reserve(4*szdef_count);
+	pExtURLs->resize(szdef_count * tdb_regions.size());
+	auto extURL_iter = pExtURLs->begin();
+	const auto tdb_regions_cend = tdb_regions.cend();
 	for (unsigned int i = 0; i < szdef_count; i++) {
 		// Current image type.
 		char imageTypeName[16];
@@ -1476,21 +1573,49 @@ int NintendoDS::extURLs(ImageType imageType, vector<ExtURL> *pExtURLs, int size)
 			 imageTypeName_base, (szdefs_dl[i]->name ? szdefs_dl[i]->name : ""));
 
 		// Add the images.
-		for (auto iter = tdb_regions.cbegin(); iter != tdb_regions.cend(); ++iter) {
-			int idx = (int)pExtURLs->size();
-			pExtURLs->resize(idx+1);
-			auto &extURL = pExtURLs->at(idx);
-
-			extURL.url = d->getURL_GameTDB("ds", imageTypeName, *iter, id4, ext);
-			extURL.cache_key = d->getCacheKey_GameTDB("ds", imageTypeName, *iter, id4, ext);
-			extURL.width = szdefs_dl[i]->width;
-			extURL.height = szdefs_dl[i]->height;
-			extURL.high_res = (szdefs_dl[i]->index >= 2);
+		for (auto tdb_iter = tdb_regions.cbegin();
+		     tdb_iter != tdb_regions_cend; ++tdb_iter, ++extURL_iter)
+		{
+			extURL_iter->url = d->getURL_GameTDB("ds", imageTypeName, *tdb_iter, id4, ext);
+			extURL_iter->cache_key = d->getCacheKey_GameTDB("ds", imageTypeName, *tdb_iter, id4, ext);
+			extURL_iter->width = szdefs_dl[i]->width;
+			extURL_iter->height = szdefs_dl[i]->height;
+			extURL_iter->high_res = (szdefs_dl[i]->index >= 2);
 		}
 	}
 
 	// All URLs added.
 	return 0;
+}
+
+/**
+ * Does this ROM image have "dangerous" permissions?
+ *
+ * @return True if the ROM image has "dangerous" permissions; false if not.
+ */
+bool NintendoDS::hasDangerousPermissions(void) const
+{
+	// Load permissions.
+	// TODO: If this is DSiWare, check DSiWare permissions?
+	RP_D(const NintendoDS);
+
+	// If Game Card Power On is set, eMMC Access and SD Card must be off.
+	// This combination is normally not found in licensed games,
+	// and is only found in the system menu. Some homebrew titles
+	// might have this set, though.
+	const uint32_t dsi_access_control = le32_to_cpu(d->romHeader.dsi.access_control);
+	if (dsi_access_control & DSi_ACCESS_GAME_CARD_POWER_ON) {
+		// Game Card Power On is set.
+		if (dsi_access_control & (DSi_ACCESS_SD_CARD | DSi_ACCESS_eMMC_ACCESS)) {
+			// SD and/or eMMC is set.
+			// This combination is not allowed by Nintendo, and
+			// usually indicates some sort of homebrew.
+			return true;
+		}
+	}
+
+	// Not dangerous.
+	return false;
 }
 
 }

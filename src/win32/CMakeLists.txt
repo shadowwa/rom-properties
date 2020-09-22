@@ -1,11 +1,38 @@
-PROJECT(rom-properties-win32)
+# Windows UI frontend
+CMAKE_MINIMUM_REQUIRED(VERSION 3.0)
+CMAKE_POLICY(SET CMP0048 NEW)
+IF(POLICY CMP0063)
+	# CMake 3.3: Enable symbol visibility presets for all
+	# target types, including static libraries and executables.
+	CMAKE_POLICY(SET CMP0063 NEW)
+ENDIF(POLICY CMP0063)
+PROJECT(rom-properties-win32 LANGUAGES C CXX)
+
+# Check for Windows SDK headers and symbols.
+INCLUDE(CheckIncludeFiles)
+INCLUDE(CheckSymbolExists)
+INCLUDE(CheckCXXSymbolExists)
+# IThumbnailProvider
+CHECK_INCLUDE_FILES("thumbcache.h" HAVE_THUMBCACHE_H)
+# Property key symbols and functions for RP_PropertyStore
+CHECK_SYMBOL_EXISTS(PKEY_Music_Conductor "windows.h;propvarutil.h;propkey.h" HAVE_PKEY_MUSIC_CONDUCTOR)
+CHECK_CXX_SYMBOL_EXISTS(InitPropVariantFromUInt16 "windows.h;propvarutil.h" HAVE_INITPROPVARIANTFROMUINT16)
+IF(HAVE_PKEY_MUSIC_CONDUCTOR AND HAVE_INITPROPVARIANTFROMUINT16)
+	SET(HAVE_RP_PROPERTYSTORE_DEPS 1)
+ELSE()
+	MESSAGE(WARNING "Windows SDK is missing required IPropertyStore symbols.\nIPropertyStore functionality will not be available.")
+ENDIF()
+
+# Write the config.h file.
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/config.win32.h.in" "${CMAKE_CURRENT_BINARY_DIR}/config.win32.h")
 
 # Create the manifest file.
-CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/rom-properties.dll.manifest.in" "${CMAKE_CURRENT_BINARY_DIR}/rom-properties.dll.manifest" @ONLY)
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/res/rom-properties.dll.manifest.in" "${CMAKE_CURRENT_BINARY_DIR}/res/rom-properties.dll.manifest" @ONLY)
 
 # Sources and headers.
 SET(rom-properties-win32_SRCS
 	DllMain.cpp
+	com-iids.c
 	RP_ExtractIcon.cpp
 	RP_ExtractIcon_Register.cpp
 	RP_ExtractIcon_Fallback.cpp
@@ -19,16 +46,21 @@ SET(rom-properties-win32_SRCS
 	RP_ThumbnailProvider.cpp
 	RP_ThumbnailProvider_Register.cpp
 	RP_ThumbnailProvider_Fallback.cpp
+	RP_ShellIconOverlayIdentifier.cpp
+	RP_ShellIconOverlayIdentifier_Register.cpp
 	CreateThumbnail.cpp
+	DragImageLabel.cpp
+	FontHandler.cpp
+	MessageWidget.cpp
 	config/ConfigDialog.cpp
 	config/PropSheetIcon.cpp
 	config/RP_EmptyVolumeCacheCallback.cpp
+	config/ITab.cpp
 	config/ImageTypesTab.cpp
-	config/DownloadsTab.cpp
+	config/SystemsTab.cpp
+	config/OptionsTab.cpp
 	config/CacheTab.cpp
-	config/KeyStore_OwnerDataCallback.cpp
 	config/AboutTab.cpp
-	resource.rc
 	)
 SET(rom-properties-win32_H
 	RP_ExtractIcon.hpp
@@ -39,42 +71,74 @@ SET(rom-properties-win32_H
 	RpImageWin32.hpp
 	RP_ShellPropSheetExt.hpp
 	RpFile_IStream.hpp
+	thumbcache-wrapper.hpp
 	RP_ThumbnailProvider.hpp
 	RP_ThumbnailProvider_p.hpp
+	RP_ShellIconOverlayIdentifier.hpp
+	RP_ShellIconOverlayIdentifier_p.hpp
 	CreateThumbnail.hpp
+	DragImageLabel.hpp
+	FontHandler.hpp
+	MessageWidget.hpp
 	config/ConfigDialog.hpp
 	config/PropSheetIcon.hpp
 	config/RP_EmptyVolumeCacheCallback.hpp
 	config/ITab.hpp
 	config/ImageTypesTab.hpp
-	config/DownloadsTab.hpp
+	config/SystemsTab.hpp
+	config/OptionsTab.hpp
 	config/CacheTab.hpp
-	config/KeyStore_OwnerDataCallback.hpp
 	config/AboutTab.hpp
-	resource.h
+	res/resource.h
 	)
+SET(rom-properties-win32_RC
+	res/resource.rc
+	res/rp-en_US.rc
+	res/rp-pt_BR.rc
+	)
+
+IF(HAVE_RP_PROPERTYSTORE_DEPS)
+	SET(rom-properties-win32-PropKey_SRCS
+		RP_PropertyStore.cpp
+		RP_PropertyStore_Register.cpp
+		)
+	SET(rom-properties-win32-PropKey_H
+		RP_PropertyStore.hpp
+		RP_PropertyStore_p.hpp
+		)
+ENDIF(HAVE_RP_PROPERTYSTORE_DEPS)
 
 IF(ENABLE_DECRYPTION)
 	SET(rom-properties-win32_CRYPTO_SRCS
 		config/KeyManagerTab.cpp
 		config/KeyStoreWin32.cpp
+		config/KeyStore_OwnerDataCallback.cpp
 		)
 	SET(rom-properties-win32_CRYPTO_H
 		config/KeyManagerTab.hpp
 		config/KeyStoreWin32.hpp
+		config/KeyStore_OwnerDataCallback.hpp
 		)
+	IF(MSVC)
+		SET(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} /dENABLE_DECRYPTION")
+	ELSE(MSVC)
+		SET(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -D ENABLE_DECRYPTION")
+	ENDIF(MSVC)
 ENDIF(ENABLE_DECRYPTION)
 
-IF(MSVC)
+IF(ENABLE_PCH)
 	# Precompiled headers.
-	# NOTE: Only enabling PCH for MSVC builds.
 	INCLUDE(PrecompiledHeader)
-	SET(rom-properties-win32_PCH_SRC stdafx.cpp)
+	SET(rom-properties-win32_PCH_C stdafx.c)
+	SET(rom-properties-win32_PCH_CXX stdafx.cpp)
+	SET(rom-properties-win32_PCH_SRC ${rom-properties-win32_PCH_C} ${rom-properties-win32_PCH_CXX})
 	SET(rom-properties-win32_PCH_H stdafx.h)
+ENDIF(ENABLE_PCH)
 
+IF(MSVC)
 	# Delay-load sources.
-	SET(rom-properties-win32-DELAY_LOAD_SRC ../libwin32common/DelayLoadHelper.cpp)
-	SET(rom-properties-win32-DELAY_LOAD_H ../libwin32common/DelayLoadHelper.hpp)
+	SET(rom-properties-win32-DELAYLOAD_SRC ../libwin32common/DelayLoadHelper.c)
+	SET(rom-properties-win32-DELAYLOAD_H ../libwin32common/DelayLoadHelper.h)
 ENDIF(MSVC)
 
 #####################
@@ -85,28 +149,27 @@ ENDIF(MSVC)
 # NOTE: This must be *before* including the DelayLoad flags.
 ADD_SUBDIRECTORY(config)
 
-IF(MSVC)
-	# Delay-load extlibs.
-	INCLUDE(../libwin32common/DelayLoadHelper.cmake)
-	SET_DELAY_LOAD_FLAGS()
-ENDIF(MSVC)
+# Delay-load extlibs.
+INCLUDE(../libwin32common/DelayLoadHelper.cmake)
+SET_DELAYLOAD_EXTLIB_FLAGS()
 
-# FIXME: Build both Win32 and Win64 DLLs?
 # NOTE: MODULE results in the .dll being placed in
 # the 'lib' directory. Use SHARED instead.
 # TODO: Disable building of import libraries.
 ADD_LIBRARY(rom-properties SHARED
 	${rom-properties-win32_PCH_SRC} ${rom-properties-win32_PCH_H}
-	${rom-properties-win32-DELAY_LOAD_SRC} ${rom-properties-win32-DELAY_LOAD_H}
+	${rom-properties-win32-DELAYLOAD_SRC} ${rom-properties-win32-DELAYLOAD_H}
 	${rom-properties-win32_SRCS} ${rom-properties-win32_H}
+	${rom-properties-win32-PropKey_SRCS} ${rom-properties-win32-PropKey_H}
 	${rom-properties-win32_CRYPTO_SRCS} ${rom-properties-win32_CRYPTO_H}
+	${rom-properties-win32_RC}
 	)
-# NOTE: Only enabling PCH for MSVC.
-IF(MSVC)
+IF(ENABLE_PCH)
 	ADD_PRECOMPILED_HEADER(rom-properties ${rom-properties-win32_PCH_H}
-		SOURCE_CXX ${rom-properties-win32_PCH_SRC}
+		SOURCE_C ${rom-properties-win32_PCH_C}
+		SOURCE_CXX ${rom-properties-win32_PCH_CXX}
 		)
-ENDIF(MSVC)
+ENDIF(ENABLE_PCH)
 SET_TARGET_PROPERTIES(rom-properties PROPERTIES PREFIX "")
 DO_SPLIT_DEBUG(rom-properties)
 SET_WINDOWS_SUBSYSTEM(rom-properties WIN32)
@@ -122,35 +185,43 @@ TARGET_INCLUDE_DIRECTORIES(rom-properties
 		$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>
 		$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
 	)
-TARGET_LINK_LIBRARIES(rom-properties cachemgr romdata rpbase win32common)
-TARGET_LINK_LIBRARIES(rom-properties comctl32 advapi32 wtsapi32)
+TARGET_LINK_LIBRARIES(rom-properties PRIVATE romdata rpfile rpcpu rpbase rpthreads win32common)
+IF(ENABLE_NLS)
+	TARGET_LINK_LIBRARIES(rom-properties PRIVATE i18n)
+ENDIF(ENABLE_NLS)
+TARGET_LINK_LIBRARIES(rom-properties PRIVATE comctl32 advapi32 shell32 gdi32)
+IF(HAVE_RP_PROPERTYSTORE_DEPS)
+	TARGET_LINK_LIBRARIES(rom-properties PRIVATE propsys)
+ENDIF(HAVE_RP_PROPERTYSTORE_DEPS)
 
-# Add zlib and png directories for the About tab.
+# Add zlib, png, and tinyxml2 directories for the About tab.
 IF(HAVE_ZLIB)
 	TARGET_INCLUDE_DIRECTORIES(rom-properties PRIVATE ${ZLIB_INCLUDE_DIRS})
 ENDIF(HAVE_ZLIB)
 IF(HAVE_PNG)
 	TARGET_INCLUDE_DIRECTORIES(rom-properties PRIVATE ${PNG_INCLUDE_DIRS})
 ENDIF(HAVE_PNG)
+IF(HAVE_XML)
+	TARGET_INCLUDE_DIRECTORIES(rom-properties PRIVATE ${TinyXML2_INCLUDE_DIR})
+ENDIF(HAVE_XML)
 
-# Delay-load some Windows system libraries.
-# TODO: MinGW delay-load?
-IF(MSVC)
-	SET(RP_SYS_DELAY_LOAD_FLAGS "/DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll")
-	TARGET_LINK_LIBRARIES(rom-properties delayimp)
-ENDIF(MSVC)
+# Make sure git_version.h is created before compiling this target.
+IF(TARGET git_version)
+	ADD_DEPENDENCIES(rpbase git_version)
+ENDIF(TARGET git_version)
 
 # CMake-3.7.2 doesn't add include paths to windres.
 IF(MINGW)
 	SET(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -I \"${CMAKE_CURRENT_SOURCE_DIR}/..\"")
 	SET(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -I \"${CMAKE_CURRENT_BINARY_DIR}/..\"")
-	SET(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -I \"${CMAKE_BINARY_DIR}\"")
+	SET(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -I \"${CMAKE_CURRENT_BINARY_DIR}\"")
 ENDIF(MINGW)
 
 # Use the .def file for DLL exports.
-# Also add delay-load flags here. (TODO: MinGW?)
 IF(MSVC)
-	SET(RP_DLL_FLAGS "${RP_SYS_DELAY_LOAD_FLAGS} /DEF:${CMAKE_CURRENT_SOURCE_DIR}/rom-properties.def")
+	SET(RP_DLL_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/rom-properties.def")
+	# Extended delay-load functionality.
+	TARGET_LINK_LIBRARIES(rom-properties PRIVATE delayimp)
 ELSEIF(MINGW)
 	# NOTE: Enabling stdcall fixups so we can use
 	# the same .def file for Win32 and Win64,

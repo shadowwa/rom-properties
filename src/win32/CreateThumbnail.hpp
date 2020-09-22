@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (Win32)                            *
  * CreateThumbnail.hpp: TCreateThumbnail<HBITMAP> implementation.          *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_WIN32_CREATETHUMBNAIL_HPP__
@@ -46,34 +33,44 @@ class CreateThumbnail : public LibRomData::TCreateThumbnail<HBITMAP>
 		 * @param img rp_image
 		 * @return ImgClass
 		 */
-		virtual HBITMAP rpImageToImgClass(const LibRpBase::rp_image *img) const override;
+		HBITMAP rpImageToImgClass(const LibRpTexture::rp_image *img) const override;
 
 		/**
 		 * Wrapper function to check if an ImgClass is valid.
 		 * @param imgClass ImgClass
 		 * @return True if valid; false if not.
 		 */
-		virtual bool isImgClassValid(const HBITMAP &imgClass) const override final;
+		inline bool isImgClassValid(const HBITMAP &imgClass) const final
+		{
+			return (imgClass != nullptr);
+		}
 
 		/**
 		 * Wrapper function to get a "null" ImgClass.
 		 * @return "Null" ImgClass.
 		 */
-		virtual HBITMAP getNullImgClass(void) const override final;
+		inline HBITMAP getNullImgClass(void) const final
+		{
+			return nullptr;
+		}
 
 		/**
 		 * Free an ImgClass object.
 		 * @param imgClass ImgClass object.
 		 */
-		virtual void freeImgClass(HBITMAP &imgClass) const override final;
+		inline void freeImgClass(HBITMAP &imgClass) const final
+		{
+			DeleteBitmap(imgClass);
+		}
 
 		/**
-		 * Rescale an ImgClass using nearest-neighbor scaling.
+		 * Rescale an ImgClass using the specified scaling method.
 		 * @param imgClass ImgClass object.
 		 * @param sz New size.
+		 * @param method Scaling method.
 		 * @return Rescaled ImgClass.
 		 */
-		virtual HBITMAP rescaleImgClass(const HBITMAP &imgClass, const ImgSize &sz) const override;
+		HBITMAP rescaleImgClass(const HBITMAP &imgClass, const ImgSize &sz, ScalingMethod method = ScalingMethod::Nearest) const override;
 
 		/**
 		 * Get the size of the specified ImgClass.
@@ -81,13 +78,19 @@ class CreateThumbnail : public LibRomData::TCreateThumbnail<HBITMAP>
 		 * @param pOutSize	[out] Pointer to ImgSize to store the image size.
 		 * @return 0 on success; non-zero on error.
 		 */
-		virtual int getImgClassSize(const HBITMAP &imgClass, ImgSize *pOutSize) const override final;
+		int getImgClassSize(const HBITMAP &imgClass, ImgSize *pOutSize) const final;
 
 		/**
 		 * Get the proxy for the specified URL.
 		 * @return Proxy, or empty string if no proxy is needed.
 		 */
-		virtual std::string proxyForUrl(const std::string &url) const override final;
+		inline std::string proxyForUrl(const std::string &url) const final
+		{
+			// rp-download uses WinInet on Windows, which
+			// always uses the system proxy.
+			((void)url);
+			return std::string();
+		}
 };
 
 /**
@@ -95,7 +98,7 @@ class CreateThumbnail : public LibRomData::TCreateThumbnail<HBITMAP>
  * This version does NOT use alpha transparency.
  * COLOR_WINDOW is used for the background.
  */
-class CreateThumbnailNoAlpha : public CreateThumbnail
+class CreateThumbnailNoAlpha final : public CreateThumbnail
 {
 	public:
 		CreateThumbnailNoAlpha() { }
@@ -112,15 +115,16 @@ class CreateThumbnailNoAlpha : public CreateThumbnail
 		 * @param img rp_image
 		 * @return ImgClass
 		 */
-		virtual HBITMAP rpImageToImgClass(const LibRpBase::rp_image *img) const override final;
+		HBITMAP rpImageToImgClass(const LibRpTexture::rp_image *img) const final;
 
 		/**
-		 * Rescale an ImgClass using nearest-neighbor scaling.
+		 * Rescale an ImgClass using the specified scaling method.
 		 * @param imgClass ImgClass object.
 		 * @param sz New size.
+		 * @param method Scaling method.
 		 * @return Rescaled ImgClass.
 		 */
-		virtual HBITMAP rescaleImgClass(const HBITMAP &imgClass, const ImgSize &sz) const override final;
+		HBITMAP rescaleImgClass(const HBITMAP &imgClass, const ImgSize &sz, ScalingMethod method = ScalingMethod::Nearest) const final;
 };
 
 #endif /* __ROMPROPERTIES_WIN32_CREATETHUMBNAIL_HPP__ */

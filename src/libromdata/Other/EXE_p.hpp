@@ -1,22 +1,9 @@
 /***************************************************************************
  * ROM Properties Page shell extension. (libromdata)                       *
- * EXE.cpp: DOS/Windows executable reader. (Private class)                 *
+ * EXE_p.hpp: DOS/Windows executable reader. (Private class)               *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBROMDATA_EXE_P_HPP__
@@ -26,22 +13,24 @@
 #include "librpbase/RomData_p.hpp"
 
 #include "exe_structs.h"
-
-// IResourceReader
-#include "disc/NEResourceReader.hpp"
 #include "disc/PEResourceReader.hpp"
 
 // Uninitialized vector class.
 // Reference: http://andreoffringa.org/?q=uvector
 #include "uvector.h"
 
+// TinyXML2
+namespace tinyxml2 {
+	class XMLDocument;
+}
+
 namespace LibRomData {
 
 class EXE;
-class EXEPrivate : public LibRpBase::RomDataPrivate
+class EXEPrivate final : public LibRpBase::RomDataPrivate
 {
 	public:
-		EXEPrivate(EXE *q, LibRpBase::IRpFile *file);
+		EXEPrivate(EXE *q, LibRpFile::IRpFile *file);
 		~EXEPrivate();
 
 	private:
@@ -50,20 +39,20 @@ class EXEPrivate : public LibRpBase::RomDataPrivate
 
 	public:
 		// Executable type.
-		enum ExeType {
-			EXE_TYPE_UNKNOWN = -1,	// Unknown EXE type.
+		enum class ExeType {
+			Unknown = -1,	// Unknown EXE type.
 
-			EXE_TYPE_MZ = 0,	// DOS MZ
-			EXE_TYPE_NE,		// 16-bit New Executable
-			EXE_TYPE_LE,		// Mixed 16/32-bit Linear Executable
-			EXE_TYPE_W3,		// Collection of LE executables (WIN386.EXE)
-			EXE_TYPE_LX,		// 32-bit Linear Executable
-			EXE_TYPE_PE,		// 32-bit Portable Executable
-			EXE_TYPE_PE32PLUS,	// 64-bit Portable Executable
+			MZ = 0,		// DOS MZ
+			NE,		// 16-bit New Executable
+			LE,		// Mixed 16/32-bit Linear Executable
+			W3,		// Collection of LE executables (WIN386.EXE)
+			LX,		// 32-bit Linear Executable
+			PE,		// 32-bit Portable Executable
+			PE32PLUS,	// 64-bit Portable Executable
 
-			EXE_TYPE_LAST
+			Max
 		};
-		int exeType;
+		ExeType exeType;
 
 	public:
 		// DOS MZ header.
@@ -71,10 +60,10 @@ class EXEPrivate : public LibRpBase::RomDataPrivate
 
 		// Secondary header.
 		#pragma pack(1)
-		union PACKED {
+		union {
 			uint32_t sig32;
 			uint16_t sig16;
-			struct PACKED {
+			struct {
 				uint32_t Signature;
 				IMAGE_FILE_HEADER FileHeader;
 				union {
@@ -113,13 +102,23 @@ class EXEPrivate : public LibRpBase::RomDataPrivate
 
 		// NE target OSes.
 		// Also used for LE.
-		static const char *const NE_TargetOSes[];
+		static const char *const NE_TargetOSes[6];
 
 		/**
 		 * Load the NE resource table.
 		 * @return 0 on success; negative POSIX error code on error. (-ENOENT if not found)
 		 */
 		int loadNEResourceTable(void);
+
+		/**
+		 * Find the runtime DLL. (NE version)
+		 * @param refDesc String to store the description.
+		 * @param refLink String to store the download link.
+		 * @param refHasKernel Set to true if KERNEL is present in the import table.
+		 *                     Used to distinguish between old Windows and OS/2 executables.
+		 * @return 0 on success; negative POSIX error code on error.
+		 */
+		int findNERuntimeDLL(std::string &refDesc, std::string &refLink, bool &refHasKernel);
 
 		/**
 		 * Add fields for NE executables.
@@ -152,10 +151,26 @@ class EXEPrivate : public LibRpBase::RomDataPrivate
 		int loadPESectionTable(void);
 
 		/**
+		 * Convert a PE virtual address to a physical address.
+		 * @param vaddr Virtual address.
+		 * @param size Size of the virtual section.
+		 * @return Physical address, or 0 if not mappable.
+		 */
+		uint32_t pe_vaddr_to_paddr(uint32_t vaddr, uint32_t size);
+
+		/**
 		 * Load the top-level PE resource directory.
 		 * @return 0 on success; negative POSIX error code on error. (-ENOENT if not found)
 		 */
 		int loadPEResourceTypes(void);
+
+		/**
+		 * Find the runtime DLL. (PE version)
+		 * @param refDesc String to store the description.
+		 * @param refLink String to store the download link.
+		 * @return 0 on success; negative POSIX error code on error.
+		 */
+		int findPERuntimeDLL(std::string &refDesc, std::string &refLink);
 
 		/**
 		 * Add fields for PE and PE32+ executables.
@@ -163,11 +178,33 @@ class EXEPrivate : public LibRpBase::RomDataPrivate
 		void addFields_PE(void);
 
 #ifdef ENABLE_XML
+	private:
+		/**
+		 * Load the Win32 manifest resource.
+		 *
+		 * The XML is loaded and parsed using the specified
+		 * TinyXML document.
+		 *
+		 * @param doc		[in/out] XML document.
+		 * @param ppResName	[out,opt] Pointer to receive the loaded resource name. (statically-allocated string)
+		 * @return 0 on success; negative POSIX error code on error.
+		 */
+		ATTR_ACCESS(read_write, 2)
+		ATTR_ACCESS(write_only, 3)
+		int loadWin32ManifestResource(tinyxml2::XMLDocument &doc, const char **ppResName = nullptr) const;
+
+	public:
 		/**
 		 * Add fields from the Win32 manifest resource.
 		 * @return 0 on success; negative POSIX error code on error.
 		 */
 		int addFields_PE_Manifest(void);
+
+		/**
+		 * Is the requestedExecutionLevel set to requireAdministrator?
+		 * @return True if set; false if not or unable to determine.
+		 */
+		bool doesExeRequireAdministrator(void) const;
 #endif /* ENABLE_XML */
 };
 

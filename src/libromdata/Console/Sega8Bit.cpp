@@ -2,49 +2,27 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * Sega8Bit.cpp: Sega 8-bit (SMS/GG) ROM reader.                           *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "Sega8Bit.hpp"
-#include "librpbase/RomData_p.hpp"
-
 #include "sega8_structs.h"
 
-// librpbase
-#include "librpbase/common.h"
-#include "librpbase/byteswap.h"
-#include "librpbase/TextFuncs.hpp"
-#include "librpbase/file/IRpFile.hpp"
-#include "libi18n/i18n.h"
+// librpbase, librpfile
 using namespace LibRpBase;
+using LibRpFile::IRpFile;
 
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cerrno>
-#include <cstring>
-#include <ctime>
-
-// C++ includes.
-#include <vector>
+// C++ STL classes.
+using std::string;
 using std::vector;
 
 namespace LibRomData {
 
-class Sega8BitPrivate : public RomDataPrivate
+ROMDATA_IMPL(Sega8Bit)
+
+class Sega8BitPrivate final : public RomDataPrivate
 {
 	public:
 		Sega8BitPrivate(Sega8Bit *q, IRpFile *file);
@@ -65,12 +43,25 @@ class Sega8BitPrivate : public RomDataPrivate
 		} romHeader;
 
 		/**
-		 * Add an SDSC string field.
-		 * @param name Field name.
+		 * Get an SDSC string field.
 		 * @param ptr SDSC string pointer.
-		 * @return 0 on success; negative POSIX error code on error.
+		 * @return SDSC string on success; empty string on error.
 		 */
-		int addField_string_sdsc(const char *name, uint16_t ptr);
+		string getSdscString(uint16_t ptr);
+
+		/**
+		 * Convert a Codemasters timestamp to a Unix timestamp.
+		 * @param timestamp Codemasters timestamp.
+		 * @return Unix timestamp, or -1 on error.
+		 */
+		static time_t codemasters_timestamp_to_unix_time(const Sega8_Codemasters_Timestamp *timestamp);
+
+		/**
+		 * Convert an SDSC build date to a Unix timestamp.
+		 * @param date SDSC build date.
+		 * @return Unix timestamp, or -1 on error.
+		 */
+		static time_t sdsc_date_to_unix_time(const Sega8_SDSC_Date *date);
 };
 
 /** Sega8BitPrivate **/
@@ -83,24 +74,23 @@ Sega8BitPrivate::Sega8BitPrivate(Sega8Bit *q, IRpFile *file)
 }
 
 /**
- * Add an SDSC string field.
- * @param name Field name.
+ * Get an SDSC string field.
  * @param ptr SDSC string pointer.
- * @return 0 on success; negative POSIX error code on error.
+ * @return SDSC string on success; empty string on error.
  */
-int Sega8BitPrivate::addField_string_sdsc(const char *name, uint16_t ptr)
+string Sega8BitPrivate::getSdscString(uint16_t ptr)
 {
 	assert(file != nullptr);
 	assert(file->isOpen());
 	assert(isValid);
 	if (!file || !file->isOpen() || !isValid) {
 		// Can't add anything...
-		return -EBADF;
+		return string();
 	}
 
 	if (ptr == 0x0000 || ptr == 0xFFFF) {
 		// No string here...
-		return 0;
+		return string();
 	}
 
 	char strbuf[256];
@@ -109,10 +99,85 @@ int Sega8BitPrivate::addField_string_sdsc(const char *name, uint16_t ptr)
 		// NOTE: SDSC documentation says these strings should be ASCII.
 		// Since SDSC was introduced in 2001, I'll interpret them as cp1252.
 		// Reference: http://www.smspower.org/Development/SDSCHeader#SDSC7fe04BytesASCII
-		fields->addField_string(name,
-			cp1252_to_utf8(strbuf, sizeof(strbuf)));
+		return cp1252_to_utf8(strbuf, sizeof(strbuf));
 	}
-	return 0;
+
+	// Unable to read the string...
+	return string();
+}
+
+/**
+ * Convert a Codemasters timestamp to a Unix timestamp.
+ * @param timestamp Codemasters timestamp.
+ * @return Unix timestamp, or -1 on error.
+ */
+time_t Sega8BitPrivate::codemasters_timestamp_to_unix_time(const Sega8_Codemasters_Timestamp *timestamp)
+{
+	// Convert date/time from BCD.
+	// NOTE: struct tm has some oddities:
+	// - tm_year: year - 1900
+	// - tm_mon: 0 == January
+
+	// TODO: Check for invalid BCD values.
+	struct tm cmtime;
+	cmtime.tm_year = ((timestamp->year >> 4) * 10) +
+			  (timestamp->year & 0x0F);
+	if (cmtime.tm_year < 80) {
+		// Assume date values lower than 80 are 2000+.
+		cmtime.tm_year += 100;
+	}
+	cmtime.tm_mon  = ((timestamp->month >> 4) * 10) +
+			  (timestamp->month & 0x0F) - 1;
+	cmtime.tm_mday = ((timestamp->day >> 4) * 10) +
+			  (timestamp->day & 0x0F);
+	cmtime.tm_hour = ((timestamp->hour >> 4) * 10) +
+			  (timestamp->hour & 0x0F);
+	cmtime.tm_min  = ((timestamp->minute >> 4) * 10) +
+			  (timestamp->minute & 0x0F);
+	cmtime.tm_sec = 0;
+
+	// tm_wday and tm_yday are output variables.
+	cmtime.tm_wday = 0;
+	cmtime.tm_yday = 0;
+	cmtime.tm_isdst = 0;
+
+	// If conversion fails, d->ctime will be set to -1.
+	return timegm(&cmtime);
+}
+
+/**
+ * Convert an SDSC build date to a Unix timestamp.
+ * @param date SDSC build date.
+ * @return Unix timestamp, or -1 on error.
+ */
+time_t Sega8BitPrivate::sdsc_date_to_unix_time(const Sega8_SDSC_Date *date)
+{
+	// Convert date/time from BCD.
+	// NOTE: struct tm has some oddities:
+	// - tm_year: year - 1900
+	// - tm_mon: 0 == January
+
+	// TODO: Check for invalid BCD values.
+	struct tm sdsctime;
+	sdsctime.tm_year = ((date->century >> 4) * 1000) +
+			   ((date->century & 0x0F) * 100) +
+			   ((date->year >> 4) * 10) +
+			    (date->year & 0x0F) - 1900;
+	sdsctime.tm_mon  = ((date->month >> 4) * 10) +
+			    (date->month & 0x0F) - 1;
+	sdsctime.tm_mday = ((date->day >> 4) * 10) +
+			    (date->day & 0x0F);
+	sdsctime.tm_hour = 0;
+	sdsctime.tm_min  = 0;
+	sdsctime.tm_sec = 0;
+
+	// tm_wday and tm_yday are output variables.
+	sdsctime.tm_wday = 0;
+	sdsctime.tm_yday = 0;
+	sdsctime.tm_isdst = 0;
+
+	// If conversion fails, d->ctime will be set to -1.
+	return timegm(&sdsctime);
 }
 
 /** Sega8Bit **/
@@ -121,7 +186,7 @@ int Sega8BitPrivate::addField_string_sdsc(const char *name, uint16_t ptr)
  * Read a Sega 8-bit (SMS/GG) ROM image.
  *
  * A ROM image must be opened by the caller. The file handle
- * will be dup()'d and must be kept open in order to load
+ * will be ref()'d and must be kept open in order to load
  * data from the ROM image.
  *
  * To close the file, either delete this object or call close().
@@ -135,9 +200,10 @@ Sega8Bit::Sega8Bit(IRpFile *file)
 {
 	RP_D(Sega8Bit);
 	d->className = "Sega8Bit";
+	d->mimeType = "application/x-sms-rom";	// unofficial (TODO: SMS vs. GG)
 
 	if (!d->file) {
-		// Could not dup() the file handle.
+		// Could not ref() the file handle.
 		return;
 	}
 
@@ -145,6 +211,7 @@ Sega8Bit::Sega8Bit(IRpFile *file)
 	size_t size = d->file->seekAndRead(0x7FE0, &d->romHeader, sizeof(d->romHeader));
 	if (size != sizeof(d->romHeader)) {
 		// Seek and/or read error.
+		UNREF_AND_NULL_NOCHK(d->file);
 		return;
 	}
 
@@ -156,6 +223,11 @@ Sega8Bit::Sega8Bit(IRpFile *file)
 	info.ext = nullptr;	// Not needed for Sega 8-bit.
 	info.szFile = d->file->size();
 	d->isValid = (isRomSupported_static(&info) >= 0);
+
+	if (!d->isValid) {
+		d->file->unref();
+		d->file = nullptr;
+	}
 }
 
 /**
@@ -188,7 +260,6 @@ int Sega8Bit::isRomSupported_static(const DetectInfo *info)
 		reinterpret_cast<const Sega8_RomHeader*>(&info->header.pData[offset]);
 
 	// Check "TMR SEGA".
-	// TODO: Codemasters and SDSC checks.
 	if (!memcmp(romHeader->magic, SEGA8_MAGIC, sizeof(romHeader->magic))) {
 		// This is a Sega 8-bit ROM image.
 		return 0;
@@ -196,16 +267,6 @@ int Sega8Bit::isRomSupported_static(const DetectInfo *info)
 
 	// Not supported.
 	return -1;
-}
-
-/**
- * Is a ROM image supported by this object?
- * @param info DetectInfo containing ROM detection information.
- * @return Class-specific system ID (>= 0) if supported; -1 if not.
- */
-int Sega8Bit::isRomSupported(const DetectInfo *info) const
-{
-	return isRomSupported_static(info);
 }
 
 /**
@@ -260,21 +321,25 @@ const char *const *Sega8Bit::supportedFileExtensions_static(void)
 }
 
 /**
- * Get a list of all supported file extensions.
- * This is to be used for file type registration;
- * subclasses don't explicitly check the extension.
+ * Get a list of all supported MIME types.
+ * This is to be used for metadata extractors that
+ * must indicate which MIME types they support.
  *
- * NOTE: The extensions include the leading dot,
- * e.g. ".bin" instead of "bin".
- *
- * NOTE 2: The array and the strings in the array should
+ * NOTE: The array and the strings in the array should
  * *not* be freed by the caller.
  *
  * @return NULL-terminated array of all supported file extensions, or nullptr on error.
  */
-const char *const *Sega8Bit::supportedFileExtensions(void) const
+const char *const *Sega8Bit::supportedMimeTypes_static(void)
 {
-	return supportedFileExtensions_static();
+	static const char *const mimeTypes[] = {
+		// Unofficial MIME types from FreeDesktop.org.
+		"application/x-sms-rom",
+		"application/x-gamegear-rom",
+
+		nullptr
+	};
+	return mimeTypes;
 }
 
 /**
@@ -285,7 +350,7 @@ const char *const *Sega8Bit::supportedFileExtensions(void) const
 int Sega8Bit::loadFieldData(void)
 {
 	RP_D(Sega8Bit);
-	if (d->fields->isDataLoaded()) {
+	if (!d->fields->empty()) {
 		// Field data *has* been loaded...
 		return 0;
 	} else if (!d->file) {
@@ -337,7 +402,7 @@ int Sega8Bit::loadFieldData(void)
 		bcdbuf[1] = ('0' + digit - 10);
 		bcdbuf[2] = 0;
 	}
-	d->fields->addField_string(C_("Sega8Bit", "Version"), bcdbuf);
+	d->fields->addField_string(C_("RomData", "Version"), bcdbuf);
 
 	// Region code and system ID.
 	const char *sysID;
@@ -345,81 +410,55 @@ int Sega8Bit::loadFieldData(void)
 	switch ((tmr->region_and_size >> 4) & 0xF) {
 		case Sega8_SMS_Japan:
 			sysID = C_("Sega8Bit|SysID", "Sega Master System");
-			region = C_("Sega8Bit|SysID", "Japan");
+			region = C_("Region", "Japan");
 			break;
 		case Sega8_SMS_Export:
 			sysID = C_("Sega8Bit|SysID", "Sega Master System");
-			region = C_("Sega8Bit|SysID", "Export");
+			// tr: Any region that isn't Japan. (used for Sega 8-bit)
+			region = C_("Region", "Export");
 			break;
 		case Sega8_GG_Japan:
 			sysID = C_("Sega8Bit|SysID", "Game Gear");
-			region = C_("Sega8Bit|SysID", "Japan");
+			region = C_("Region", "Japan");
 			break;
 		case Sega8_GG_Export:
 			sysID = C_("Sega8Bit|SysID", "Game Gear");
-			region = C_("Sega8Bit|SysID", "Export");
+			// tr: Any region that isn't Japan. (used for Sega 8-bit)
+			region = C_("Region", "Export");
 			break;
 		case Sega8_GG_International:
 			sysID = C_("Sega8Bit|SysID", "Game Gear");
-			region = C_("Sega8Bit|SysID", "International");
+			// tr: Effectively region-free.
+			region = C_("Region", "Worldwide");
 			break;
 		default:
 			sysID = nullptr;
 			region = nullptr;
 	}
 	d->fields->addField_string(C_("Sega8Bit", "System"),
-		(sysID ? sysID : C_("Sega8Bit", "Unknown")));
-	d->fields->addField_string(C_("Sega8Bit", "Region Code"),
-		(region ? region : C_("Sega8Bit", "Unknown")));
+		(sysID ? sysID : C_("RomData", "Unknown")));
+	d->fields->addField_string(C_("RomData", "Region Code"),
+		(region ? region : C_("RomData", "Unknown")));
 
 	// Checksum.
-	d->fields->addField_string_numeric(C_("Sega8Bit", "Checksum"),
-		le16_to_cpu(tmr->checksum), RomFields::FB_HEX, 4,
+	d->fields->addField_string_numeric(C_("RomData", "Checksum"),
+		le16_to_cpu(tmr->checksum), RomFields::Base::Hex, 4,
 		RomFields::STRF_MONOSPACE);
 
 	// TODO: ROM size?
 
 	// Check for other headers.
-	// TODO: SDSC header.
-	if (0x10000 - (uint32_t)le16_to_cpu(d->romHeader.codemasters.checksum) ==
-	    (uint32_t)le16_to_cpu(d->romHeader.codemasters.checksum_compl))
+	if (0x10000 - static_cast<uint32_t>(le16_to_cpu(d->romHeader.codemasters.checksum)) ==
+	    static_cast<uint32_t>(le16_to_cpu(d->romHeader.codemasters.checksum_compl)))
 	{
 		// Codemasters checksums match.
 		const Sega8_Codemasters_RomHeader *const codemasters = &d->romHeader.codemasters;
 		d->fields->addField_string(C_("Sega8Bit", "Extra Header"), "Codemasters");
 
-		// Convert date/time from BCD.
-		// NOTE: struct tm has some oddities:
-		// - tm_year: year - 1900
-		// - tm_mon: 0 == January
+		// Build time.
+		// NOTE: CreationDate is currently handled as QDate on KDE.
+		time_t ctime = d->codemasters_timestamp_to_unix_time(&codemasters->timestamp);
 
-		// TODO: Check for invalid BCD values.
-		struct tm cmtime;
-		cmtime.tm_year = ((codemasters->timestamp.year >> 4) * 10) +
-				  (codemasters->timestamp.year & 0x0F);
-		if (cmtime.tm_year < 80) {
-			// Assume date values lower than 80 are 2000+.
-			cmtime.tm_year += 100;
-		}
-		cmtime.tm_mon  = ((codemasters->timestamp.month >> 4) * 10) +
-				  (codemasters->timestamp.month & 0x0F) - 1;
-		cmtime.tm_mday = ((codemasters->timestamp.day >> 4) * 10) +
-				  (codemasters->timestamp.day & 0x0F);
-		cmtime.tm_hour = ((codemasters->timestamp.hour >> 4) * 10) +
-				  (codemasters->timestamp.hour & 0x0F);
-		cmtime.tm_min  = ((codemasters->timestamp.minute >> 4) * 10) +
-				  (codemasters->timestamp.minute & 0x0F);
-		cmtime.tm_sec = 0;
-
-		// tm_wday and tm_yday are output variables.
-		cmtime.tm_wday = 0;
-		cmtime.tm_yday = 0;
-		cmtime.tm_isdst = 0;
-
-		// If conversion fails, d->ctime will be set to -1.
-		time_t ctime = timegm(&cmtime);
-
-		// TODO: Interpret dateTime of -1 as "error"?
 		d->fields->addField_dateTime(C_("Sega8Bit", "Build Time"), ctime,
 			RomFields::RFT_DATETIME_HAS_DATE |
 			RomFields::RFT_DATETIME_HAS_TIME |
@@ -431,11 +470,11 @@ int Sega8Bit::loadFieldData(void)
 			codemasters->checksum_banks);
 		d->fields->addField_string_numeric(C_("Sega8Bit", "CM Checksum 1"),
 			le16_to_cpu(codemasters->checksum),
-			RomFields::FB_HEX, 4, RomFields::STRF_MONOSPACE);
+			RomFields::Base::Hex, 4, RomFields::STRF_MONOSPACE);
 		d->fields->addField_string_numeric(C_("Sega8Bit", "CM Checksum 2"),
 			le16_to_cpu(codemasters->checksum_compl),
-			RomFields::FB_HEX, 4, RomFields::STRF_MONOSPACE);
-	} else if (!memcmp(d->romHeader.sdsc.magic, SDSC_MAGIC, 4)) {
+			RomFields::Base::Hex, 4, RomFields::STRF_MONOSPACE);
+	} else if (d->romHeader.sdsc.magic == cpu_to_be32(SDSC_MAGIC)) {
 		// SDSC header magic.
 		const Sega8_SDSC_RomHeader *sdsc = &d->romHeader.sdsc;
 		d->fields->addField_string(C_("Sega8Bit", "Extra Header"), "SDSC");
@@ -454,45 +493,20 @@ int Sega8Bit::loadFieldData(void)
 		d->fields->addField_string(C_("Sega8Bit", "SDSC Version"), bcdbuf);
 
 		// Build date.
+		time_t ctime = d->sdsc_date_to_unix_time(&sdsc->date);
 
-		// Convert date/time from BCD.
-		// NOTE: struct tm has some oddities:
-		// - tm_year: year - 1900
-		// - tm_mon: 0 == January
-
-		// TODO: Check for invalid BCD values.
-		struct tm cmtime;
-		cmtime.tm_year = ((sdsc->date.century >> 4) * 1000) +
-				 ((sdsc->date.century & 0x0F) * 100) +
-				 ((sdsc->date.year >> 4) * 10) +
-				  (sdsc->date.year & 0x0F) - 1900;
-		cmtime.tm_mon  = ((sdsc->date.month >> 4) * 10) +
-				  (sdsc->date.month & 0x0F) - 1;
-		cmtime.tm_mday = ((sdsc->date.day >> 4) * 10) +
-				  (sdsc->date.day & 0x0F);
-		cmtime.tm_hour = 0;
-		cmtime.tm_min  = 0;
-		cmtime.tm_sec = 0;
-
-		// tm_wday and tm_yday are output variables.
-		cmtime.tm_wday = 0;
-		cmtime.tm_yday = 0;
-		cmtime.tm_isdst = 0;
-
-		// If conversion fails, d->ctime will be set to -1.
-		time_t ctime = timegm(&cmtime);
-
-		// TODO: Interpret dateTime of -1 as "error"?
 		d->fields->addField_dateTime(C_("Sega8Bit", "Build Date"), ctime,
 			RomFields::RFT_DATETIME_HAS_DATE |
 			RomFields::RFT_DATETIME_IS_UTC  // No timezone information here.
 		);
 
 		// SDSC string fields.
-		d->addField_string_sdsc(C_("Sega8Bit", "Author"), le16_to_cpu(sdsc->author_ptr));
-		d->addField_string_sdsc(C_("Sega8Bit", "Name"), le16_to_cpu(sdsc->name_ptr));
-		d->addField_string_sdsc(C_("Sega8Bit", "Description"), le16_to_cpu(sdsc->desc_ptr));
-
+		d->fields->addField_string(C_("RomData", "Author"),
+			d->getSdscString(le16_to_cpu(sdsc->author_ptr)));
+		d->fields->addField_string(C_("RomData", "Name"),
+			d->getSdscString(le16_to_cpu(sdsc->name_ptr)));
+		d->fields->addField_string(C_("RomData", "Description"),
+			d->getSdscString(le16_to_cpu(sdsc->desc_ptr)));
 	} else if (!memcmp(d->romHeader.m404_copyright, "COPYRIGHT SEGA", 14) ||
 		   !memcmp(d->romHeader.m404_copyright, "COPYRIGHTSEGA", 13))
 	{
@@ -502,7 +516,74 @@ int Sega8Bit::loadFieldData(void)
 	}
 
 	// Finished reading the field data.
-	return (int)d->fields->count();
+	return static_cast<int>(d->fields->count());
+}
+
+/**
+ * Load metadata properties.
+ * Called by RomData::metaData() if the field data hasn't been loaded yet.
+ * @return Number of metadata properties read on success; negative POSIX error code on error.
+ */
+int Sega8Bit::loadMetaData(void)
+{
+	RP_D(Sega8Bit);
+	if (d->metaData != nullptr) {
+		// Metadata *has* been loaded...
+		return 0;
+	} else if (!d->file) {
+		// File isn't open.
+		return -EBADF;
+	} else if (!d->isValid) {
+		// Unknown ROM image type.
+		return -EIO;
+	}
+
+	if (0x10000 - static_cast<uint32_t>(le16_to_cpu(d->romHeader.codemasters.checksum)) ==
+	    static_cast<uint32_t>(le16_to_cpu(d->romHeader.codemasters.checksum_compl)))
+	{
+		// Codemasters checksums match.
+		d->metaData = new RomMetaData();
+		d->metaData->reserve(1);	// Maximum of 1 metadata property.
+		const Sega8_Codemasters_RomHeader *const codemasters = &d->romHeader.codemasters;
+
+		// Build time.
+		// NOTE: CreationDate is currently handled as QDate on KDE.
+		time_t ctime = d->codemasters_timestamp_to_unix_time(&codemasters->timestamp);
+		d->metaData->addMetaData_timestamp(Property::CreationDate, ctime);
+	} else if (d->romHeader.sdsc.magic == cpu_to_be32(SDSC_MAGIC)) {
+		// SDSC header is present.
+		d->metaData = new RomMetaData();
+		d->metaData->reserve(4);	// Maximum of 4 metadata properties.
+		const Sega8_SDSC_RomHeader *const sdsc = &d->romHeader.sdsc;
+
+		// Build date.
+		time_t ctime = d->sdsc_date_to_unix_time(&sdsc->date);
+		d->metaData->addMetaData_timestamp(Property::CreationDate, ctime);
+
+		// Author.
+		string str = d->getSdscString(le16_to_cpu(sdsc->author_ptr));
+		if (!str.empty()) {
+			d->metaData->addMetaData_string(Property::Author, str);
+		}
+
+		// Name. (Title)
+		str = d->getSdscString(le16_to_cpu(sdsc->name_ptr));
+		if (!str.empty()) {
+			d->metaData->addMetaData_string(Property::Title, str);
+		}
+
+		// Description. (Comment)
+                // TODO: Property::Comment is assumed to be user-added
+                // on KDE Dolphin 18.08.1. Needs a description property.
+                // Also needs verification on Windows.
+                str = d->getSdscString(le16_to_cpu(sdsc->desc_ptr));
+		if (!str.empty()) {
+			d->metaData->addMetaData_string(Property::Subject, str);
+		}
+	}
+
+	// Finished reading the metadata.
+	return (d->metaData ? static_cast<int>(d->metaData->count()) : -ENOENT);
 }
 
 }

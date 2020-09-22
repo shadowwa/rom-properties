@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * PEResourceReader.hpp: Portable Executable resource reader.              *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBROMDATA_DISC_PERESOURCEREADER_HPP__
@@ -41,10 +28,11 @@ class PEResourceReader : public IResourceReader
 		 * @param rsrc_size .rsrc section size.
 		 * @param rsrc_va .rsrc virtual address.
 		 */
-		PEResourceReader(LibRpBase::IRpFile *file, uint32_t rsrc_addr, uint32_t rsrc_size, uint32_t rsrc_va);
+		PEResourceReader(LibRpFile::IRpFile *file, uint32_t rsrc_addr, uint32_t rsrc_size, uint32_t rsrc_va);
 		virtual ~PEResourceReader();
 
 	private:
+		typedef IResourceReader super;
 		RP_DISABLE_COPY(PEResourceReader)
 	protected:
 		friend class PEResourceReaderPrivate;
@@ -54,37 +42,26 @@ class PEResourceReader : public IResourceReader
 		/** IDiscReader **/
 
 		/**
-		 * Is the partition open?
-		 * This usually only returns false if an error occurred.
-		 * @return True if the partition is open; false if it isn't.
-		 */
-		virtual bool isOpen(void) const override final;
-
-		/**
 		 * Read data from the partition.
 		 * @param ptr Output data buffer.
 		 * @param size Amount of data to read, in bytes.
 		 * @return Number of bytes read.
 		 */
-		virtual size_t read(void *ptr, size_t size) override final;
+		ATTR_ACCESS_SIZE(write_only, 2, 3)
+		size_t read(void *ptr, size_t size) final;
 
 		/**
 		 * Set the partition position.
 		 * @param pos Partition position.
 		 * @return 0 on success; -1 on error.
 		 */
-		virtual int seek(int64_t pos) override final;
-
-		/**
-		 * Seek to the beginning of the partition.
-		 */
-		virtual void rewind(void) override final;
+		int seek(off64_t pos) final;
 
 		/**
 		 * Get the partition position.
 		 * @return Partition position on success; -1 on error.
 		 */
-		virtual int64_t tell(void) override final;
+		off64_t tell(void) final;
 
 		/**
 		 * Get the data size.
@@ -92,8 +69,9 @@ class PEResourceReader : public IResourceReader
 		 * and it's adjusted to exclude hashes.
 		 * @return Data size, or -1 on error.
 		 */
-		virtual int64_t size(void) override final;
+		off64_t size(void) final;
 
+	public:
 		/** IPartition **/
 
 		/**
@@ -101,7 +79,7 @@ class PEResourceReader : public IResourceReader
 		 * This size includes the partition header and hashes.
 		 * @return Partition size, or -1 on error.
 		 */
-		virtual int64_t partition_size(void) const override final;
+		off64_t partition_size(void) const final;
 
 		/**
 		 * Get the used partition size.
@@ -109,7 +87,7 @@ class PEResourceReader : public IResourceReader
 		 * but does not include "empty" sectors.
 		 * @return Used partition size, or -1 on error.
 		 */
-		virtual int64_t partition_size_used(void) const override final;
+		off64_t partition_size_used(void) const final;
 
 	public:
 		/** IResourceReader functions. **/
@@ -121,17 +99,18 @@ class PEResourceReader : public IResourceReader
 		 * @param lang Language ID. (-1 for "first entry")
 		 * @return IRpFile*, or nullptr on error.
 		 */
-		virtual LibRpBase::IRpFile *open(uint16_t type, int id, int lang) override final;
+		LibRpFile::IRpFile *open(uint16_t type, int id, int lang) final;
 
 		/**
 		 * Load a VS_VERSION_INFO resource.
+		 * Data will be byteswapped to host-endian if necessary.
 		 * @param id		[in] Resource ID. (-1 for "first entry")
 		 * @param lang		[in] Language ID. (-1 for "first entry")
 		 * @param pVsFfi	[out] VS_FIXEDFILEINFO (host-endian)
 		 * @param pVsSfi	[out] StringFileInfo section.
 		 * @return 0 on success; non-zero on error.
 		 */
-		virtual int load_VS_VERSION_INFO(int id, int lang, VS_FIXEDFILEINFO *pVsFfi, StringFileInfo *pVsSfi) override final;
+		int load_VS_VERSION_INFO(int id, int lang, VS_FIXEDFILEINFO *pVsFfi, StringFileInfo *pVsSfi) final;
 };
 
 }

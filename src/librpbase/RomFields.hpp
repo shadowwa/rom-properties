@@ -2,60 +2,77 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * RomFields.hpp: ROM fields class.                                        *
  *                                                                         *
- * Copyright (c) 2016 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBRPBASE_ROMFIELDS_HPP__
 #define __ROMPROPERTIES_LIBRPBASE_ROMFIELDS_HPP__
 
-#include "librpbase/config.librpbase.h"
+#include "common.h"
 
 // C includes.
+#include <stddef.h>	/* size_t */
 #include <stdint.h>
+
+// C includes. (C++ namespace)
+#include <ctime>
 
 // C++ includes.
 #include <array>
+#include <map>
 #include <string>
 #include <vector>
 
+namespace LibRpTexture {
+	class rp_image;
+}
+
 namespace LibRpBase {
+
+// RFT_LISTDATA alignment macros.
+// - # indicates number of columns.
+// - Parameters are for columns 0, 1, 2, 3, etc.
+// - This does NOT include checkboxes or icons.
+#define TXA_D	(RomFields::TextAlign::TXA_DEFAULT)
+#define TXA_L	(RomFields::TextAlign::TXA_LEFT)
+#define TXA_C	(RomFields::TextAlign::TXA_CENTER)
+#define TXA_R	(RomFields::TextAlign::TXA_RIGHT)
+#define AFLD_ALIGN1(a)				((a)&3U)
+#define AFLD_ALIGN2(a,b)			(AFLD_ALIGN1(a)|(((b)&3U)<<2U))
+#define AFLD_ALIGN3(a,b,c)			(AFLD_ALIGN2(a,b)|(((c)&3U)<<4U))
+#define AFLD_ALIGN4(a,b,c,d)			(AFLD_ALIGN3(a,b,c)|(((d)&3U)<<6U))
+#define AFLD_ALIGN5(a,b,c,d,e)			(AFLD_ALIGN4(a,b,c,d)|(((e)&3U)<<8U))
+#define AFLD_ALIGN6(a,b,c,d,e,f)		(AFLD_ALIGN5(a,b,c,d,e)|(((f)&3U)<<10U))
+#define AFLD_ALIGN7(a,b,c,d,e,f,g)		(AFLD_ALIGN6(a,b,c,d,e,f)|(((g)&3U)<<12U))
+#define AFLD_ALIGN8(a,b,c,d,e,f,g,h)		(AFLD_ALIGN7(a,b,c,d,e,f,g)|(((h)&3U)<<14U))
+#define AFLD_ALIGN9(a,b,c,d,e,f,g,h,i)		(AFLD_ALIGN8(a,b,c,d,e,f,g,h)|(((i)&3U)<<16U))
+#define AFLD_ALIGN10(a,b,c,d,e,f,g,h,i,j)	(AFLD_ALIGN9(a,b,c,d,e,f,g,h,i)|(((j)&3U)<<18U))
 
 class RomFieldsPrivate;
 class RomFields
 {
 	public:
 		// ROM field types.
-		enum RomFieldType {
+		enum RomFieldType : uint8_t {
 			RFT_INVALID,		// Invalid. (skips the field)
 			RFT_STRING,		// Basic string.
 			RFT_BITFIELD,		// Bitfield.
 			RFT_LISTDATA,		// ListData.
 			RFT_DATETIME,		// Date/Time.
 			RFT_AGE_RATINGS,	// Age ratings.
+			RFT_DIMENSIONS,		// Image dimensions.
+			RFT_STRING_MULTI,	// Multi-language string.
 		};
 
 		// String format flags. (RFT_STRING)
-		enum StringFormat {
+		enum StringFormat : unsigned int {
 			// Print the string using a monospaced font.
-			STRF_MONOSPACE	= (1 << 0),
+			STRF_MONOSPACE	= (1U << 0),
 
 			// Print the string using a "warning" font.
 			// (usually bold and red)
-			STRF_WARNING	= (1 << 1),
+			STRF_WARNING	= (1U << 1),
 
 			// "Credits" field.
 			// Used for providing credits for an external database.
@@ -64,32 +81,48 @@ class RomFields
 			// always shown at the bottom of the dialog and with
 			// center-aligned text.
 			// NOTE: Maximum of one STRF_CREDITS per RomData subclass.
-			STRF_CREDITS	= (1 << 2),
+			STRF_CREDITS	= (1U << 2),
 
 			// Trim spaces from the end of strings.
-			STRF_TRIM_END	= (1 << 3),
+			STRF_TRIM_END	= (1U << 3),
+
+			// Numeric formatting: Use lowercase letters for hexadecimal.
+			STRF_HEX_LOWER	= (1U << 4),
+
+			// Hexdump: No spaces.
+			STRF_HEXDUMP_NO_SPACES	= (1U << 5),
 		};
 
 		// Display flags for RFT_LISTDATA.
-		enum ListDataFlags {
+		enum ListDataFlags : unsigned int {
 			// Show the ListView on a separate row
 			// from the description label.
-			RFT_LISTDATA_SEPARATE_ROW = (1 << 0),
+			RFT_LISTDATA_SEPARATE_ROW = (1U << 0),
 
 			// Enable checkboxes.
-			RFT_LISTDATA_CHECKBOXES = (1 << 1),
+			// NOTE: Mutually exclusive with icons.
+			RFT_LISTDATA_CHECKBOXES = (1U << 1),
+
+			// Enable icons.
+			// NOTE: Mutually exclusive with checkboxes.
+			RFT_LISTDATA_ICONS	= (1U << 2),
+
+			// String data is multi-lingual.
+			// NOTE: This changes the structure of the
+			// data field!
+			RFT_LISTDATA_MULTI	= (1U << 3),
 		};
 
 		// Display flags for RFT_DATETIME.
-		enum DateTimeFlags {
+		enum DateTimeFlags : unsigned int {
 			// Show the date value.
-			RFT_DATETIME_HAS_DATE = (1 << 0),
+			RFT_DATETIME_HAS_DATE = (1U << 0),
 
 			// Show the time value.
-			RFT_DATETIME_HAS_TIME = (1 << 1),
+			RFT_DATETIME_HAS_TIME = (1U << 1),
 
 			// Date does not have a valid year value.
-			RFT_DATETIME_NO_YEAR = (1 << 2),
+			RFT_DATETIME_NO_YEAR = (1U << 2),
 
 			// Mask for date/time display values.
 			RFT_DATETIME_HAS_DATETIME_MASK = RFT_DATETIME_HAS_DATE | RFT_DATETIME_HAS_TIME,
@@ -98,7 +131,7 @@ class RomFields
 			// Show the timestamp as UTC instead of the local timezone.
 			// This is useful for timestamps that aren't actually
 			// adjusted for the local timezone.
-			RFT_DATETIME_IS_UTC = (1 << 3),
+			RFT_DATETIME_IS_UTC = (1U << 3),
 		};
 
 		// Age Ratings indexes.
@@ -111,15 +144,15 @@ class RomFields
 			AGE_FINLAND	= 5,	// Finland (MEKU)
 			AGE_PORTUGAL	= 6,	// Portugal (PEGI-PT)
 			AGE_ENGLAND	= 7,	// England (BBFC)
-			AGE_AUSTRALIA	= 8,	// Australia (AGCB)
-			AGE_SOUTH_KOREA	= 9,	// South Korea (GRB)
+			AGE_AUSTRALIA	= 8,	// Australia (ACB)
+			AGE_SOUTH_KOREA	= 9,	// South Korea (GRB, formerly KMRB)
 			AGE_TAIWAN	= 10,	// Taiwan (CGSRR)
 
 			AGE_MAX		= 16	// Maximum number of age rating fields
 		};
 
 		// Age Ratings bitfields.
-		enum AgeRatingsBitfield {
+		enum AgeRatingsBitfield : uint16_t {
 			AGEBF_MIN_AGE_MASK	= 0x001F,	// Low 5 bits indicate the minimum age.
 			AGEBF_ACTIVE		= 0x0020,	// Rating is only valid if this is set.
 			AGEBF_PENDING		= 0x0040,	// Rating is pending.
@@ -130,6 +163,20 @@ class RomFields
 
 		// Age Ratings type.
 		typedef std::array<uint16_t, AGE_MAX> age_ratings_t;
+
+		// Text alignment for RFT_LISTDATA.
+		enum TextAlign : uint32_t {
+			TXA_DEFAULT	= 0,	// OS default
+			TXA_LEFT	= 1,
+			TXA_CENTER	= 2,
+			TXA_RIGHT	= 3,
+		};
+
+		// Typedefs for various containers.
+		typedef std::map<uint32_t, std::string> StringMultiMap_t;
+		typedef std::vector<std::vector<std::string> > ListData_t;
+		typedef std::map<uint32_t, ListData_t> ListDataMultiMap_t;
+		typedef std::vector<const LibRpTexture::rp_image*> ListDataIcons_t;
 
 		// ROM field struct.
 		// Dynamically allocated.
@@ -143,10 +190,8 @@ class RomFields
 			union _desc {
 				unsigned int flags;	// Generic flags. (string, date)
 
+				// TODO: Reorder to reduce wasted space on 64-bit?
 				struct _bitfield {
-					// Number of bits to check. (must be 1-32)
-					// TODO: Remove this field.
-					int elements;
 					// Bit flags per row. (3 or 4 is usually good)
 					int elemsPerRow;
 					// Bit flag names.
@@ -157,12 +202,25 @@ class RomFields
 				struct _list_data {
 					// Flags.
 					unsigned int flags;
+
 					// Number of visible rows. (0 for "default")
 					int rows_visible;
+
 					// List field names. (headers)
 					// Must be a vector of at least 'fields' strings.
 					// If a name is nullptr, that field is skipped.
 					const std::vector<std::string> *names;
+
+					// Column text alignment.
+					// Up to 16 columns can be specified using
+					// two bits each, with the two LSBs indicating
+					// column 0, next two bits column 1, etc.
+					// See the TextAlign enum.
+					struct {
+						// TODO: Reduce to uint16_t?
+						uint32_t headers;	// Header alignment
+						uint32_t data;		// Data alignment
+					} alignment;
 				} list_data;
 			} desc;
 
@@ -179,9 +237,26 @@ class RomFields
 
 				// RFT_LISTDATA
 				struct {
-					const std::vector<std::vector<std::string> > *list_data;
-					uint32_t list_checkboxes;	// Requires RFT_LISTDATA_CHECKBOXES.
-				};
+					union {
+						// Standard RFT_LISTDATA
+						const ListData_t *single;
+
+						// RFT_LISTDATA_MULTI
+						// - Key: Language code
+						// - Value: Vector of rows.
+						const ListDataMultiMap_t *multi;
+					} data;
+
+					union {
+						// Checkbox bitfield.
+						// Requires RFT_LISTDATA_CHECKBOXES.
+						uint32_t checkboxes;
+
+						// Icons vector.
+						// Requires RFT_LISTDATA_ICONS.
+						const ListDataIcons_t *icons;
+					} mxd;
+				} list_data;
 
 				// RFT_DATETIME (UNIX format)
 				// NOTE: -1 is used to indicate
@@ -191,6 +266,16 @@ class RomFields
 				// RFT_AGE_RATINGS
 				// See AgeRatingsCountry for field indexes.
 				const age_ratings_t *age_ratings;
+
+				// RFT_DIMENSIONS
+				// Up to three image dimensions.
+				// If a dimension is not present, set to 0.
+				int dimensions[3];
+
+				// RFT_STRING_MULTI
+				// - Key: Language code ('en', 'es', etc; multi-char constant)
+				// - Value: String
+				const StringMultiMap_t *str_multi;
 			} data;
 		};
 
@@ -200,13 +285,16 @@ class RomFields
 		 */
 		RomFields();
 		~RomFields();
-	public:
-		RomFields(const RomFields &other);
-		RomFields &operator=(const RomFields &other);
 
 	private:
+		RP_DISABLE_COPY(RomFields)
+	private:
 		friend class RomFieldsPrivate;
-		RomFieldsPrivate *d_ptr;
+		RomFieldsPrivate *const d_ptr;
+
+	public:
+		/** Field iterator types. **/
+		typedef std::vector<Field>::const_iterator const_iterator;
 
 	public:
 		/** Field accessors. **/
@@ -218,25 +306,29 @@ class RomFields
 		int count(void) const;
 
 		/**
+		 * Is this RomFields empty?
+		 * @return True if empty; false if not.
+		 */
+		bool empty(void) const;
+
+		/**
 		 * Get a ROM field.
 		 * @param idx Field index.
 		 * @return ROM field, or nullptr if the index is invalid.
 		 */
-		const Field *field(int idx) const;
+		const Field *at(int idx) const;
 
 		/**
-		 * Is data loaded?
-		 * TODO: Rename to empty() after porting to the new addField() functions?
-		 * @return True if m_data has at least one row; false if m_data is nullptr or empty.
+		 * Get a const iterator pointing to the beginning of the RomFields.
+		 * @return Const iterator.
 		 */
-		bool isDataLoaded(void) const;
+		const_iterator cbegin(void) const;
 
-	private:
 		/**
-		 * Detach this instance from all other instances.
-		 * TODO: Move to RomFieldsPrivate?
+		 * Get a const iterator pointing to the end of the RomFields.
+		 * @return Const iterator.
 		 */
-		void detach(void);
+		const_iterator cend(void) const;
 
 	public:
 		/**
@@ -265,6 +357,27 @@ class RomFields
 		 * @return Human-readable string, or empty string if no ratings.
 		 */
 		static std::string ageRatingsDecode(const age_ratings_t *age_ratings, bool newlines = true);
+
+	public:
+		/** Multi-language convenience functions. **/
+
+		/**
+		 * Get a string from an RFT_STRING_MULTI field.
+		 * @param pStr_multi StringMultiMap_t*
+		 * @param def_lc Default language code.
+		 * @param user_lc User-specified language code.
+		 * @return Pointer to string, or nullptr if not found.
+		 */
+		static const std::string *getFromStringMulti(const StringMultiMap_t *pStr_multi, uint32_t def_lc, uint32_t user_lc);
+
+		/**
+		 * Get ListData_t from an RFT_LISTDATA_MULTI field.
+		 * @param pListData_multi ListDataMultiMap_t*
+		 * @param def_lc Default language code.
+		 * @param user_lc User-specified language code.
+		 * @return Pointer to ListData_t, or nullptr if not found.
+		 */
+		static const ListData_t *getFromListDataMulti(const ListDataMultiMap_t *pListData_multi, uint32_t def_lc, uint32_t user_lc);
 
 	public:
 		/** Convenience functions for RomData subclasses. **/
@@ -311,6 +424,12 @@ class RomFields
 		 */
 		const char *tabName(int tabIdx) const;
 
+		/**
+		 * Get the default language code for RFT_STRING_MULTI and RFT_LISTDATA_MULTI.
+		 * @return Default language code, or 0 if not set.
+		 */
+		uint32_t defaultLanguageCode(void) const;
+
 		/** Fields **/
 
 		/**
@@ -323,29 +442,35 @@ class RomFields
 		 * Convert an array of char strings to a vector of std::string.
 		 * This can be used for addField_bitfield() and addField_listData().
 		 * @param strArray Array of strings.
-		 * @param count Number of strings, or -1 for a NULL-terminated array.
-		 * NOTE: The array will be terminated at NULL regardless of count,
-		 * so a -1 count is only useful if the size isn't known.
+		 * @param count Number of strings. (nullptrs will be handled as empty strings)
 		 * @return Allocated std::vector<std::string>.
 		 */
-		static std::vector<std::string> *strArrayToVector(const char *const *strArray, int count = -1);
+		static std::vector<std::string> *strArrayToVector(const char *const *strArray, size_t count);
 
 		/**
 		 * Convert an array of char strings to a vector of std::string.
 		 * This can be used for addField_bitfield() and addField_listData().
 		 * @param msgctxt i18n context.
 		 * @param strArray Array of strings.
-		 * @param count Number of strings, or -1 for a NULL-terminated array.
-		 * NOTE: The array will be terminated at NULL regardless of count,
-		 * so a -1 count is only useful if the size isn't known.
+		 * @param count Number of strings. (nullptrs will be handled as empty strings)
 		 * @return Allocated std::vector<std::string>.
 		 */
-		static std::vector<std::string> *strArrayToVector_i18n(const char *msgctxt, const char *const *strArray, int count = -1);
+		static std::vector<std::string> *strArrayToVector_i18n(const char *msgctxt, const char *const *strArray, size_t count);
+
+		enum {
+			TabOffset_Ignore = -1,
+			TabOffset_AddTabs = -2,
+		};
 
 		/**
 		 * Add fields from another RomFields object.
 		 * @param other Source RomFields object.
-		 * @param tabOffset Tab index to add to the original tabs. (If -1, ignore the original tabs.)
+		 * @param tabOffset Tab index to add to the original tabs.
+		 *
+		 * Special tabOffset values:
+		 * - -1: Ignore the original tab indexes.
+		 * - -2: Add tabs from the original RomFields.
+		 *
 		 * @return Field index of the last field added.
 		 */
 		int addFields_romFields(const RomFields *other, int tabOffset);
@@ -368,10 +493,10 @@ class RomFields
 		 */
 		int addField_string(const char *name, const std::string &str, unsigned int flags = 0);
 
-		enum Base {
-			FB_DEC,
-			FB_HEX,
-			FB_OCT,
+		enum class Base {
+			Dec,	// Decimal (Base 10)
+			Hex,	// Hexadecimal (Base 16)
+			Oct,	// Octal (Base 8)
 		};
 
 		/**
@@ -383,7 +508,7 @@ class RomFields
 		 * @param flags Formatting flags.
 		 * @return Field index, or -1 on error.
 		 */
-		int addField_string_numeric(const char *name, uint32_t val, Base base = FB_DEC, int digits = 0, unsigned int flags = 0);
+		int addField_string_numeric(const char *name, uint32_t val, Base base = Base::Dec, int digits = 0, unsigned int flags = 0);
 
 		/**
 		 * Add a string field formatted like a hex dump
@@ -393,6 +518,7 @@ class RomFields
 		 * @param flags Formatting flags.
 		 * @return Field index, or -1 on error.
 		 */
+		ATTR_ACCESS_SIZE(read_only, 3, 4)
 		int addField_string_hexdump(const char *name, const uint8_t *buf, size_t size, unsigned int flags = 0);
 
 		/**
@@ -438,24 +564,77 @@ class RomFields
 			int elemsPerRow, uint32_t bitfield);
 
 		/**
+		 * addField_listData() parameter struct.
+		 */
+		struct AFLD_PARAMS {
+			AFLD_PARAMS()
+				: flags(0), rows_visible(0)
+				, def_lc(0), headers(nullptr)
+			{
+				alignment.headers = 0;
+				alignment.data = 0;
+				data.single = nullptr;
+				mxd.icons = nullptr;
+			}
+			AFLD_PARAMS(unsigned int flags, int rows_visible)
+				: flags(flags), rows_visible(rows_visible)
+				, def_lc(0), headers(nullptr)
+			{
+				alignment.headers = 0;
+				alignment.data = 0;
+				data.single = nullptr;
+				mxd.icons = nullptr;
+			}
+
+			// Formatting
+			unsigned int flags;
+			int rows_visible;
+
+			// Column text alignment.
+			// Up to 16 columns can be specified using
+			// two bits each, with the two LSBs indicating
+			// column 0, next two bits column 1, etc.
+			// See the TextAlign enum.
+			struct {
+				// TODO: Reduce to uint16_t?
+				uint32_t headers;	// Header alignment
+				uint32_t data;		// Data alignment
+			} alignment;
+
+			// Default language code. (RFT_LISTDATA_MULTI)
+			uint32_t def_lc;
+
+			// Data
+			const std::vector<std::string> *headers;
+			union {
+				const ListData_t *single;
+				const ListDataMultiMap_t *multi;
+			} data;
+
+			// Mutually-exclusive data.
+			union {
+				// Checkbox bitfield.
+				// Requires RFT_LISTDATA_CHECKBOXES.
+				uint32_t checkboxes;
+
+				// Icons vector.
+				// Requires RFT_LISTDATA_ICONS.
+				const std::vector<const LibRpTexture::rp_image*> *icons;
+			} mxd;
+		};
+
+		/**
 		 * Add ListData.
-		 * NOTE: This object takes ownership of the two vectors.
+		 * NOTE: This object takes ownership of the vectors.
 		 * @param name Field name.
-		 * @param headers Vector of column names. (If NULL, no headers will be shown.)
-		 * @param list_data ListData.
-		 * @param rows_visible Number of visible rows, (0 for "default")
-		 * @param flags Flags.
-		 * @param checkboxes Checkbox bitfield. (requires RFT_LISTDATA_CHECKBOXES)
+		 * @param params Parameters.
 		 *
 		 * NOTE: If headers is nullptr, the column count will be
 		 * determined using the first row in list_data.
 		 *
 		 * @return Field index, or -1 on error.
 		 */
-		int addField_listData(const char *name,
-			const std::vector<std::string> *headers,
-			const std::vector<std::vector<std::string> > *list_data,
-			int rows_visible = 0, unsigned int flags = 0, uint32_t checkboxes = 0);
+		int addField_listData(const char *name, const AFLD_PARAMS *params);
 
 		/**
 		 * Add DateTime.
@@ -474,6 +653,28 @@ class RomFields
 		 * @return Field index, or -1 on error.
 		 */
 		int addField_ageRatings(const char *name, const age_ratings_t &age_ratings);
+
+		/**
+		 * Add image dimensions.
+		 * @param name Field name.
+		 * @param dimX X dimension.
+		 * @param dimY Y dimension.
+		 * @param dimZ Z dimension.
+		 * @return Field index, or -1 on error.
+		 */
+		int addField_dimensions(const char *name, int dimX, int dimY = 0, int dimZ = 0);
+
+		/**
+		 * Add a multi-language string.
+		 * NOTE: This object takes ownership of the map.
+		 * @param name Field name.
+		 * @param str_multi Map of strings with language codes.
+		 * @param def_lc Default language code.
+		 * @param flags Formatting flags.
+		 * @return Field index, or -1 on error.
+		 */
+		int addField_string_multi(const char *name, const StringMultiMap_t *str_multi,
+			uint32_t def_lc = 'en', unsigned int flags = 0);
 };
 
 }

@@ -2,57 +2,35 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * SegaSaturn.hpp: Sega Saturn disc image reader.                          *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License       *
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.   *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "SegaSaturn.hpp"
-#include "librpbase/RomData_p.hpp"
-
 #include "data/SegaPublishers.hpp"
 #include "saturn_structs.h"
 #include "cdrom_structs.h"
 
-// librpbase
-#include "librpbase/common.h"
-#include "librpbase/byteswap.h"
-#include "librpbase/TextFuncs.hpp"
-#include "librpbase/file/IRpFile.hpp"
-#include "libi18n/i18n.h"
+// librpbase, librpfile
 using namespace LibRpBase;
+using LibRpFile::IRpFile;
 
-// CD-ROM reader.
+// CD-ROM reader
 #include "disc/Cdrom2352Reader.hpp"
 
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cctype>
-#include <ctime>
-#include <cstring>
+// Other RomData subclasses
+#include "Other/ISO.hpp"
 
-// C++ includes.
-#include <memory>
-#include <string>
-#include <vector>
+// C++ STL classes.
 using std::string;
-using std::unique_ptr;
 using std::vector;
 
 namespace LibRomData {
 
-class SegaSaturnPrivate : public RomDataPrivate
+ROMDATA_IMPL(SegaSaturn)
+
+class SegaSaturnPrivate final : public RomDataPrivate
 {
 	public:
 		SegaSaturnPrivate(SegaSaturn *q, IRpFile *file);
@@ -66,29 +44,29 @@ class SegaSaturnPrivate : public RomDataPrivate
 
 		// Peripherals. (RFT_BITFIELD)
 		enum Saturn_Peripherals_Bitfield {
-			SATURN_IOBF_CONTROL_PAD		= (1 << 0),	// Standard control pad
-			SATURN_IOBF_ANALOG_CONTROLLER	= (1 << 1),	// Analog controller
-			SATURN_IOBF_MOUSE		= (1 << 2),	// Mouse
-			SATURN_IOBF_KEYBOARD		= (1 << 3),	// Keyboard
-			SATURN_IOBF_STEERING		= (1 << 4),	// Steering controller
-			SATURN_IOBF_MULTITAP		= (1 << 5),	// Multi-Tap
-			SATURN_IOBF_LIGHT_GUN		= (1 << 6),	// Light Gun
-			SATURN_IOBF_RAM_CARTRIDGE	= (1 << 7),	// RAM Cartridge
-			SATURN_IOBF_3D_CONTROLLER	= (1 << 8),	// 3D Controller
-			SATURN_IOBF_LINK_CABLE		= (1 << 9),	// Link Cable
-			SATURN_IOBF_NETLINK		= (1 << 10),	// NetLink
-			SATURN_IOBF_PACHINKO		= (1 << 11),	// Pachinko Controller
-			SATURN_IOBF_FDD			= (1 << 12),	// Floppy Disk Drive
-			SATURN_IOBF_ROM_CARTRIDGE	= (1 << 13),	// ROM Cartridge
-			SATURN_IOBF_MPEG_CARD		= (1 << 14),	// MPEG Card
+			SATURN_IOBF_CONTROL_PAD		= (1U <<  0),	// Standard control pad
+			SATURN_IOBF_ANALOG_CONTROLLER	= (1U <<  1),	// Analog controller
+			SATURN_IOBF_MOUSE		= (1U <<  2),	// Mouse
+			SATURN_IOBF_KEYBOARD		= (1U <<  3),	// Keyboard
+			SATURN_IOBF_STEERING		= (1U <<  4),	// Steering controller
+			SATURN_IOBF_MULTITAP		= (1U <<  5),	// Multi-Tap
+			SATURN_IOBF_LIGHT_GUN		= (1U <<  6),	// Light Gun
+			SATURN_IOBF_RAM_CARTRIDGE	= (1U <<  7),	// RAM Cartridge
+			SATURN_IOBF_3D_CONTROLLER	= (1U <<  8),	// 3D Controller
+			SATURN_IOBF_LINK_CABLE		= (1U <<  9),	// Link Cable
+			SATURN_IOBF_NETLINK		= (1U << 10),	// NetLink
+			SATURN_IOBF_PACHINKO		= (1U << 11),	// Pachinko Controller
+			SATURN_IOBF_FDD			= (1U << 12),	// Floppy Disk Drive
+			SATURN_IOBF_ROM_CARTRIDGE	= (1U << 13),	// ROM Cartridge
+			SATURN_IOBF_MPEG_CARD		= (1U << 14),	// MPEG Card
 		};
 
 		// Region code.
 		enum SaturnRegion {
-			SATURN_REGION_JAPAN	= (1 << 0),
-			SATURN_REGION_TAIWAN	= (1 << 1),
-			SATURN_REGION_USA	= (1 << 2),
-			SATURN_REGION_EUROPE	= (1 << 3),
+			SATURN_REGION_JAPAN	= (1U << 0),
+			SATURN_REGION_TAIWAN	= (1U << 1),
+			SATURN_REGION_USA	= (1U << 2),
+			SATURN_REGION_EUROPE	= (1U << 3),
 		};
 
 		/** Internal ROM data. **/
@@ -110,27 +88,41 @@ class SegaSaturnPrivate : public RomDataPrivate
 		static unsigned int parseRegionCodes(const char *region_codes, int size);
 
 	public:
-		enum DiscType {
-			DISC_UNKNOWN		= -1,	// Unknown ROM type.
-			DISC_ISO_2048		= 0,	// ISO-9660, 2048-byte sectors.
-			DISC_ISO_2352		= 1,	// ISO-9660, 2352-byte sectors.
-		};
+		enum class DiscType {
+			Unknown	= -1,
 
-		// Disc type.
-		int discType;
+			Iso2048	= 0,	// ISO-9660, 2048-byte sectors.
+			Iso2352	= 1,	// ISO-9660, 2352-byte sectors.
+
+			Max
+		};
+		DiscType discType;
 
 		// Disc header.
 		Saturn_IP0000_BIN_t discHeader;
 
 		// Region code. (Saturn_Region)
 		unsigned int saturn_region;
+
+		/**
+		 * Get the disc publisher.
+		 * @return Disc publisher.
+		 */
+		string getPublisher(void) const;
+
+		/**
+		 * Parse the disc number portion of the device information field.
+		 * @param disc_num	[out] Disc number.
+		 * @param disc_total	[out] Total number of discs.
+		 */
+		void parseDiscNumber(uint8_t &disc_num, uint8_t &disc_total) const;
 };
 
 /** SegaSaturnPrivate **/
 
 SegaSaturnPrivate::SegaSaturnPrivate(SegaSaturn *q, IRpFile *file)
 	: super(q, file)
-	, discType(DISC_UNKNOWN)
+	, discType(DiscType::Unknown)
 	, saturn_region(0)
 {
 	// Clear the disc header struct.
@@ -152,56 +144,41 @@ uint32_t SegaSaturnPrivate::parsePeripherals(const char *peripherals, int size)
 
 	uint32_t ret = 0;
 	for (int i = size-1; i >= 0; i--) {
-		switch (peripherals[i]) {
-			case SATURN_IO_CONTROL_PAD:
-				ret |= SATURN_IOBF_CONTROL_PAD;
+		// TODO: Sort by character and use bsearch()?
+		#define SATURN_IO_SUPPORT_ENTRY(entry) {SATURN_IO_##entry, SATURN_IOBF_##entry}
+		static const struct {
+			char io_chr;
+			uint32_t io_bf;
+		} saturn_io_lkup_tbl[] = {
+			{' ', 0},	// quick exit for empty entries
+			SATURN_IO_SUPPORT_ENTRY(CONTROL_PAD),
+			SATURN_IO_SUPPORT_ENTRY(ANALOG_CONTROLLER),
+			SATURN_IO_SUPPORT_ENTRY(MOUSE),
+			SATURN_IO_SUPPORT_ENTRY(KEYBOARD),
+			SATURN_IO_SUPPORT_ENTRY(STEERING),
+			SATURN_IO_SUPPORT_ENTRY(MULTITAP),
+			SATURN_IO_SUPPORT_ENTRY(LIGHT_GUN),
+			SATURN_IO_SUPPORT_ENTRY(RAM_CARTRIDGE),
+			SATURN_IO_SUPPORT_ENTRY(3D_CONTROLLER),
+
+			// TODO: Are these actually the same thing?
+			{SATURN_IO_LINK_CABLE_JPN, SATURN_IOBF_LINK_CABLE},
+			{SATURN_IO_LINK_CABLE_USA, SATURN_IOBF_LINK_CABLE},
+
+			SATURN_IO_SUPPORT_ENTRY(NETLINK),
+			SATURN_IO_SUPPORT_ENTRY(PACHINKO),
+			SATURN_IO_SUPPORT_ENTRY(FDD),
+			SATURN_IO_SUPPORT_ENTRY(ROM_CARTRIDGE),
+			SATURN_IO_SUPPORT_ENTRY(MPEG_CARD),
+
+			{0, 0}
+		};
+
+		for (const auto *p = saturn_io_lkup_tbl; p->io_chr != 0; p++) {
+			if (p->io_chr == peripherals[i]) {
+				ret |= p->io_bf;
 				break;
-			case SATURN_IO_ANALOG_CONTROLLER:
-				ret |= SATURN_IOBF_ANALOG_CONTROLLER;
-				break;
-			case SATURN_IO_MOUSE:
-				ret |= SATURN_IOBF_MOUSE;
-				break;
-			case SATURN_IO_KEYBOARD:
-				ret |= SATURN_IOBF_KEYBOARD;
-				break;
-			case SATURN_IO_STEERING:
-				ret |= SATURN_IOBF_STEERING;
-				break;
-			case SATURN_IO_MULTITAP:
-				ret |= SATURN_IOBF_MULTITAP;
-				break;
-			case SATURN_IO_LIGHT_GUN:
-				ret |= SATURN_IOBF_LIGHT_GUN;
-				break;
-			case SATURN_IO_RAM_CARTRIDGE:
-				ret |= SATURN_IOBF_RAM_CARTRIDGE;
-				break;
-			case SATURN_IO_3D_CONTROLLER:
-				ret |= SATURN_IOBF_3D_CONTROLLER;
-				break;
-			case SATURN_IO_LINK_CABLE_JPN:
-			case SATURN_IO_LINK_CABLE_USA:
-				// TODO: Are these actually the same thing?
-				ret |= SATURN_IOBF_LINK_CABLE;
-				break;
-			case SATURN_IO_NETLINK:
-				ret |= SATURN_IOBF_NETLINK;
-				break;
-			case SATURN_IO_PACHINKO:
-				ret |= SATURN_IOBF_PACHINKO;
-				break;
-			case SATURN_IO_FDD:
-				ret |= SATURN_IOBF_FDD;
-				break;
-			case SATURN_IO_ROM_CARTRIDGE:
-				ret |= SATURN_IOBF_ROM_CARTRIDGE;
-				break;
-			case SATURN_IO_MPEG_CARD:
-				ret |= SATURN_IOBF_MPEG_CARD;
-				break;
-			default:
-				break;
+			}
 		}
 	}
 
@@ -223,7 +200,7 @@ unsigned int SegaSaturnPrivate::parseRegionCodes(const char *region_codes, int s
 
 	unsigned int ret = 0;
 	for (int i = 0; i < size; i++) {
-		if (region_codes[i] == 0 || isspace(region_codes[i]))
+		if (region_codes[i] == 0 || ISSPACE(region_codes[i]))
 			break;
 		switch (region_codes[i]) {
 			case 'J':
@@ -246,13 +223,74 @@ unsigned int SegaSaturnPrivate::parseRegionCodes(const char *region_codes, int s
 	return ret;
 }
 
+/**
+ * Get the disc publisher.
+ * @return Disc publisher.
+ */
+string SegaSaturnPrivate::getPublisher(void) const
+{
+	const char *publisher = nullptr;
+	if (!memcmp(discHeader.maker_id, SATURN_IP0000_BIN_MAKER_ID, sizeof(discHeader.maker_id))) {
+		// First-party Sega title.
+		publisher = "Sega";
+	} else if (!memcmp(discHeader.maker_id, "SEGA TP T-", 10)) {
+		// This may be a third-party T-code.
+		char *endptr;
+		const unsigned int t_code = static_cast<unsigned int>(
+			strtoul(&discHeader.maker_id[10], &endptr, 10));
+		if (t_code != 0 &&
+		    endptr > &discHeader.maker_id[10] &&
+		    endptr <= &discHeader.maker_id[15] &&
+		    *endptr == ' ')
+		{
+			// Valid T-code. Look up the publisher.
+			publisher = SegaPublishers::lookup(t_code);
+		}
+	}
+
+	if (publisher) {
+		// Found the publisher.
+		return publisher;
+	}
+
+	// Unknown publisher.
+	// List the field as-is.
+	string s_ret = latin1_to_utf8(discHeader.maker_id, sizeof(discHeader.maker_id));
+	trimEnd(s_ret);
+	return s_ret;
+}
+
+/**
+ * Parse the disc number portion of the device information field.
+ * @param disc_num	[out] Disc number.
+ * @param disc_total	[out] Total number of discs.
+ */
+void SegaSaturnPrivate::parseDiscNumber(uint8_t &disc_num, uint8_t &disc_total) const
+{
+	disc_num = 0;
+	disc_total = 0;
+
+	if (!memcmp(&discHeader.device_info[0], "CD-", 3) &&
+	             discHeader.device_info[4] == '/')
+	{
+		// "CD-ROM" is present.
+		if (ISDIGIT(discHeader.device_info[3]) &&
+		    ISDIGIT(discHeader.device_info[5]))
+		{
+			// Disc digits are present.
+			disc_num = discHeader.device_info[3] & 0x0F;
+			disc_total = discHeader.device_info[5] & 0x0F;
+		}
+	}
+}
+
 /** SegaSaturn **/
 
 /**
  * Read a Sega Saturn disc image.
  *
  * A ROM image must be opened by the caller. The file handle
- * will be dup()'d and must be kept open in order to load
+ * will be ref()'d and must be kept open in order to load
  * data from the ROM image.
  *
  * To close the file, either delete this object or call close().
@@ -267,10 +305,11 @@ SegaSaturn::SegaSaturn(IRpFile *file)
 	// This class handles disc images.
 	RP_D(SegaSaturn);
 	d->className = "SegaSaturn";
-	d->fileType = FTYPE_DISC_IMAGE;
+	d->mimeType = "application/x-saturn-rom";	// unofficial
+	d->fileType = FileType::DiscImage;
 
 	if (!d->file) {
-		// Could not dup() the file handle.
+		// Could not ref() the file handle.
 		return;
 	}
 
@@ -279,8 +318,10 @@ SegaSaturn::SegaSaturn(IRpFile *file)
 	CDROM_2352_Sector_t sector;
 	d->file->rewind();
 	size_t size = d->file->read(&sector, sizeof(sector));
-	if (size != sizeof(sector))
+	if (size != sizeof(sector)) {
+		UNREF_AND_NULL_NOCHK(d->file);
 		return;
+	}
 
 	// Check if this ROM image is supported.
 	DetectInfo info;
@@ -289,24 +330,27 @@ SegaSaturn::SegaSaturn(IRpFile *file)
 	info.header.pData = reinterpret_cast<const uint8_t*>(&sector);
 	info.ext = nullptr;	// Not needed for SegaSaturn.
 	info.szFile = 0;	// Not needed for SegaSaturn.
-	d->discType = isRomSupported_static(&info);
-
-	if (d->discType < 0)
-		return;
+	d->discType = static_cast<SegaSaturnPrivate::DiscType>(isRomSupported_static(&info));
 
 	switch (d->discType) {
-		case SegaSaturnPrivate::DISC_ISO_2048:
+		case SegaSaturnPrivate::DiscType::Iso2048:
 			// 2048-byte sectors.
 			// TODO: Determine session start address.
 			memcpy(&d->discHeader, &sector, sizeof(d->discHeader));
+			if (d->file->size() <= 64*1024) {
+				// 64 KB is way too small for a Dreamcast disc image.
+				// We'll assume this is IP.bin.
+				d->fileType = FileType::BootSector;
+			}
 			break;
-		case SegaSaturnPrivate::DISC_ISO_2352:
+		case SegaSaturnPrivate::DiscType::Iso2352:
 			// 2352-byte sectors.
-			// FIXME: Assuming Mode 1.
+			// Assuming Mode 1. (TODO: Check for Mode 2.)
 			memcpy(&d->discHeader, &sector.m1.data, sizeof(d->discHeader));
 			break;
 		default:
 			// Unsupported.
+			UNREF_AND_NULL_NOCHK(d->file);
 			return;
 	}
 	d->isValid = true;
@@ -332,7 +376,7 @@ int SegaSaturn::isRomSupported_static(const DetectInfo *info)
 	{
 		// Either no detection information was specified,
 		// or the header is too small.
-		return -1;
+		return static_cast<int>(SegaSaturnPrivate::DiscType::Unknown);
 	}
 
 	// Check for Sega Saturn HW and Maker ID.
@@ -342,7 +386,7 @@ int SegaSaturn::isRomSupported_static(const DetectInfo *info)
 	if (!memcmp(ip0000_bin->hw_id, SATURN_IP0000_BIN_HW_ID, sizeof(ip0000_bin->hw_id))) {
 		// Found HW ID at 0x0000.
 		// This is a 2048-byte sector image.
-		return SegaSaturnPrivate::DISC_ISO_2048;
+		return static_cast<int>(SegaSaturnPrivate::DiscType::Iso2048);
 	}
 
 	// 0x0010: 2352-byte sectors;
@@ -353,24 +397,14 @@ int SegaSaturn::isRomSupported_static(const DetectInfo *info)
 		if (Cdrom2352Reader::isDiscSupported_static(info->header.pData, info->header.size) >= 0) {
 			// Found CD-ROM sync bytes.
 			// This is a 2352-byte sector image.
-			return SegaSaturnPrivate::DISC_ISO_2352;
+			return static_cast<int>(SegaSaturnPrivate::DiscType::Iso2352);
 		}
 	}
 
 	// TODO: Check for other formats, including CDI and NRG?
 
 	// Not supported.
-	return -1;
-}
-
-/**
- * Is a ROM image supported by this object?
- * @param info DetectInfo containing ROM detection information.
- * @return Class-specific system ID (>= 0) if supported; -1 if not.
- */
-int SegaSaturn::isRomSupported(const DetectInfo *info) const
-{
-	return isRomSupported_static(info);
+	return static_cast<int>(SegaSaturnPrivate::DiscType::Unknown);
 }
 
 /**
@@ -425,21 +459,24 @@ const char *const *SegaSaturn::supportedFileExtensions_static(void)
 }
 
 /**
- * Get a list of all supported file extensions.
- * This is to be used for file type registration;
- * subclasses don't explicitly check the extension.
+ * Get a list of all supported MIME types.
+ * This is to be used for metadata extractors that
+ * must indicate which MIME types they support.
  *
- * NOTE: The extensions include the leading dot,
- * e.g. ".bin" instead of "bin".
- *
- * NOTE 2: The array and the strings in the array should
+ * NOTE: The array and the strings in the array should
  * *not* be freed by the caller.
  *
  * @return NULL-terminated array of all supported file extensions, or nullptr on error.
  */
-const char *const *SegaSaturn::supportedFileExtensions(void) const
+const char *const *SegaSaturn::supportedMimeTypes_static(void)
 {
-	return supportedFileExtensions_static();
+	static const char *const mimeTypes[] = {
+		// Unofficial MIME types from FreeDesktop.org.
+		"application/x-saturn-rom",
+
+		nullptr
+	};
+	return mimeTypes;
 }
 
 /**
@@ -450,13 +487,13 @@ const char *const *SegaSaturn::supportedFileExtensions(void) const
 int SegaSaturn::loadFieldData(void)
 {
 	RP_D(SegaSaturn);
-	if (d->fields->isDataLoaded()) {
+	if (!d->fields->empty()) {
 		// Field data *has* been loaded...
 		return 0;
 	} else if (!d->file) {
 		// File isn't open.
 		return -EBADF;
-	} else if (!d->isValid || d->discType < 0) {
+	} else if (!d->isValid || (int)d->discType < 0) {
 		// Unknown ROM image type.
 		return -EIO;
 	}
@@ -464,39 +501,15 @@ int SegaSaturn::loadFieldData(void)
 	// Sega Saturn disc header.
 	const Saturn_IP0000_BIN_t *const discHeader = &d->discHeader;
 	d->fields->reserve(8);	// Maximum of 8 fields.
+	d->fields->setTabName(0, C_("SegaSaturn", "Saturn"));
 
 	// Title. (TODO: Encoding?)
-	d->fields->addField_string(C_("SegaSaturn", "Title"),
+	d->fields->addField_string(C_("RomData", "Title"),
 		latin1_to_utf8(discHeader->title, sizeof(discHeader->title)),
 		RomFields::STRF_TRIM_END);
 
 	// Publisher.
-	const char *publisher = nullptr;
-	if (!memcmp(discHeader->maker_id, SATURN_IP0000_BIN_MAKER_ID, sizeof(discHeader->maker_id))) {
-		// First-party Sega title.
-		publisher = "Sega";
-	} else if (!memcmp(discHeader->maker_id, "SEGA TP T-", 10)) {
-		// This may be a third-party T-code.
-		char *endptr;
-		unsigned int t_code = (unsigned int)strtoul(&discHeader->maker_id[10], &endptr, 10);
-		if (t_code != 0 &&
-		    endptr > &discHeader->maker_id[10] &&
-		    endptr <= &discHeader->maker_id[15])
-		{
-			// Valid T-code. Look up the publisher.
-			publisher = SegaPublishers::lookup(t_code);
-		}
-	}
-
-	if (publisher) {
-		d->fields->addField_string(C_("SegaSaturn", "Publisher"), publisher);
-	} else {
-		// Unknown publisher.
-		// List the field as-is.
-		d->fields->addField_string(C_("SegaSaturn", "Publisher"),
-			latin1_to_utf8(discHeader->maker_id, sizeof(discHeader->maker_id)),
-			RomFields::STRF_TRIM_END);
-	}
+	d->fields->addField_string(C_("RomData", "Publisher"), d->getPublisher());
 
 	// TODO: Latin-1, cp1252, or Shift-JIS?
 
@@ -506,13 +519,13 @@ int SegaSaturn::loadFieldData(void)
 		RomFields::STRF_TRIM_END);
 
 	// Product version.
-	d->fields->addField_string(C_("SegaSaturn", "Version"),
+	d->fields->addField_string(C_("RomData", "Version"),
 		latin1_to_utf8(discHeader->product_version, sizeof(discHeader->product_version)),
 		RomFields::STRF_TRIM_END);
 
 	// Release date.
 	time_t release_date = d->ascii_yyyymmdd_to_unix_time(discHeader->release_date);
-	d->fields->addField_dateTime(C_("SegaSaturn", "Release Date"), release_date,
+	d->fields->addField_dateTime(C_("RomData", "Release Date"), release_date,
 		RomFields::RFT_DATETIME_HAS_DATE |
 		RomFields::RFT_DATETIME_IS_UTC  // Date only.
 	);
@@ -529,34 +542,20 @@ int SegaSaturn::loadFieldData(void)
 		NOP_C_("Region", "USA"),
 		NOP_C_("Region", "Europe"),
 	};
-	vector<string> *v_region_code_bitfield_names = RomFields::strArrayToVector_i18n(
+	vector<string> *const v_region_code_bitfield_names = RomFields::strArrayToVector_i18n(
 		"Region", region_code_bitfield_names, ARRAY_SIZE(region_code_bitfield_names));
-	d->fields->addField_bitfield(C_("SegaSaturn", "Region Code"),
+	d->fields->addField_bitfield(C_("RomData", "Region Code"),
 		v_region_code_bitfield_names, 0, d->saturn_region);
 
 	// Disc number.
-	uint8_t disc_num = 0;
-	uint8_t disc_total = 0;
-	if (!memcmp(discHeader->device_info, "CD-", 3) &&
-	    discHeader->device_info[4] == '/')
-	{
-		// "GD-ROM" is present.
-		if (isdigit(discHeader->device_info[3]) &&
-		    isdigit(discHeader->device_info[5]))
-		{
-			// Disc digits are present.
-			disc_num = discHeader->device_info[3] & 0x0F;
-			disc_total = discHeader->device_info[5] & 0x0F;
-		}
-	}
-
-	if (disc_num != 0) {
-		d->fields->addField_string(C_("SegaSaturn", "Disc #"),
-			rp_sprintf_p(C_("SegaSaturn|Disc", "%1$u of %2$u"),
+	uint8_t disc_num, disc_total;
+	d->parseDiscNumber(disc_num, disc_total);
+	if (disc_num != 0 && disc_total > 1) {
+		const char *const disc_number_title = C_("RomData", "Disc #");
+		d->fields->addField_string(disc_number_title,
+			// tr: Disc X of Y (for multi-disc games)
+			rp_sprintf_p(C_("RomData|Disc", "%1$u of %2$u"),
 				disc_num, disc_total));
-	} else {
-		d->fields->addField_string(C_("SegaSaturn", "Disc #"),
-			C_("SegaSaturn", "Unknown"));
 	}
 
 	// Peripherals.
@@ -577,15 +576,79 @@ int SegaSaturn::loadFieldData(void)
 		NOP_C_("SegaSaturn|Peripherals", "ROM Cartridge"),
 		NOP_C_("SegaSaturn|Peripherals", "MPEG Card"),
 	};
-	vector<string> *v_peripherals_bitfield_names = RomFields::strArrayToVector_i18n(
+	vector<string> *const v_peripherals_bitfield_names = RomFields::strArrayToVector_i18n(
 		"SegaSaturn|Peripherals", peripherals_bitfield_names, ARRAY_SIZE(peripherals_bitfield_names));
 	// Parse peripherals.
 	uint32_t peripherals = d->parsePeripherals(discHeader->peripherals, sizeof(discHeader->peripherals));
 	d->fields->addField_bitfield(C_("SegaSaturn", "Peripherals"),
 		v_peripherals_bitfield_names, 3, peripherals);
 
+	// Try to open the ISO-9660 object.
+	// NOTE: Only done here because the ISO-9660 fields
+	// are used for field info only.
+	ISO *const isoData = new ISO(d->file);
+	if (isoData->isOpen()) {
+		// Add the fields.
+		const RomFields *const isoFields = isoData->fields();
+		assert(isoFields != nullptr);
+		if (isoFields) {
+			d->fields->addFields_romFields(isoFields,
+				RomFields::TabOffset_AddTabs);
+		}
+	}
+	isoData->unref();
+
 	// Finished reading the field data.
-	return (int)d->fields->count();
+	return static_cast<int>(d->fields->count());
+}
+
+/**
+ * Load metadata properties.
+ * Called by RomData::metaData() if the field data hasn't been loaded yet.
+ * @return Number of metadata properties read on success; negative POSIX error code on error.
+ */
+int SegaSaturn::loadMetaData(void)
+{
+	RP_D(SegaSaturn);
+	if (d->metaData != nullptr) {
+		// Metadata *has* been loaded...
+		return 0;
+	} else if (!d->file) {
+		// File isn't open.
+		return -EBADF;
+	} else if (!d->isValid || (int)d->discType < 0) {
+		// Unknown disc image type.
+		return -EIO;
+	}
+
+	// Create the metadata object.
+	d->metaData = new RomMetaData();
+
+	// Sega Saturn disc header.
+	const Saturn_IP0000_BIN_t *const discHeader = &d->discHeader;
+	d->metaData->reserve(4);	// Maximum of 4 metadata properties.
+
+	// Title. (TODO: Encoding?)
+	d->metaData->addMetaData_string(Property::Title,
+		latin1_to_utf8(discHeader->title, sizeof(discHeader->title)),
+		RomMetaData::STRF_TRIM_END);
+
+	// Publisher.
+	d->metaData->addMetaData_string(Property::Publisher, d->getPublisher());
+
+	// Release date.
+	d->metaData->addMetaData_timestamp(Property::CreationDate,
+		d->ascii_yyyymmdd_to_unix_time(discHeader->release_date));
+
+	// Disc number. (multiple disc sets only)
+	uint8_t disc_num, disc_total;
+	d->parseDiscNumber(disc_num, disc_total);
+	if (disc_num != 0 && disc_total > 1) {
+		d->metaData->addMetaData_integer(Property::DiscNumber, disc_num);
+	}
+
+	// Finished reading the metadata.
+	return static_cast<int>(d->metaData->count());
 }
 
 }

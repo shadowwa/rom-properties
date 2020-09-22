@@ -1,24 +1,12 @@
 /***************************************************************************
- * ROM Properties Page shell extension. (KDE4/KDE5)                        *
+ * ROM Properties Page shell extension. (KDE4/KF5)                         *
  * RpQImageBackend.cpp: rp_image_backend using QImage.                     *
  *                                                                         *
- * Copyright (c) 2016 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "RpQImageBackend.hpp"
 
 #if QT_VERSION >= QT_VERSION_CHECK(4,0,0) && QT_VERSION < QT_VERSION_CHECK(5,0,0)
@@ -27,14 +15,10 @@
 # error Unsupported Qt version.
 #endif
 
-// C includes. (C++ namespace)
-#include <cassert>
-
-// librpbase
+// librpbase, librptexture
 #include "librpbase/aligned_malloc.h"
-#include "librpbase/img/rp_image.hpp"
-using LibRpBase::rp_image;
-using LibRpBase::rp_image_backend;
+using LibRpTexture::rp_image;
+using LibRpTexture::rp_image_backend;
 
 RpQImageBackend::RpQImageBackend(int width, int height, rp_image::Format format)
 	: super(width, height, format)
@@ -42,20 +26,20 @@ RpQImageBackend::RpQImageBackend(int width, int height, rp_image::Format format)
 	// Initialize the QImage.
 	QImage::Format qfmt;
 	switch (format) {
-		case rp_image::FORMAT_CI8:
+		case rp_image::Format::CI8:
 			qfmt = QImage::Format_Indexed8;
-			this->stride = ALIGN(16, width);
+			this->stride = ALIGN_BYTES(16, width);
 			break;
-		case rp_image::FORMAT_ARGB32:
+		case rp_image::Format::ARGB32:
 			qfmt = QImage::Format_ARGB32;
-			this->stride = ALIGN(16, width * sizeof(uint32_t));
+			this->stride = ALIGN_BYTES(16, width * sizeof(uint32_t));
 			break;
 		default:
 			assert(!"Unsupported rp_image::Format.");
 			this->width = 0;
 			this->height = 0;
 			this->stride = 0;
-			this->format = rp_image::FORMAT_NONE;
+			this->format = rp_image::Format::None;
 			return;
 	}
 
@@ -73,15 +57,10 @@ RpQImageBackend::RpQImageBackend(int width, int height, rp_image::Format format)
 	// buffer when rp_image is deleted. Note that this may crash
 	// if QImages aren't detached before the rp_image is deleted.
 
-	// FIXME: Need to test with Qt4 to make sure this doesn't break!
-	// TODO: Manually hack into QImageData and set own_data?
-	// This will call free(), which is usually fine on POSIX systems
-	// when using POSIX aligned memory allocation functions.
-
 	// Create the QImage using the allocated memory buffer.
 #if QT_VERSION >= QT_VERSION_CHECK(5,0,0)
 	m_qImage = QImage(data, width, height, this->stride, qfmt, aligned_free, data);
-#else
+#else /* QT_VERSION < QT_VERSION_CHECK(5,0,0) */
 	m_qImage = QImage(data, width, height, this->stride, qfmt);
 #endif
 	if (m_qImage.isNull()) {
@@ -97,7 +76,7 @@ RpQImageBackend::RpQImageBackend(int width, int height, rp_image::Format format)
 	QImage::DataPtr d = m_qImage.data_ptr();
 	d->own_data = true;
 	d->ro_data = false;
-#endif
+#endif /* QT_VERSION < QT_VERSION_CHECK(5,0,0) */
 
 	// We're using the full stride for the last row
 	// to make it easier to manage. (Qt does this as well.)
@@ -105,7 +84,7 @@ RpQImageBackend::RpQImageBackend(int width, int height, rp_image::Format format)
 	// Make sure we have the correct stride.
 	assert(this->stride == m_qImage.bytesPerLine());
 
-	if (format == rp_image::FORMAT_CI8) {
+	if (format == rp_image::Format::CI8) {
 		// Initialize the palette.
 		m_qPalette.resize(256);
 	}
@@ -136,7 +115,11 @@ const void *RpQImageBackend::data(void) const
 
 size_t RpQImageBackend::data_len(void) const
 {
+#if QT_VERSION >= QT_VERSION_CHECK(5,10,0)
+	return m_qImage.sizeInBytes();
+#else /* QT_VERSION < QT_VERSION_CHECK(5,10,0) */
 	return m_qImage.byteCount();
+#endif
 }
 
 uint32_t *RpQImageBackend::palette(void)
@@ -163,6 +146,33 @@ int RpQImageBackend::palette_len(void) const
 }
 
 /**
+ * Shrink image dimensions.
+ * @param width New width.
+ * @param height New height.
+ * @return 0 on success; negative POSIX error code on error.
+ */
+int RpQImageBackend::shrink(int width, int height)
+{
+	assert(width > 0);
+	assert(height > 0);
+	assert(this->width > 0);
+	assert(this->height > 0);
+	assert(width <= this->width);
+	assert(height <= this->height);
+	if (width <= 0 || height <= 0 ||
+	    this->width <= 0 || this->height <= 0 ||
+	    width > this->width || height > this->height)
+	{
+		return -EINVAL;
+	}
+
+	// QImage doesn't support changing width/height in-place,
+	// so we'll need to copy it to a new QImage.
+	m_qImage = m_qImage.copy(0, 0, width, height);
+	return 0;
+}
+
+/**
  * Get the underlying QImage.
  *
  * NOTE: On Qt4, you *must* detach the image if it
@@ -175,7 +185,7 @@ int RpQImageBackend::palette_len(void) const
  */
 QImage RpQImageBackend::getQImage(void) const
 {
-	if (this->format == rp_image::FORMAT_CI8) {
+	if (this->format == rp_image::Format::CI8) {
 		// Copy the local color table to the QImage.
 		const_cast<RpQImageBackend*>(this)->m_qImage.setColorTable(m_qPalette);
 	}

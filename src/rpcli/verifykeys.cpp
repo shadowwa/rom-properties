@@ -2,22 +2,9 @@
  * ROM Properties Page shell extension. (rpcli)                            *
  * verifykeys.hpp: Verify encryption keys.                                 *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
+ * Copyright (c) 2016-2019 by David Korth.                                 *
  * Copyright (c) 2016-2017 by Egor.                                        *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #include "stdafx.h"
@@ -39,6 +26,7 @@ using namespace LibRpBase;
 #include "libromdata/disc/WiiPartition.hpp"
 #include "libromdata/crypto/CtrKeyScrambler.hpp"
 #include "libromdata/crypto/N3DSVerifyKeys.hpp"
+#include "libromdata/Console/Xbox360_XEX.hpp"
 using namespace LibRomData;
 
 // C includes. (C++ namespace)
@@ -71,6 +59,7 @@ static const EncKeyFns_t encKeyFns[] = {
 	ENCKEYFNS(WiiPartition),
 	ENCKEYFNS(CtrKeyScrambler),
 	ENCKEYFNS(N3DSVerifyKeys),
+	ENCKEYFNS(Xbox360_XEX),
 
 	{nullptr, nullptr, nullptr, nullptr}
 };
@@ -83,7 +72,7 @@ int VerifyKeys(void)
 {
 	// Initialize the key manager.
 	// Get the Key Manager instance.
-	KeyManager *keyManager = KeyManager::instance();
+	KeyManager *const keyManager = KeyManager::instance();
 	assert(keyManager != nullptr);
 	if (!keyManager) {
 		cerr << "*** " << C_("rpcli", "ERROR initializing KeyManager. Cannot verify keys.") << endl;
@@ -122,7 +111,7 @@ int VerifyKeys(void)
 			// Verify the key.
 			KeyManager::VerifyResult res = keyManager->getAndVerify(keyName, nullptr, verifyData, 16);
 			cerr << keyName << ": ";
-			if (res == KeyManager::VERIFY_OK) {
+			if (res == KeyManager::VerifyResult::OK) {
 				cerr << C_("rpcli", "OK") << endl;
 			} else {
 				cerr << rp_sprintf(C_("rpcli", "ERROR: %s"),

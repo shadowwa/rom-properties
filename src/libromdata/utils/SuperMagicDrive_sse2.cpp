@@ -3,27 +3,17 @@
  * SuperMagicDrive_sse2.cpp: Super Magic Drive deinterleaving function.    *
  * SSE2-optimized version.                                                 *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2019 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "SuperMagicDrive.hpp"
+
+// C includes. (C++ namespace)
 #include <cassert>
 
-#include <xmmintrin.h>
+// SSE2 intrinsics.
 #include <emmintrin.h>
 
 namespace LibRomData {
@@ -37,7 +27,7 @@ namespace LibRomData {
  */
 void SuperMagicDrive::decodeBlock_sse2(uint8_t *RESTRICT pDest, const uint8_t *RESTRICT pSrc)
 {
-	// FIXME: MSVC 2017 generates `movdqu` instead of `movdqa`.
+	// NOTE: MSVC 2017 generates `movdqu` instead of `movdqa`.
 	// https://developercommunity.visualstudio.com/content/problem/48123/perf-regression-movdqu-instructions-are-generated.html
 	ASSERT_ALIGNMENT(16, pDest);
 	ASSERT_ALIGNMENT(16, pSrc);

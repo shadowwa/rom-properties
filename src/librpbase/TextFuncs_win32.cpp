@@ -2,42 +2,26 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * TextFuncs_win32.cpp: Text encoding functions. (Win32 version)           *
  *                                                                         *
- * Copyright (c) 2009-2016 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2009-2018 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
-#include "librpbase/config.librpbase.h"
+#include "stdafx.h"
+#include "config.librpbase.h"
 #include "TextFuncs.hpp"
+#include "TextFuncs_NULL.hpp"
 
 #ifndef _WIN32
-#error TextFuncs_win32.cpp is for Windows only.
+# error TextFuncs_win32.cpp is for Windows only.
+#endif
+#if SYS_BYTEORDER != SYS_LIL_ENDIAN
+# error TextFuncs_win32.cpp only works on little-endian architectures.
 #endif
 
 // Windows
 #include "libwin32common/RpWin32_sdk.h"
 
-// C includes.
-#include <stdlib.h>
-
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cstring>
-
-// C++ includes.
-#include <string>
+// C++ STL classes.
 using std::string;
 using std::u16string;
 using std::wstring;
@@ -65,7 +49,7 @@ static char16_t *W32U_mbs_to_UTF16(const char *mbs, unsigned int codepage, DWORD
 	if (cchWcs <= 0)
 		return nullptr;
 
-	wchar_t *wcs = (wchar_t*)malloc(cchWcs * sizeof(wchar_t));
+	wchar_t *const wcs = static_cast<wchar_t*>(malloc(cchWcs * sizeof(wchar_t)));
 	MultiByteToWideChar(codepage, dwFlags, mbs, -1, wcs, cchWcs);
 	return reinterpret_cast<char16_t*>(wcs);
 }
@@ -87,7 +71,7 @@ static char16_t *W32U_mbs_to_UTF16(const char *mbs, int cbMbs,
 	if (cchWcs <= 0)
 		return nullptr;
 
-	wchar_t *wcs = (wchar_t*)malloc(cchWcs * sizeof(wchar_t));
+	wchar_t *const wcs = static_cast<wchar_t*>(malloc(cchWcs * sizeof(wchar_t)));
 	MultiByteToWideChar(codepage, dwFlags, mbs, cbMbs, wcs, cchWcs);
 
 	if (cchWcs_ret)
@@ -107,7 +91,7 @@ static char *W32U_UTF16_to_mbs(const char16_t *wcs, unsigned int codepage)
 	if (cbMbs <= 0)
 		return nullptr;
  
-	char *mbs = (char*)malloc(cbMbs);
+	char *const mbs = static_cast<char*>(malloc(cbMbs));
 	WideCharToMultiByte(codepage, 0, reinterpret_cast<const wchar_t*>(wcs), -1, mbs, cbMbs, nullptr, nullptr);
 	return mbs;
 }
@@ -128,7 +112,7 @@ static char *W32U_UTF16_to_mbs(const char16_t *wcs, int cchWcs,
 	if (cbMbs <= 0)
 		return nullptr;
 
-	char *mbs = (char*)malloc(cbMbs);
+	char *const mbs = static_cast<char*>(malloc(cbMbs));
 	WideCharToMultiByte(codepage, 0, reinterpret_cast<const wchar_t*>(wcs), cchWcs, mbs, cbMbs, nullptr, nullptr);
 
 	if (cbMbs_ret)
@@ -136,231 +120,192 @@ static char *W32U_UTF16_to_mbs(const char16_t *wcs, int cchWcs,
 	return mbs;
 }
 
-/** Public text conversion functions. **/
+/** Generic code page functions. **/
 
-// Overloaded NULL terminator checks for ICONV_FUNCTION_*.
-static FORCEINLINE int check_NULL_terminator(const char *str, int len)
+/**
+ * Convert 8-bit text to UTF-8.
+ * Trailing NULL bytes will be removed.
+ *
+ * The specified code page number will be used.
+ *
+ * @param cp	[in] Code page number.
+ * @param str	[in] ANSI text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
+ * @param flags	[in] Flags. (See TextConv_Flags_e.)
+ * @return UTF-8 string.
+ */
+string cpN_to_utf8(unsigned int cp, const char *str, int len, unsigned int flags)
 {
-	if (len < 0) {
-		return (int)strlen(str);
-	} else {
-		return (int)strnlen(str, len);
+	len = check_NULL_terminator(str, len);
+	DWORD dwFlags = 0;
+	if (flags & TEXTCONV_FLAG_CP1252_FALLBACK) {
+		// Fallback is enabled.
+		// Fail on invalid characters in the first pass.
+		dwFlags = MB_ERR_INVALID_CHARS;
 	}
+
+	// Convert from `cp` to UTF-16.
+	string ret;
+	int cchWcs;
+	char16_t *wcs = W32U_mbs_to_UTF16(str, len, cp, &cchWcs, dwFlags);
+	if (!wcs || cchWcs == 0) {
+		if (flags & TEXTCONV_FLAG_CP1252_FALLBACK) {
+			// Try again using cp1252.
+			wcs = W32U_mbs_to_UTF16(str, len, 1252, &cchWcs, 0);
+		}
+	}
+
+	if (wcs && cchWcs > 0) {
+		// Convert from UTF-16 to UTF-8.
+		int cbMbs;
+		char *mbs = W32U_UTF16_to_mbs(wcs, cchWcs, CP_UTF8, &cbMbs);
+		if (mbs && cbMbs > 0) {
+			// Remove the NULL terminator if present.
+			if (mbs[cbMbs-1] == 0) {
+				cbMbs--;
+			}
+			ret.assign(mbs, cbMbs);
+		}
+		free(mbs);
+	}
+
+	free(wcs);
+	return ret;
 }
 
-static FORCEINLINE int check_NULL_terminator(const char16_t *wcs, int len)
+/**
+ * Convert 8-bit text to UTF-16.
+ * Trailing NULL bytes will be removed.
+ *
+ * The specified code page number will be used.
+ *
+ * @param cp	[in] Code page number.
+ * @param str	[in] ANSI text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
+ * @param flags	[in] Flags. (See TextConv_Flags_e.)
+ * @return UTF-16 string.
+ */
+u16string cpN_to_utf16(unsigned int cp, const char *str, int len, unsigned int flags)
 {
-	if (len < 0) {
-		return (int)u16_strlen(wcs);
-	} else {
-		return (int)u16_strnlen(wcs, len);
+	len = check_NULL_terminator(str, len);
+	DWORD dwFlags = 0;
+	if (flags & TEXTCONV_FLAG_CP1252_FALLBACK) {
+		// Fallback is enabled.
+		// Fail on invalid characters in the first pass.
+		dwFlags = MB_ERR_INVALID_CHARS;
 	}
+
+	// Convert from `cp` to UTF-16.
+	u16string ret;
+	int cchWcs;
+	char16_t *wcs = W32U_mbs_to_UTF16(str, len, cp, &cchWcs, dwFlags);
+	if (!wcs || cchWcs == 0) {
+		if (flags & TEXTCONV_FLAG_CP1252_FALLBACK) {
+			// Try again using cp1252.
+			wcs = W32U_mbs_to_UTF16(str, len, 1252, &cchWcs, 0);
+		}
+	}
+
+	if (wcs && cchWcs > 0) {
+		// Remove the NULL terminator if present.
+		if (wcs[cchWcs-1] == 0) {
+			cchWcs--;
+		}
+		ret.assign(wcs, cchWcs);
+	}
+	free(wcs);
+	return ret;
 }
 
 /**
- * Convert from an 8-bit encoding to another 8-bit encoding.
- * Base version with no encoding fallbacks.
+ * Convert UTF-8 to 8-bit text.
  * Trailing NULL bytes will be removed.
- * @param src_prefix	Function suffix. (destination encoding)
- * @param cp_src0	Source code page.
- * @param dest_suffix	Function prefix. (source encoding)
- * @param cp_dest	Destination code page.
+ *
+ * The specified code page number will be used.
+ * Invalid characters will be ignored.
+ *
+ * @param cp	[in] Code page number.
+ * @param str	[in] UTF-8 text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
+ * @return 8-bit text.
  */
-#define W32U_8TO8_1(src_prefix, cp_src0, dest_suffix, cp_dest) \
-string src_prefix##_to_##dest_suffix(const char *str, int len) \
-{ \
-	len = check_NULL_terminator(str, len); \
-	\
-	/* Convert from cp_src0 to UTF-16. */ \
-	string ret; \
-	int cchWcs; \
-	char16_t *wcs = W32U_mbs_to_UTF16(str, len, cp_src0, &cchWcs, 0); \
-	if (wcs && cchWcs > 0) { \
-		/* Convert from UTF-16 to cp_dest. */ \
-		int cbMbs; \
-		char *mbs = W32U_UTF16_to_mbs(wcs, cchWcs, cp_dest, &cbMbs); \
-		if (mbs && cbMbs > 0) { \
-			/* Remove the NULL terminator if present. */ \
-			if (mbs[cbMbs-1] == 0) { \
-				cbMbs--; \
-			} \
-			ret.assign(mbs, cbMbs); \
-		} \
-		free(mbs); \
-	} \
-	\
-	free(wcs); \
-	return ret; \
+string utf8_to_cpN(unsigned int cp, const char *str, int len)
+{
+	len = check_NULL_terminator(str, len);
+
+	// Convert from UTF-8 to UTF-16.
+	string ret;
+	int cchWcs;
+	char16_t *wcs = W32U_mbs_to_UTF16(str, len, CP_UTF8, &cchWcs, 0);
+	if (wcs && cchWcs > 0) {
+		// Convert from UTF-16 to `cp`.
+		int cbMbs;
+		char *mbs = W32U_UTF16_to_mbs(wcs, cchWcs, cp, &cbMbs);
+		if (mbs && cbMbs > 0) {
+			// Remove the NULL terminator if present.
+			if (mbs[cbMbs-1] == 0) {
+				cbMbs--;
+			}
+			ret.assign(mbs, cbMbs);
+		}
+		free(mbs);
+	}
+
+	free(wcs);
+	return ret;
 }
 
 /**
- * Convert from an 8-bit encoding to another 8-bit encoding.
- * One encoding fallback is provided.
+ * Convert UTF-16 to 8-bit text.
  * Trailing NULL bytes will be removed.
- * @param src_prefix	Function suffix. (destination encoding)
- * @param cp_src0	Source code page.
- * @param cp_src1	Fallback code page.
- * @param dest_suffix	Function prefix. (source encoding)
- * @param cp_dest	Destination code page.
+ *
+ * The specified code page number will be used.
+ * Invalid characters will be ignored.
+ *
+ * @param cp	[in] Code page number.
+ * @param wcs	[in] UTF-16 text.
+ * @param len	[in] Length of str, in bytes. (-1 for NULL-terminated string)
+ * @return 8-bit text.
  */
-#define W32U_8TO8_2(src_prefix, cp_src0, cp_src1, dest_suffix, cp_dest) \
-string src_prefix##_to_##dest_suffix(const char *str, int len) \
-{ \
-	len = check_NULL_terminator(str, len); \
-	\
-	/* Convert from cp_src0 to UTF-16. */ \
-	string ret; \
-	int cchWcs; \
-	char16_t *wcs = W32U_mbs_to_UTF16(str, len, cp_src0, &cchWcs, MB_ERR_INVALID_CHARS); \
-	if (!wcs || cchWcs <= 0) { \
-		/* Conversion from cp_src0 failed. Try cp_src1. */ \
-		free(wcs); \
-		wcs = W32U_mbs_to_UTF16(str, len, cp_src1, &cchWcs); \
-	} \
-	if (wcs && cchWcs > 0) { \
-		/* Convert from UTF-16 to cp_dest. */ \
-		int cbMbs; \
-		char *mbs = W32U_UTF16_to_mbs(wcs, cchWcs, cp_dest, &cbMbs); \
-		if (mbs && cbMbs > 0) { \
-			/* Remove the NULL terminator if present. */ \
-			if (mbs[cbMbs-1] == 0) { \
-				cbMbs--; \
-			} \
-			ret.assign(mbs, cbMbs); \
-		} \
-		free(mbs); \
-	} \
-	\
-	free(wcs); \
-	return ret; \
+string utf16_to_cpN(unsigned int cp, const char16_t *wcs, int len)
+{
+	len = check_NULL_terminator(wcs, len);
+
+	// Convert from UTF-16 to `cp`.
+	string ret;
+	int cbMbs;
+	char *mbs = W32U_UTF16_to_mbs(wcs, len, cp, &cbMbs);
+	if (mbs && cbMbs > 0) {
+		// Remove the NULL terminator if present.
+		if (mbs[cbMbs-1] == 0) {
+			cbMbs--;
+		}
+		ret.assign(mbs, cbMbs);
+	}
+	free(mbs);
+	return ret;
 }
+
+/** Specialized UTF-16 conversion functions. **/
 
 /**
- * Convert from an 8-bit encoding to UTF-16.
- * Base version with no encoding fallbacks.
+ * Convert UTF-16LE text to UTF-8.
  * Trailing NULL bytes will be removed.
- * @param src_prefix	Function suffix. (destination encoding)
- * @param cp_src0	Source code page.
+ * @param wcs	[in] UTF-16LE text.
+ * @param len	[in] Length of wcs, in characters. (-1 for NULL-terminated string)
+ * @return UTF-8 string.
  */
-#define W32U_8TO16_1(src_prefix, cp_src0) \
-u16string src_prefix##_to_utf16(const char *str, int len) \
-{ \
-	len = check_NULL_terminator(str, len); \
-	\
-	/* Convert from cp_src0 to UTF-16. */ \
-	u16string ret; \
-	int cchWcs; \
-	char16_t *wcs = W32U_mbs_to_UTF16(str, len, cp_src0, &cchWcs, 0); \
-	if (wcs && cchWcs > 0) { \
-		/* Remove the NULL terminator if present. */ \
-		if (wcs[cchWcs-1] == 0) { \
-			cchWcs--; \
-		} \
-		ret.assign(wcs, cchWcs); \
-	} \
-	\
-	free(wcs); \
-	return ret; \
+string utf16le_to_utf8(const char16_t *wcs, int len)
+{
+	// Wrapper around utf16_to_cpN().
+	return utf16_to_cpN(CP_UTF8, wcs, len);
 }
-
-
-/**
- * Convert from an 8-bit encoding to UTF-16.
- * Base version with no encoding fallbacks.
- * Trailing NULL bytes will be removed.
- * @param src_prefix	Function suffix. (destination encoding)
- * @param cp_src0	Source code page.
- * @param cp_src1	Fallback code page.
- */
-#define W32U_8TO16_2(src_prefix, cp_src0, cp_src1) \
-u16string src_prefix##_to_utf16(const char *str, int len) \
-{ \
-	len = check_NULL_terminator(str, len); \
-	\
-	/* Convert from cp_src0 to UTF-16. */ \
-	u16string ret; \
-	int cchWcs; \
-	char16_t *wcs = W32U_mbs_to_UTF16(str, len, cp_src0, &cchWcs, MB_ERR_INVALID_CHARS); \
-	if (!wcs || cchWcs <= 0) { \
-		/* Conversion from cp_src0 failed. Try cp_src1. */ \
-		free(wcs); \
-		wcs = W32U_mbs_to_UTF16(str, len, cp_src1, &cchWcs); \
-	} \
-	if (wcs && cchWcs > 0) { \
-		/* Remove the NULL terminator if present. */ \
-		if (wcs[cchWcs-1] == 0) { \
-			cchWcs--; \
-		} \
-		ret.assign(wcs, cchWcs); \
-	} \
-	\
-	free(wcs); \
-	return ret; \
-}
-
-/**
- * Convert from an 8-bit encoding to UTF-16.
- * Base version with no encoding fallbacks.
- * Trailing NULL bytes will be removed.
- * @param dest_suffix	Function prefix. (source encoding)
- * @param cp_dest	Destination code page.
- */
-#define W32U_16TO8_1(dest_suffix, cp_dest0) \
-string utf16_to_##dest_suffix(const char16_t *wcs, int len) \
-{ \
-	len = check_NULL_terminator(wcs, len); \
-	\
-	/* Convert from UTF-16 to cp_dest0. */ \
-	string ret; \
-	int cbMbs; \
-	char *mbs = W32U_UTF16_to_mbs(wcs, len, cp_dest0, &cbMbs); \
-	if (mbs && cbMbs > 0) { \
-		/* Remove the NULL terminator if present. */ \
-		if (mbs[cbMbs-1] == 0) { \
-			cbMbs--; \
-		} \
-		ret.assign(mbs, cbMbs); \
-	} \
-	\
-	free(mbs); \
-	return ret; \
-}
-
-/** Code Page 1252 **/
-W32U_8TO8_1(cp1252, 1252, utf8, CP_UTF8)
-W32U_8TO16_1(cp1252, 1252)
-
-W32U_8TO8_1(utf8, CP_UTF8, cp1252, 1252)
-W32U_16TO8_1(cp1252, 1252)
-
-/** Code Page 1252 + Shift-JIS (932) **/
-W32U_8TO8_2(cp1252_sjis, 932, 1252, utf8, CP_UTF8)
-W32U_8TO16_2(cp1252_sjis, 932, 1252)
-
-/** Latin-1 (ISO-8859-1) */
-W32U_8TO8_1(latin1, 28591, utf8, CP_UTF8)
-W32U_8TO16_1(latin1, 28591)
-
-W32U_8TO8_1(utf8, CP_UTF8, latin1, 28591)
-W32U_16TO8_1(latin1, 28591)
-
-/** UTF-8 to UTF-16 and vice-versa **/
-W32U_8TO16_1(utf8, CP_UTF8)
-
-// Reuse W32U_16TO8_1 for utf16le.
-#define utf16_to_utf8 utf16le_to_utf8
-W32U_16TO8_1(utf8, CP_UTF8)
-#undef utf16_to_utf8
-
-#if SYS_BYTEORDER != SYS_LIL_ENDIAN
-#error TextFuncs_win32.cpp only works on little-endian architectures.
-#endif
 
 /**
  * Convert UTF-16BE text to UTF-8.
  * Trailing NULL bytes will be removed.
- * @param wcs UTF-16BE text.
- * @param len Length of wcs, in characters. (-1 for NULL-terminated string)
+ * @param wcs	[in] UTF-16BE text.
+ * @param len	[in] Length of wcs, in characters. (-1 for NULL-terminated string)
  * @return UTF-8 string.
  */
 string utf16be_to_utf8(const char16_t *wcs, int len)
@@ -380,7 +325,7 @@ string utf16be_to_utf8(const char16_t *wcs, int len)
 	if (bwcs.empty()) {
 		// Error byteswapping the string...
 		return string();
-	} else if (len > 0 && len != (int)(bwcs.size())) {
+	} else if (len > 0 && len != static_cast<int>(bwcs.size())) {
 		// Byteswapping failed.
 		// NOTE: Only checking if an explicit length
 		// is specified, since we don't want to
@@ -389,7 +334,7 @@ string utf16be_to_utf8(const char16_t *wcs, int len)
 	}
 
 	// Convert the byteswapped text.
-	return utf16le_to_utf8(bwcs.data(), (int)bwcs.size());
+	return utf16_to_cpN(CP_UTF8, bwcs.data(), static_cast<int>(bwcs.size()));
 }
 
 }

@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (Win32)                            *
  * RP_ExtractImage.hpp: IExtractImage implementation.                      *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 // Reference: http://www.codeproject.com/Articles/338268/COM-in-C
@@ -24,27 +11,14 @@
 #include "RP_ExtractImage.hpp"
 #include "RpImageWin32.hpp"
 
-// librpbase
-#include "librpbase/RomData.hpp"
-#include "librpbase/TextFuncs.hpp"
-#include "librpbase/file/RpFile.hpp"
-#include "librpbase/img/rp_image.hpp"
+// librpbase, librpfile, librptexture, libromdata
 using namespace LibRpBase;
-
-// libromdata
-#include "libromdata/RomDataFactory.hpp"
+using namespace LibRpFile;
+using LibRpTexture::rp_image;
 using LibRomData::RomDataFactory;
 
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cstdio>
-#include <cstring>
-
-// C++ includes.
-#include <memory>
-#include <string>
-using std::unique_ptr;
-using std::wstring;
+// C++ STL classes.
+using std::tstring;
 
 // CLSID
 const CLSID CLSID_RP_ExtractImage =
@@ -52,10 +26,6 @@ const CLSID CLSID_RP_ExtractImage =
 
 /** RP_ExtractImage_Private **/
 #include "RP_ExtractImage_p.hpp"
-
-// TCreateThumbnail is a templated class,
-// so we have to #include the .cpp file here.
-#include "libromdata/img/TCreateThumbnail.cpp"
 
 RP_ExtractImage_Private::RP_ExtractImage_Private()
 	: romData(nullptr)
@@ -68,9 +38,7 @@ RP_ExtractImage_Private::RP_ExtractImage_Private()
 
 RP_ExtractImage_Private::~RP_ExtractImage_Private()
 {
-	if (romData) {
-		romData->unref();
-	}
+	UNREF(romData);
 }
 
 /** RP_ExtractImage **/
@@ -89,14 +57,21 @@ RP_ExtractImage::~RP_ExtractImage()
 
 IFACEMETHODIMP RP_ExtractImage::QueryInterface(REFIID riid, LPVOID *ppvObj)
 {
+#ifdef _MSC_VER
+# pragma warning(push)
+# pragma warning(disable: 4365 4838)
+#endif /* _MSC_VER */
 	static const QITAB rgqit[] = {
 		QITABENT(RP_ExtractImage, IPersist),
 		QITABENT(RP_ExtractImage, IPersistFile),
 		QITABENT(RP_ExtractImage, IExtractImage),
 		QITABENT(RP_ExtractImage, IExtractImage2),
-		{ 0 }
+		{ 0, 0 }
 	};
-	return LibWin32Common::pQISearch(this, rgqit, riid, ppvObj);
+#ifdef _MSC_VER
+# pragma warning(pop)
+#endif /* _MSC_VER */
+	return LibWin32Common::rp_QISearch(this, rgqit, riid, ppvObj);
 }
 
 /** IPersistFile **/
@@ -105,7 +80,7 @@ IFACEMETHODIMP RP_ExtractImage::QueryInterface(REFIID riid, LPVOID *ppvObj)
 IFACEMETHODIMP RP_ExtractImage::GetClassID(CLSID *pClassID)
 {
 	if (!pClassID) {
-		return E_FAIL;
+		return E_POINTER;
 	}
 	*pClassID = CLSID_RP_ExtractImage;
 	return S_OK;
@@ -122,24 +97,31 @@ IFACEMETHODIMP RP_ExtractImage::Load(LPCOLESTR pszFileName, DWORD dwMode)
 
 	// If we already have a RomData object, unref() it first.
 	RP_D(RP_ExtractImage);
-	if (d->romData) {
-		d->romData->unref();
-		d->romData = nullptr;
-	}
+	UNREF_AND_NULL(d->romData);
 
 	// pszFileName is the file being worked on.
 	// TODO: If the file was already loaded, don't reload it.
 	d->filename = W2U8(pszFileName);
 
+	// Check for "bad" file systems.
+	const Config *const config = Config::instance();
+	if (FileSystem::isOnBadFS(d->filename.c_str(), config->enableThumbnailOnNetworkFS())) {
+		// This file is on a "bad" file system.
+		return E_FAIL;
+	}
+
 	// Attempt to open the ROM file.
-	unique_ptr<IRpFile> file(new RpFile(d->filename, RpFile::FM_OPEN_READ));
-	if (!file || !file->isOpen()) {
+	RpFile *const file = new RpFile(d->filename, RpFile::FM_OPEN_READ_GZ);
+	if (!file->isOpen()) {
+		// Unable to open the file.
+		file->unref();
 		return E_FAIL;
 	}
 
 	// Get the appropriate RomData class for this ROM.
 	// RomData class *must* support at least one image type.
-	d->romData = RomDataFactory::create(file.get(), true);
+	d->romData = RomDataFactory::create(file, RomDataFactory::RDA_HAS_THUMBNAIL);
+	file->unref();
 
 	// NOTE: Since this is the registered image extractor
 	// for the file type, we have to implement our own
@@ -176,6 +158,9 @@ IFACEMETHODIMP RP_ExtractImage::GetLocation(LPWSTR pszPathBuffer,
 	DWORD cchMax, DWORD *pdwPriority, const SIZE *prgSize,
 	DWORD dwRecClrDepth, DWORD *pdwFlags)
 {
+	((void)pszPathBuffer);
+	((void)cchMax);
+
 	// TODO: If the image is cached on disk, return a filename.
 	if (!prgSize || !pdwFlags) {
 		// Invalid arguments.
@@ -240,11 +225,17 @@ IFACEMETHODIMP RP_ExtractImage::Extract(HBITMAP *phBmpImage)
 
 	// ROM is supported. Get the image.
 	// NOTE: Using width only. (TODO: both width/height?)
-	int ret = d->thumbnailer.getThumbnail(d->romData, d->rgSize.cx, *phBmpImage);
-	if (ret != 0 || !*phBmpImage) {
+	CreateThumbnail::GetThumbnailOutParams_t outParams;
+	outParams.retImg = nullptr;
+	int ret = d->thumbnailer.getThumbnail(d->romData, d->rgSize.cx, &outParams);
+	if (ret != 0 || !outParams.retImg) {
 		// ROM is not supported. Use the fallback.
+		if (outParams.retImg) {
+			DeleteBitmap(outParams.retImg);
+		}
 		return d->Fallback(phBmpImage);
 	}
+	*phBmpImage = outParams.retImg;
 	return S_OK;
 }
 
@@ -266,8 +257,11 @@ IFACEMETHODIMP RP_ExtractImage::GetDateStamp(FILETIME *pDateStamp)
 		return E_INVALIDARG;
 	}
 
-	// open the file and get last write time
-	HANDLE hFile = CreateFile(RP2W_s(d->filename),
+	// Open the file and get the last write time.
+	// NOTE: LibRpBase::FileSystem::get_mtime() exists,
+	// but its resolution is seconds, less than FILETIME.
+	const tstring tfilename = U82T_s(d->filename);
+	HANDLE hFile = CreateFile(tfilename.c_str(),
 		GENERIC_READ, FILE_SHARE_READ, NULL,
 		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (!hFile) {

@@ -2,20 +2,8 @@
  * ROM Properties Page shell extension. (GTK+ common)                      *
  * GdkImageConv.hpp: Helper functions to convert from rp_image to GDK.     *
  *                                                                         *
- * Copyright (c) 2017 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License       *
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.   *
+ * Copyright (c) 2017-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_GTK_GDKIMAGECONV_HPP__
@@ -24,15 +12,15 @@
 // NOTE: GdkPixbuf doesn't natively support 8bpp. Because of this,
 // we can't simply make a GdkPixbuf rp_image backend.
 
-#include "librpbase/common.h"
-#include "librpbase/cpu_dispatch.h"
-namespace LibRpBase {
+#include "common.h"
+#include "librpcpu/cpu_dispatch.h"
+namespace LibRpTexture {
 	class rp_image;
 }
 #include <gdk-pixbuf/gdk-pixbuf.h>
 
 #if defined(RP_CPU_I386) || defined(RP_CPU_AMD64)
-# include "librpbase/cpuflags_x86.h"
+# include "librpcpu/cpuflags_x86.h"
 # define GDKIMAGECONV_HAS_SSSE3 1
 #endif
 
@@ -51,7 +39,7 @@ class GdkImageConv
 		 * @param img	[in] rp_image.
 		 * @return GdkPixbuf, or nullptr on error.
 		 */
-		static GdkPixbuf *rp_image_to_GdkPixbuf_cpp(const LibRpBase::rp_image *img);
+		static GdkPixbuf *rp_image_to_GdkPixbuf_cpp(const LibRpTexture::rp_image *img);
 
 #ifdef GDKIMAGECONV_HAS_SSSE3
 		/**
@@ -60,7 +48,7 @@ class GdkImageConv
 		 * @param img	[in] rp_image.
 		 * @return GdkPixbuf, or nullptr on error.
 		 */
-		static GdkPixbuf *rp_image_to_GdkPixbuf_ssse3(const LibRpBase::rp_image *img);
+		static GdkPixbuf *rp_image_to_GdkPixbuf_ssse3(const LibRpTexture::rp_image *img);
 #endif /* GDKIMAGECONV_HAS_SSSE3 */
 
 		/**
@@ -68,7 +56,7 @@ class GdkImageConv
 		 * @param img	[in] rp_image.
 		 * @return GdkPixbuf, or nullptr on error.
 		 */
-		static IFUNC_INLINE GdkPixbuf *rp_image_to_GdkPixbuf(const LibRpBase::rp_image *img);
+		static IFUNC_INLINE GdkPixbuf *rp_image_to_GdkPixbuf(const LibRpTexture::rp_image *img);
 };
 
 #if !defined(RP_HAS_IFUNC) || (!defined(RP_CPU_I386) && !defined(RP_CPU_AMD64))
@@ -81,7 +69,7 @@ class GdkImageConv
  * @param img rp_image.
  * @return GdkPixbuf, or nullptr on error.
  */
-inline GdkPixbuf *GdkImageConv::rp_image_to_GdkPixbuf(const LibRpBase::rp_image *img)
+inline GdkPixbuf *GdkImageConv::rp_image_to_GdkPixbuf(const LibRpTexture::rp_image *img)
 {
 #ifdef GDKIMAGECONV_HAS_SSSE3
 	if (RP_CPU_HasSSSE3()) {

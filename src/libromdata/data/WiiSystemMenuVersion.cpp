@@ -2,26 +2,12 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * WiiSystemMenuVersion.cpp: Nintendo Wii System Menu version list.        *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2019 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "WiiSystemMenuVersion.hpp"
-
-#include <stdlib.h>
 
 namespace LibRomData {
 
@@ -36,13 +22,13 @@ class WiiSystemMenuVersionPrivate {
 		/**
 		 * Nintendo Wii System Menu version list.
 		 * References:
-		 * - http://wiibrew.org/wiki/System_Menu
-		 * - http://wiiubrew.org/wiki/Title_database
+		 * - https://wiibrew.org/wiki/System_Menu
+		 * - https://wiiubrew.org/wiki/Title_database
 		 * - https://yls8.mtheall.com/ninupdates/reports.php
 		 */
 		struct SysVersionEntry_t {
-			unsigned int version;
-			const char *str;
+			uint16_t version;
+			char str[6];
 		};
 		static const SysVersionEntry_t sysVersionList[];
 
@@ -61,13 +47,13 @@ class WiiSystemMenuVersionPrivate {
 /**
  * Nintendo Wii System Menu version list.
  * References:
- * - http://wiibrew.org/wiki/System_Menu
- * - http://wiiubrew.org/wiki/Title_database
+ * - https://wiibrew.org/wiki/System_Menu
+ * - https://wiiubrew.org/wiki/Title_database
  * - https://yls8.mtheall.com/ninupdates/reports.php
  */
 const WiiSystemMenuVersionPrivate::SysVersionEntry_t WiiSystemMenuVersionPrivate::sysVersionList[] = {
 	// Wii
-	// Reference: http://wiibrew.org/wiki/System_Menu
+	// Reference: https://wiibrew.org/wiki/System_Menu
 	{ 33, "1.0"},
 	{ 97, "2.0U"}, {128, "2.0J"}, {130, "2.0E"},
 	{162, "2.1E"},
@@ -85,7 +71,7 @@ const WiiSystemMenuVersionPrivate::SysVersionEntry_t WiiSystemMenuVersionPrivate
 
 	// vWii
 	// References:
-	// - http://wiiubrew.org/wiki/Title_database
+	// - https://wiiubrew.org/wiki/Title_database
 	// - https://yls8.mtheall.com/ninupdates/reports.php
 	// NOTE: These are all listed as 4.3.
 	// NOTE 2: vWii also has 512, 513, and 514.
@@ -93,7 +79,7 @@ const WiiSystemMenuVersionPrivate::SysVersionEntry_t WiiSystemMenuVersionPrivate
 	{608, "4.3J"}, {609, "4.3U"}, {610, "4.3E"},
 
 	// End of list.
-	{0, nullptr}
+	{0, ""}
 };
 
 /**
@@ -121,7 +107,7 @@ int RP_C_API WiiSystemMenuVersionPrivate::compar(const void *a, const void *b)
 const char *WiiSystemMenuVersion::lookup(unsigned int version)
 {
 	// Do a binary search.
-	const WiiSystemMenuVersionPrivate::SysVersionEntry_t key = {version, nullptr};
+	const WiiSystemMenuVersionPrivate::SysVersionEntry_t key = {static_cast<uint16_t>(version), ""};
 	const WiiSystemMenuVersionPrivate::SysVersionEntry_t *res =
 		static_cast<const WiiSystemMenuVersionPrivate::SysVersionEntry_t*>(bsearch(&key,
 			WiiSystemMenuVersionPrivate::sysVersionList,

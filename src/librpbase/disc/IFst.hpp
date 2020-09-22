@@ -2,28 +2,15 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * IFst.hpp: File System Table interface.                                  *
  *                                                                         *
- * Copyright (c) 2016 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBRPBASE_DISC_IFST_HPP__
 #define __ROMPROPERTIES_LIBRPBASE_DISC_IFST_HPP__
 
 #include "librpbase/config.librpbase.h"
-#include "librpbase/common.h"
+#include "common.h"
 
 // C includes.
 #include <stdint.h>
@@ -31,6 +18,9 @@
 // Directory type values.
 // Based on dirent.h from glibc-2.23.
 #include "d_type.h"
+
+// C++ includes.
+#include <string>
 
 namespace LibRpBase {
 
@@ -63,13 +53,13 @@ class IFst
 		/** opendir() interface. **/
 
 		struct DirEnt {
-			int64_t offset;		// Starting address.
-			int64_t size;		// File size.
-			uint8_t type;		// File type. (See d_type.h)
+			off64_t offset;		// Starting address.
+			off64_t size;		// File size.
 			const char *name;	// Filename.
 
 			// TODO: Additional placeholders?
 			int idx;		// File index.
+			uint8_t type;		// File type. (See d_type.h)
 		};
 
 		struct Dir {

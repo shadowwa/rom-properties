@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (libwin32common)                   *
  * ComBase.hpp: Base class for COM objects.                                *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2018 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBWIN32COMMON_COMBASE_HPP__
@@ -35,15 +22,19 @@
 
 namespace LibWin32Common {
 
-// QISearch() function pointer.
-extern PFNQISEARCH pQISearch;
+// Manipulate the global COM reference count.
+void incRpGlobalRefCount(void);
+void decRpGlobalRefCount(void);
 
 // References of all objects.
 extern volatile ULONG RP_ulTotalRefCount;
 
-// Manipulate the global COM reference count.
-void incRpGlobalRefCount(void);
-void decRpGlobalRefCount(void);
+// QISearch() [our own implementation]
+HRESULT WINAPI rp_QISearch(_Inout_ void *that, _In_ LPCQITAB pqit, _In_ REFIID riid, _COM_Outptr_ void **ppv);
+
+// IsThemeActive() [uxtheme.dll]
+typedef BOOL (STDAPICALLTYPE* PFNISTHEMEACTIVE)(void);
+extern PFNISTHEMEACTIVE pfnIsThemeActive;
 
 /**
  * Is an RP_ComBase object referenced?
@@ -69,14 +60,14 @@ static inline bool ComBase_isReferenced(void)
 	\
 	public: \
 		/** IUnknown **/ \
-		IFACEMETHODIMP_(ULONG) AddRef(void) override final \
+		IFACEMETHODIMP_(ULONG) AddRef(void) final \
 		{ \
 			incRpGlobalRefCount(); \
 			InterlockedIncrement(&m_ulRefCount); \
 			return m_ulRefCount; \
 		} \
 		\
-		IFACEMETHODIMP_(ULONG) Release(void) override final \
+		IFACEMETHODIMP_(ULONG) Release(void) final \
 		{ \
 			ULONG ulRefCount = InterlockedDecrement(&m_ulRefCount); \
 			if (ulRefCount == 0) { \
@@ -102,4 +93,4 @@ class ComBase3 : public I1, public I2, public I3
 
 }
 
-#endif /* __ROMPROPERTIES_WIN32_RP_COMBASE_HPP__ */
+#endif /* __ROMPROPERTIES_LIBWIN32COMMON_COMBASE_HPP__ */

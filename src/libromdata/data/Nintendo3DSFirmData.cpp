@@ -2,27 +2,12 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * Nintendo3DSFirmData.cpp: Nintendo 3DS firmware data.                    *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2019 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "Nintendo3DSFirmData.hpp"
-
-// C includes.
-#include <stdlib.h>
 
 namespace LibRomData {
 
@@ -66,6 +51,7 @@ const Nintendo3DSFirmData::FirmBin_t Nintendo3DSFirmDataPrivate::firmBins[] = {
 	{0x41C8A171, {2,52, 0}, {11,2}, false},
 	{0x4380DB8D, {2,46, 0}, { 9,0}, false},
 	{0x4A07016A, {2,54, 0}, {11,4}, true},
+	{0x4EE22A07, {2,55, 0}, {11,8}, false},
 	{0x528E293F, {2,37, 0}, { 6,0}, false},
 	{0x584C9AF5, {2,48, 3}, { 9,3}, false},
 	{0x6488499E, {2,33, 4}, { 4,0}, false},
@@ -87,6 +73,7 @@ const Nintendo3DSFirmData::FirmBin_t Nintendo3DSFirmDataPrivate::firmBins[] = {
 	{0xACCC5EC4, {2,50,11}, {10,4}, true},
 	{0xB7B6499E, {2,50, 1}, { 9,6}, true},
 	{0xBDD9D878, {2,50, 9}, {10,2}, false},
+	{0xC110E2F9, {2,56, 0}, {11,12}, true},
 	{0xC5380DCC, {2,53, 0}, {11,3}, true},
 	{0xC645B9A5, {2,50, 1}, { 9,6}, false},
 	{0xC9829406, {2,29, 7}, { 2,0}, false},
@@ -94,7 +81,9 @@ const Nintendo3DSFirmData::FirmBin_t Nintendo3DSFirmDataPrivate::firmBins[] = {
 	{0xE0D74F64, {2,32,15}, { 3,0}, false},
 	{0xE25F25F5, {2,31,40}, { 2,2}, false},
 	{0xEA07F21E, {2,40, 0}, { 7,2}, false},
+	{0xEE23547A, {2,55, 0}, {11,8}, true},
 	{0xF5D833A2, {2,51, 2}, {11,1}, true},
+	{0xFA7997F7, {2,56, 0}, {11,12}, false},
 	{0xFFA6777A, {2,48, 3}, { 9,3}, true},
 
 	{0, {0,0,0}, {0,0}, false}

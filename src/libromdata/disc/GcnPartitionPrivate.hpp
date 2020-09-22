@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * GcnPartitionPrivate.hpp: GCN/Wii partition private class.               *
  *                                                                         *
- * Copyright (c) 2016 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBROMDATA_DISC_GCNPARTITIONPRIVATE_HPP__
@@ -37,8 +24,9 @@ class GcnFst;
 class GcnPartitionPrivate
 {
 	public:
-		GcnPartitionPrivate(GcnPartition *q, LibRpBase::IDiscReader *discReader,
-			int64_t partition_offset, uint8_t offsetShift = 0);
+		GcnPartitionPrivate(GcnPartition *q,
+			off64_t partition_offset, off64_t data_size,
+			uint8_t offsetShift = 0);
 		virtual ~GcnPartitionPrivate();
 
 	private:
@@ -47,29 +35,27 @@ class GcnPartitionPrivate
 		GcnPartition *const q_ptr;
 
 	public:
-		uint8_t offsetShift;	// GCN == 0, Wii == 2
-
-		LibRpBase::IDiscReader *discReader;
-
 		// Offsets. (-1 == error)
 		// For GCN, these are usually 0.
 		// For Wii, partition_offset is the start of the partition,
 		// and data_offset is the start of the encrypted data.
-		int64_t partition_offset;	// Partition start offset.
-		int64_t data_offset;		// Data start offset.
+		off64_t partition_offset;	// Partition start offset.
+		off64_t data_offset;		// Data start offset.
 
 		// Partition size.
 		// For GCN, these are both the size of the disc images.
 		// For Wii, partition_size is the entire partition, including
 		// header and hashes, while data size is the data area without
 		// any of the hash sections.
-		int64_t partition_size;		// Partition size, including header and hashes.
-		int64_t data_size;		// Data size, excluding hashes.
+		off64_t partition_size;		// Partition size, including header and hashes.
+		off64_t data_size;		// Data size, excluding hashes.
 
 		// Boot block and info.
 		GCN_Boot_Block bootBlock;
 		GCN_Boot_Info bootInfo;		// bi2.bin
 		bool bootLoaded;
+
+		uint8_t offsetShift;		// GCN == 0, Wii == 2
 
 		/**
 		 * Load the boot block and boot info.

@@ -24,14 +24,19 @@
        <string>&amp;Image Types</string>
       </attribute>
      </widget>
-     <widget class="DownloadsTab" name="tabDownloads">
+     <widget class="SystemsTab" name="tabSystems">
       <attribute name="title">
-       <string>&amp;Downloads</string>
+       <string>&amp;Systems</string>
+      </attribute>
+     </widget>
+     <widget class="OptionsTab" name="tabOptions">
+      <attribute name="title">
+       <string>&amp;Options</string>
       </attribute>
      </widget>
      <widget class="AboutTab" name="tabAbout">
       <attribute name="title">
-       <string>&amp;About</string>
+       <string>About</string>
       </attribute>
      </widget>
     </widget>
@@ -62,9 +67,9 @@
    </slots>
   </customwidget>
   <customwidget>
-   <class>DownloadsTab</class>
+   <class>OptionsTab</class>
    <extends>QWidget</extends>
-   <header>config/DownloadsTab.hpp</header>
+   <header>config/OptionsTab.hpp</header>
    <container>1</container>
    <slots>
     <signal>modified()</signal>
@@ -77,6 +82,12 @@
    <class>AboutTab</class>
    <extends>QWidget</extends>
    <header>config/AboutTab.hpp</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>SystemsTab</class>
+   <extends>QWidget</extends>
+   <header>config/SystemsTab.hpp</header>
    <container>1</container>
   </customwidget>
  </customwidgets>

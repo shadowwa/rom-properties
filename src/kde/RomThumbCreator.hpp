@@ -1,22 +1,9 @@
 /***************************************************************************
- * ROM Properties Page shell extension. (KDE4/KDE5)                        *
+ * ROM Properties Page shell extension. (KDE4/KF5)                         *
  * RomThumbCreator.hpp: Thumbnail creator.                                 *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_KDE_ROMTHUMBCREATOR_HPP__
@@ -26,7 +13,7 @@
 #include <kio/thumbcreator.h>
 
 // TODO: ThumbCreatorV2 on KDE4 for user configuration?
-// (This was merged into ThumbCreator for KDE5.)
+// (This was merged into ThumbCreator for KF5.)
 
 class RomThumbCreatorPrivate;
 class RomThumbCreator : public ThumbCreator
@@ -54,7 +41,7 @@ class RomThumbCreator : public ThumbCreator
 		 * @return @c true if a preview was successfully generated and store in @p
 		 *         img, @c false otherwise.
 		 */
-		virtual bool create(const QString &path, int width, int height, QImage &img) override final;
+		bool create(const QString &path, int width, int height, QImage &img) final;
 
 		/**
 		 * Returns the flags for this plugin.
@@ -62,7 +49,7 @@ class RomThumbCreator : public ThumbCreator
 		 * @return XOR'd flags values.
 		 * @see Flags
 		 */
-		virtual Flags flags(void) const override final;
+		Flags flags(void) const final;
 
 	private:
 		typedef ThumbCreator super;

@@ -2,35 +2,20 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * dmg_structs.h: Game Boy (DMG/CGB/SGB) data structures.                  *
  *                                                                         *
- * Copyright (c) 2016 by David Korth.                                      *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
  * Copyright (c) 2016 by Egor.                                             *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBROMDATA_DMG_STRUCTS_H__
 #define __ROMPROPERTIES_LIBROMDATA_DMG_STRUCTS_H__
 
-#include "librpbase/common.h"
 #include <stdint.h>
+#include "common.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#pragma pack(1)
 
 /**
  * Game Boy ROM header.
@@ -41,7 +26,7 @@ extern "C" {
  * 
  * NOTE: Strings are NOT null-terminated!
  */
-typedef struct PACKED _DMG_RomHeader {
+typedef struct _DMG_RomHeader {
 	uint8_t entry[4];
 	uint8_t nintendo[0x30];
 
@@ -81,7 +66,70 @@ typedef struct PACKED _DMG_RomHeader {
 } DMG_RomHeader;
 ASSERT_STRUCT(DMG_RomHeader, 80);
 
-#pragma pack()
+/**
+ * GBX footer.
+ * All fields are in big-endian.
+ *
+ * References:
+ * - http://hhug.me/gbx/1.0
+ * - https://github.com/GerbilSoft/rom-properties/issues/125
+ */
+#define GBX_MAGIC 'GBX!'
+typedef struct _GBX_Footer {
+	/** Cartridge information. **/
+	union {
+		char mapper[4];		// [0x000] Mapper identifier. (ASCII; NULL-padded)
+		uint32_t mapper_id;	// [0x000] Mapper identifier. (See GBX_Mapper_e.)
+	};
+	uint8_t battery_flag;		// [0x004] 1 if battery is present; 0 if not.
+	uint8_t rumble_flag;		// [0x005] 1 if rumble is present; 0 if not.
+	uint8_t timer_flag;		// [0x006] 1 if timer is present; 0 if not.
+	uint8_t reserved1;		// [0x007]
+	uint32_t rom_size;		// [0x008] ROM size, in bytes.
+	uint32_t ram_size;		// [0x00C] RAM size, in bytes.
+	uint32_t mapper_vars[8];	// [0x010] Mapper-specific variables.
+
+	/** GBX metadata. **/
+	uint32_t footer_size;		// [0x030] Footer size, in bytes. (Should be 64.)
+	struct {
+		uint32_t major;		// [0x034] Major version number.
+		uint32_t minor;		// [0x038] Minor version number.
+	} version;
+	uint32_t magic;			// [0x03C] "GBX!"
+} GBX_Footer;
+ASSERT_STRUCT(GBX_Footer, 64);
+
+/**
+ * GBX: Mapper FourCCs.
+ */
+typedef enum {
+	// Nintendo
+	GBX_MAPPER_ROM_ONLY		= 0x524F4D00U,	// 'ROM\0'
+	GBX_MAPPER_MBC1			= 'MBC1',
+	GBX_MAPPER_MBC2			= 'MBC2',
+	GBX_MAPPER_MBC3			= 'MBC3',
+	GBX_MAPPER_MBC5			= 'MBC5',
+	GBX_MAPPER_MBC7			= 'MBC7',
+	GBX_MAPPER_MBC1_MULTICART	= 'MB1M',
+	GBX_MAPPER_MMM01		= 'MMM1',
+	GBX_MAPPER_POCKET_CAMERA	= 'CAMR',
+
+	// Licensed third-party
+	GBX_MAPPER_HuC1			= 'HUC1',
+	GBX_MAPPER_HuC3			= 'HUC3',
+	GBX_MAPPER_TAMA5		= 'TAM5',
+
+	// Unlicensed
+	GBX_MAPPER_BBD			= 0x42424400U,	// 'BBD\0'
+	GBX_MAPPER_HITEK		= 'HITK',
+	GBX_MAPPER_SINTAX		= 'SNTX',
+	GBX_MAPPER_NT_OLDER_TYPE_1	= 'NTO1',
+	GBX_MAPPER_NT_OLDER_TYPE_2	= 'NTO2',
+	GBX_MAPPER_NT_NEWER		= 0x4E544E00,	// 'NTN\0'
+	GBX_MAPPER_LI_CHENG		= 'LICH',
+	GBX_MAPPER_LAST_BIBLE		= 'LBMC',
+	GBX_MAPPER_LIEBAO		= 'LIBA',
+} GBX_Mapper_e;
 
 #ifdef __cplusplus
 }

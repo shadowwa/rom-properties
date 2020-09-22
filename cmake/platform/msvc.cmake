@@ -7,27 +7,31 @@ ENDIF()
 # - MSVC "logo" messages
 # - C4355: 'this' used in base member initializer list (used for Qt Dpointer pattern)
 # - MSVCRT "deprecated" functions
+# - std::tr1 deprecation
 # Increase some warnings to errors:
 # - C4013: function undefined; this is allowed in C, but will
 #   probably cause a linker error.
-SET(RP_C_FLAGS_COMMON "/nologo /wd4355 /wd4482 /we4013 -D_CRT_SECURE_NO_WARNINGS -D_CRT_SECURE_NO_DEPRECATE -D_CRT_NONSTDC_NO_DEPRECATE")
-SET(RP_CXX_FLAGS_COMMON "${RP_C_FLAGS_COMMON}")
+# - C4024: 'function': different types for formal and actual parameter n
+# - C4047: 'function': 'parameter' differs in levels of indirection from 'argument'
+SET(RP_C_FLAGS_COMMON "/nologo /wd4355 /wd4482 /we4013 /we4024 /we4047")
+SET(RP_CXX_FLAGS_COMMON "${RP_C_FLAGS_COMMON} -D_SILENCE_TR1_NAMESPACE_DEPRECATION_WARNING")
+ADD_DEFINITIONS(-D_CRT_SECURE_NO_WARNINGS -D_CRT_SECURE_NO_DEPRECATE -D_CRT_NONSTDC_NO_DEPRECATE)
 # NOTE: /TSAWARE is automatically set for Windows 2000 and later. (as of at least Visual Studio .NET 2003)
 # NOTE 2: /TSAWARE is not applicable for DLLs.
 SET(RP_EXE_LINKER_FLAGS_COMMON "/NOLOGO /DYNAMICBASE /NXCOMPAT /LARGEADDRESSAWARE")
 SET(RP_SHARED_LINKER_FLAGS_COMMON "${RP_EXE_LINKER_FLAGS_COMMON}")
 SET(RP_MODULE_LINKER_FLAGS_COMMON "${RP_EXE_LINKER_FLAGS_COMMON}")
 
-# Check what flag is needed for stack smashing protection.
-INCLUDE(CheckStackProtectorCompilerFlag)
-CHECK_STACK_PROTECTOR_COMPILER_FLAG(RP_STACK_CFLAG)
-SET(RP_C_FLAGS_COMMON "${RP_C_FLAGS_COMMON} ${RP_STACK_CFLAG}")
-SET(RP_CXX_FLAGS_COMMON "${RP_CXX_FLAGS_COMMON} ${RP_STACK_CFLAG}")
-UNSET(RP_STACK_CFLAG)
+# Enable /EHsc if it isn't enabled already.
+# Default in most cases; not enabled for MSVC 2019 on ARM or ARM64.
+IF(NOT CMAKE_CXX_FLAGS MATCHES "/EHsc")
+	SET(RP_CXX_FLAGS_COMMON "${RP_CXX_FLAGS_COMMON} /EHsc")
+ENDIF(NOT CMAKE_CXX_FLAGS MATCHES "/EHsc")
 
-# Test for "/sdl" and "/guard:cf".
+# Test for MSVC-specific compiler flags.
+# /utf-8 was added in MSVC 2015.
 INCLUDE(CheckCCompilerFlag)
-FOREACH(FLAG_TEST "/sdl" "/guard:cf")
+FOREACH(FLAG_TEST "/sdl" "/guard:cf" "/utf-8")
 	# CMake doesn't like certain characters in variable names.
 	STRING(REGEX REPLACE "/|:" "_" FLAG_TEST_VARNAME "${FLAG_TEST}")
 
@@ -73,21 +77,15 @@ ENDIF()
 SET(CMAKE_ASM_MASM_FLAGS "/W0 /safeseh" CACHE STRING
      "Flags used by the assembler during all build types.")
 
-# CPU architecture.
-STRING(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" arch)
-
 # Check if CMAKE_SIZEOF_VOID_P is set correctly.
 IF(NOT CMAKE_SIZEOF_VOID_P)
 	# CMAKE_SIZEOF_VOID_P isn't set.
 	# Set it based on CMAKE_SYSTEM_PROCESSOR.
 	# FIXME: This won't work if we're cross-compiling, e.g. using
 	# the x86_amd64 or amd64_x86 toolchains.
-	IF(arch MATCHES "^x86_64$|^amd64$|^ia64$")
+	IF(CMAKE_CL_64)
 		SET(CMAKE_SIZEOF_VOID_P 8)
-	ELSEIF(arch MATCHES "^(i.|x)86$")
-		SET(CMAKE_SIZEOF_VOID_P 4)
 	ELSE()
-		# Assume other CPUs are 32-bit.
 		SET(CMAKE_SIZEOF_VOID_P 4)
 	ENDIF()
 ENDIF(NOT CMAKE_SIZEOF_VOID_P)
@@ -95,11 +93,12 @@ ENDIF(NOT CMAKE_SIZEOF_VOID_P)
 # Use stdcall on i386.
 # Applies to unexported functions only.
 # Exported functions must have explicit calling conventions.
-IF(arch MATCHES "^(i.|x)86$|^x86_64$|^amd64$|^ia64$" AND NOT CMAKE_CL_64)
-	SET(RP_C_FLAGS_COMMON   "${RP_C_FLAGS_COMMON} /Gz")
-	SET(RP_CXX_FLAGS_COMMON "${RP_CXX_FLAGS_COMMON} /Gz")
-ENDIF()
-UNSET(arch)
+IF(CPU_i386 OR CPU_amd64)
+	IF(NOT CMAKE_CL_64)
+		SET(RP_C_FLAGS_COMMON   "${RP_C_FLAGS_COMMON} /Gz")
+		SET(RP_CXX_FLAGS_COMMON "${RP_CXX_FLAGS_COMMON} /Gz")
+	ENDIF(NOT CMAKE_CL_64)
+ENDIF(CPU_i386 OR CPU_amd64)
 
 # TODO: Code coverage checking for MSVC?
 IF(ENABLE_COVERAGE)

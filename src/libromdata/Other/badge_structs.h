@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * badge_structs.h: Nintendo Badge Arcade data structures.                 *
  *                                                                         *
- * Copyright (c) 2017 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2017-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBROMDATA_BADGE_STRUCTS_H__
@@ -29,14 +16,12 @@
  * - https://github.com/TheMachinumps/Advanced-badge-editor
  */
 
-#include "librpbase/common.h"
 #include <stdint.h>
+#include "common.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#pragma pack(1)
 
 // Badge dimensions.
 #define BADGE_SIZE_SMALL_W 32
@@ -53,11 +38,13 @@ extern "C" {
  * If width * height == 1: Image data starts at 0x1100.
  * Otherwise, image data starts at 0x4300.
  *
- * All fields are in little-endian.
+ * All fields are in little-endian,
+ * except for the magic number.
  */
-#define BADGE_PRBS_MAGIC "PRBS"
+#define BADGE_PRBS_MAGIC 'PRBS'
+#pragma pack(1)
 typedef struct PACKED _Badge_PRBS_Header {
-	char magic[4];		// [0x000] "PRBS"
+	uint32_t magic;		// [0x000] 'PRBS' (big-endian)
 	uint8_t reserved1[56];	// [0x004] Unknown
 	uint32_t badge_id;	// [0x03C] Badge ID
 	uint8_t reserved2[4];	// [0x040] Unknown
@@ -79,6 +66,7 @@ typedef struct PACKED _Badge_PRBS_Header {
 	char16_t name[16][128];	// [0x0E0] Badge names. (UTF-16LE)
 } Badge_PRBS_Header;
 ASSERT_STRUCT(Badge_PRBS_Header, 0x10E0);
+#pragma pack()
 
 /**
  * CABS: Badge set file.
@@ -87,11 +75,12 @@ ASSERT_STRUCT(Badge_PRBS_Header, 0x10E0);
  *
  * Image data starts at 0x2080;
  *
- * All fields are in little-endian.
+ * All fields are in little-endian,
+ * except for the magic number.
  */
-#define BADGE_CABS_MAGIC "CABS"
-typedef struct PACKED _Badge_CABS_Header {
-	char magic[4];		// [0x000] "CABS"
+#define BADGE_CABS_MAGIC 'CABS'
+typedef struct _Badge_CABS_Header {
+	uint32_t magic;		// [0x000] 'CABS'
 	uint8_t reserved1[32];	// [0x004] Unknown
 	uint32_t set_id;	// [0x024] Set ID.
 	uint8_t reserved2[4];	// [0x028] Unknown
@@ -100,8 +89,6 @@ typedef struct PACKED _Badge_CABS_Header {
 	char16_t name[16][128];	// [0x068] Set names. (UTF-16LE)
 } Badge_CABS_Header;
 ASSERT_STRUCT(Badge_CABS_Header, 0x1068);
-
-#pragma pack()
 
 #ifdef __cplusplus
 }

@@ -2,37 +2,26 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * RpImageLoader.cpp: Image loader class.                                  *
  *                                                                         *
- * Copyright (c) 2016 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
-#include "librpbase/config.librpbase.h"
+#include "stdafx.h"
+#include "config.librpbase.h"
 
 #include "RpImageLoader.hpp"
-#include "rp_image.hpp"
-#include "../file/IRpFile.hpp"
+#include "librpfile/IRpFile.hpp"
+
+// librpfile, librptexture
+#include "librptexture/img/rp_image.hpp"
+using LibRpFile::IRpFile;
+using LibRpTexture::rp_image;
 
 // Image loaders.
 #include "RpPng.hpp"
 #ifdef HAVE_JPEG
-#include "RpJpeg.hpp"
+# include "RpJpeg.hpp"
 #endif /* HAVE_JPEG */
-
-// C includes. (C++ namespace)
-#include <cstring>
 
 namespace LibRpBase {
 

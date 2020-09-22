@@ -2,25 +2,13 @@
  * ROM Properties Page shell extension. (libromdata/tests)                 *
  * SuperMagicDriveTest.cpp: SuperMagicDrive class test.                    *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 // Google Test
 #include "gtest/gtest.h"
+#include "tcharx.h"
 
 // SuperMagicDrive
 #include "libromdata/utils/SuperMagicDrive.hpp"
@@ -28,10 +16,6 @@
 
 // C includes. (C++ namespace)
 #include <cstdio>
-
-// C++ includes.
-#include <memory>
-using std::unique_ptr;
 
 // zlib
 #define CHUNK 4096
@@ -87,8 +71,8 @@ class SuperMagicDriveTest : public ::testing::Test
 		static int decompress(void);
 
 	public:
-		virtual void SetUp(void) override final;
-		virtual void TearDown(void) override final;
+		void SetUp(void) final;
+		void TearDown(void) final;
 
 	public:
 		// Temporary aligned memory buffer.
@@ -217,7 +201,8 @@ int SuperMagicDriveTest::decompress(uint8_t *pOut, unsigned int out_len, const u
 int SuperMagicDriveTest::decompress(void)
 {
 	m_bin_data = static_cast<uint8_t*>(aligned_malloc(16, OUT_BLOCK_UNZ_SIZE));
-	int ret = decompress(m_bin_data, OUT_BLOCK_UNZ_SIZE, bin_data_gz, (unsigned int)sizeof(bin_data_gz));
+	int ret = decompress(m_bin_data, OUT_BLOCK_UNZ_SIZE, bin_data_gz,
+		static_cast<unsigned int>(sizeof(bin_data_gz)));
 	if (ret != 0) {
 		aligned_free(m_bin_data);
 		m_bin_data = nullptr;
@@ -225,7 +210,8 @@ int SuperMagicDriveTest::decompress(void)
 	}
 
 	m_smd_data = static_cast<uint8_t*>(aligned_malloc(16, OUT_BLOCK_UNZ_SIZE));
-	ret = decompress(m_smd_data, OUT_BLOCK_UNZ_SIZE, smd_data_gz, (unsigned int)sizeof(smd_data_gz));
+	ret = decompress(m_smd_data, OUT_BLOCK_UNZ_SIZE, smd_data_gz,
+		static_cast<unsigned int>(sizeof(smd_data_gz)));
 	if (ret != 0) {
 		aligned_free(m_smd_data);
 		m_smd_data = nullptr;
@@ -341,7 +327,7 @@ TEST_F(SuperMagicDriveTest, decodeBlock_dispatch_benchmark)
 /**
  * Test suite main function.
  */
-extern "C" int gtest_main(int argc, char *argv[])
+extern "C" int gtest_main(int argc, TCHAR *argv[])
 {
 	fprintf(stderr, "LibRomData test suite: SuperMagicDrive tests.\n\n");
 	fprintf(stderr, "Benchmark iterations: %u\n", LibRomData::Tests::SuperMagicDriveTest::BENCHMARK_ITERATIONS);

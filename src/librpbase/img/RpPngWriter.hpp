@@ -2,37 +2,26 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * RpPngWriter.hpp: PNG image writer.                                      *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBRPBASE_IMG_RPPNGWRITER_HPP__
 #define __ROMPROPERTIES_LIBRPBASE_IMG_RPPNGWRITER_HPP__
 
-#include "librpbase/config.librpbase.h"
-#include "../common.h"
-#include "rp_image.hpp"
+#include "common.h"
+#include "librptexture/img/rp_image.hpp"
 
 // C++ includes.
 #include <string>
 #include <vector>
 
+namespace LibRpFile {
+	class IRpFile;
+}
+
 namespace LibRpBase {
 
-class IRpFile;
 struct IconAnimData;
 
 class RpPngWriterPrivate;
@@ -56,7 +45,7 @@ class RpPngWriter
 		 * @param height 	[in] Image height.
 		 * @param format 	[in] Image format.
 		 */
-		RpPngWriter(const char *filename, int width, int height, rp_image::Format format);
+		RpPngWriter(const char *filename, int width, int height, LibRpTexture::rp_image::Format format);
 
 		/**
 		 * Write a raw image to a PNG file.
@@ -76,7 +65,7 @@ class RpPngWriter
 		 * @param height 	[in] Image height.
 		 * @param format 	[in] Image format.
 		 */
-		RpPngWriter(IRpFile *file, int width, int height, rp_image::Format format);
+		RpPngWriter(LibRpFile::IRpFile *file, int width, int height, LibRpTexture::rp_image::Format format);
 
 		/**
 		 * Write an image to a PNG file.
@@ -93,7 +82,7 @@ class RpPngWriter
 		 * @param filename	[in] Filename.
 		 * @param img		[in] rp_image.
 		 */
-		RpPngWriter(const char *filename, const rp_image *img);
+		RpPngWriter(const char *filename, const LibRpTexture::rp_image *img);
 
 		/**
 		 * Write an image to a PNG file.
@@ -111,7 +100,7 @@ class RpPngWriter
 		 * @param file	[in] IRpFile open for writing.
 		 * @param img	[in] rp_image.
 		 */
-		RpPngWriter(IRpFile *file, const rp_image *img);
+		RpPngWriter(LibRpFile::IRpFile *file, const LibRpTexture::rp_image *img);
 
 		/**
 		 * Write an animated image to an APNG file.
@@ -156,7 +145,7 @@ class RpPngWriter
 		 * @param file		[in] IRpFile open for writing.
 		 * @param iconAnimData	[in] Animated image data.
 		 */
-		RpPngWriter(IRpFile *file, const IconAnimData *iconAnimData);
+		RpPngWriter(LibRpFile::IRpFile *file, const IconAnimData *iconAnimData);
 
 		~RpPngWriter();
 
@@ -203,7 +192,7 @@ class RpPngWriter
 		 * @param palette_len	[in,opt] Number of entries in `palette`.
 		 * @return 0 on success; negative POSIX error code on error.
 		 */
-		int write_IHDR(const rp_image::sBIT_t *sBIT, const uint32_t *palette = nullptr, int palette_len = 0);
+		int write_IHDR(const LibRpTexture::rp_image::sBIT_t *sBIT, const uint32_t *palette = nullptr, int palette_len = 0);
 
 		// Key/value pair.
 		// - Key: Must be Latin-1.

@@ -2,50 +2,22 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * GameCubeSave.hpp: Nintendo GameCube save file reader.                   *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "GameCubeSave.hpp"
-#include "librpbase/RomData_p.hpp"
-
 #include "data/NintendoPublishers.hpp"
 #include "gcn_card.h"
 
-// librpbase
-#include "librpbase/common.h"
-#include "librpbase/byteswap.h"
-#include "librpbase/aligned_malloc.h"
-#include "librpbase/TextFuncs.hpp"
-#include "librpbase/file/IRpFile.hpp"
-
-#include "librpbase/img/rp_image.hpp"
-#include "librpbase/img/ImageDecoder.hpp"
-#include "librpbase/img/IconAnimData.hpp"
-
-#include "libi18n/i18n.h"
+// librpbase, librpfile, librptexture
+#include "librpbase/SystemRegion.hpp"
 using namespace LibRpBase;
+using LibRpFile::IRpFile;
+using namespace LibRpTexture;
 
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cctype>
-#include <cerrno>
-#include <cstring>
-
-// C++ includes.
+// C++ STL classes.
 #include <string>
 #include <vector>
 using std::string;
@@ -53,7 +25,10 @@ using std::vector;
 
 namespace LibRomData {
 
-class GameCubeSavePrivate : public RomDataPrivate
+ROMDATA_IMPL(GameCubeSave)
+ROMDATA_IMPL_IMG(GameCubeSave)
+
+class GameCubeSavePrivate final : public RomDataPrivate
 {
 	public:
 		GameCubeSavePrivate(GameCubeSave *q, IRpFile *file);
@@ -77,14 +52,16 @@ class GameCubeSavePrivate : public RomDataPrivate
 		card_direntry direntry;
 
 		// Save file type.
-		enum SaveType {
-			SAVE_TYPE_UNKNOWN = -1,	// Unknown save type.
+		enum class SaveType {
+			Unknown	= -1,
 
-			SAVE_TYPE_GCI = 0,	// USB Memory Adapter
-			SAVE_TYPE_GCS = 1,	// GameShark
-			SAVE_TYPE_SAV = 2,	// MaxDrive
+			GCI	= 0,	// USB Memory Adapter
+			GCS	= 1,	// GameShark
+			SAV	= 2,	// MaxDrive
+
+			Max
 		};
-		int saveType;
+		SaveType saveType;
 
 		/**
 		 * Byteswap a card_direntry struct.
@@ -130,7 +107,7 @@ GameCubeSavePrivate::GameCubeSavePrivate(GameCubeSave *q, IRpFile *file)
 	: super(q, file)
 	, img_banner(nullptr)
 	, iconAnimData(nullptr)
-	, saveType(SAVE_TYPE_UNKNOWN)
+	, saveType(SaveType::Unknown)
 	, dataOffset(-1)
 {
 	// Clear the directory entry.
@@ -139,13 +116,8 @@ GameCubeSavePrivate::GameCubeSavePrivate(GameCubeSave *q, IRpFile *file)
 
 GameCubeSavePrivate::~GameCubeSavePrivate()
 {
-	delete img_banner;
-	if (iconAnimData) {
-		for (int i = iconAnimData->count-1; i >= 0; i--) {
-			delete iconAnimData->frames[i];
-		}
-		delete iconAnimData;
-	}
+	UNREF(img_banner);
+	UNREF(iconAnimData);
 }
 
 /**
@@ -155,7 +127,7 @@ GameCubeSavePrivate::~GameCubeSavePrivate()
  */
 void GameCubeSavePrivate::byteswap_direntry(card_direntry *direntry, SaveType saveType)
 {
-	if (saveType == SAVE_TYPE_SAV) {
+	if (saveType == SaveType::SAV) {
 		// Swap 16-bit values at 0x2E through 0x40.
 		// Also 0x06 (pad_00 / bannerfmt).
 		// Reference: https://github.com/dolphin-emu/dolphin/blob/master/Source/Core/Core/HW/GCMemcard.cpp
@@ -198,14 +170,14 @@ bool GameCubeSavePrivate::isCardDirEntry(const uint8_t *buffer, uint32_t data_si
 	// TODO: NDDEMO has a NULL in the game ID, but I don't think
 	// it has save files.
 	for (int i = 6-1; i >= 0; i--) {
-		if (!isalnum(direntry->id6[i])) {
+		if (!ISALNUM(direntry->id6[i])) {
 			// Non-alphanumeric character.
 			return false;
 		}
 	}
 
 	// Padding should be 0xFF.
-	if (saveType == SAVE_TYPE_SAV) {
+	if (saveType == SaveType::SAV) {
 		// MaxDrive SAV. pad_00 and bannerfmt are swappde.
 		if (direntry->bannerfmt != 0xFF) {
 			// Incorrect padding.
@@ -232,7 +204,7 @@ bool GameCubeSavePrivate::isCardDirEntry(const uint8_t *buffer, uint32_t data_si
 	// field will always be 1.
 	unsigned int length;
 	switch (saveType) {
-		case SAVE_TYPE_GCS:
+		case SaveType::GCS:
 			// Just check for >= 1.
 			length = be16_to_cpu(direntry->length);
 			if (length == 0) {
@@ -241,7 +213,7 @@ bool GameCubeSavePrivate::isCardDirEntry(const uint8_t *buffer, uint32_t data_si
 			}
 			break;
 
-		case SAVE_TYPE_SAV:
+		case SaveType::SAV:
 			// SAV: Field is little-endian
 			length = le16_to_cpu(direntry->length);
 			if (length * 8192 != data_size) {
@@ -250,7 +222,7 @@ bool GameCubeSavePrivate::isCardDirEntry(const uint8_t *buffer, uint32_t data_si
 			}
 			break;
 
-		case SAVE_TYPE_GCI:
+		case SaveType::GCI:
 		default:
 			// GCI: Field is big-endian.
 			length = be16_to_cpu(direntry->length);
@@ -272,7 +244,7 @@ bool GameCubeSavePrivate::isCardDirEntry(const uint8_t *buffer, uint32_t data_si
 		(dest) = tmp.d; \
 	} while (0)
 	uint32_t iconaddr, commentaddr;
-	if (saveType != SAVE_TYPE_SAV) {
+	if (saveType != SaveType::SAV) {
 		iconaddr = be32_to_cpu(direntry->iconaddr);
 		commentaddr = be32_to_cpu(direntry->commentaddr);
 	} else {
@@ -329,7 +301,7 @@ const rp_image *GameCubeSavePrivate::loadIcon(void)
 	bool is_CI8_shared = false;
 	uint16_t iconfmt = direntry.iconfmt;
 	uint16_t iconspeed = direntry.iconspeed;
-	for (int i = 0; i < CARD_MAXICONS; i++, iconfmt >>= 2, iconspeed >>= 2) {
+	for (unsigned int i = 0; i < CARD_MAXICONS; i++, iconfmt >>= 2, iconspeed >>= 2) {
 		if ((iconspeed & CARD_SPEED_MASK) == CARD_SPEED_END) {
 			// End of the icons.
 			break;
@@ -368,15 +340,10 @@ const rp_image *GameCubeSavePrivate::loadIcon(void)
 
 	// Load the icon data.
 	// TODO: Only read the first frame unless specifically requested?
-	uint8_t *const icondata = static_cast<uint8_t*>(aligned_malloc(16, iconsizetotal));
-	if (!icondata) {
-		// Memory allocation failure.
-		return nullptr;
-	}
-	size_t size = file->seekAndRead(dataOffset + iconaddr, icondata, iconsizetotal);
+	auto icondata = aligned_uptr<uint8_t>(16, iconsizetotal);
+	size_t size = file->seekAndRead(dataOffset + iconaddr, icondata.get(), iconsizetotal);
 	if (size != iconsizetotal) {
 		// Seek and/or read error.
-		aligned_free(icondata);
 		return nullptr;
 	}
 
@@ -384,7 +351,7 @@ const rp_image *GameCubeSavePrivate::loadIcon(void)
 	if (is_CI8_shared) {
 		// Shared CI8 palette is at the end of the data.
 		pal_CI8_shared = reinterpret_cast<const uint16_t*>(
-			&icondata[iconsizetotal - (256*2)]);
+			icondata.get() + (iconsizetotal - (256*2)));
 	}
 
 	this->iconAnimData = new IconAnimData();
@@ -394,7 +361,7 @@ const rp_image *GameCubeSavePrivate::loadIcon(void)
 	iconfmt = direntry.iconfmt;
 	iconspeed = direntry.iconspeed;
 	for (int i = 0; i < CARD_MAXICONS; i++, iconfmt >>= 2, iconspeed >>= 2) {
-		const int delay = (iconspeed & CARD_SPEED_MASK);
+		const unsigned int delay = (iconspeed & CARD_SPEED_MASK);
 		if (delay == CARD_SPEED_END) {
 			// End of the icons.
 			break;
@@ -403,17 +370,17 @@ const rp_image *GameCubeSavePrivate::loadIcon(void)
 		// Icon delay.
 		// Using 125ms for the fastest speed.
 		// TODO: Verify this?
-		iconAnimData->delays[i].numer = (uint16_t)delay;
+		iconAnimData->delays[i].numer = static_cast<uint16_t>(delay);
 		iconAnimData->delays[i].denom = 8;
 		iconAnimData->delays[i].ms = delay * 125;
 
 		switch (iconfmt & CARD_ICON_MASK) {
 			case CARD_ICON_RGB: {
 				// RGB5A3
-				const unsigned int iconsize = CARD_ICON_W * CARD_ICON_H * 2;
+				static const unsigned int iconsize = CARD_ICON_W * CARD_ICON_H * 2;
 				iconAnimData->frames[i] = ImageDecoder::fromGcn16(ImageDecoder::PXF_RGB5A3,
 					CARD_ICON_W, CARD_ICON_H,
-					reinterpret_cast<const uint16_t*>(&icondata[iconaddr_cur]),
+					reinterpret_cast<const uint16_t*>(icondata.get() + iconaddr_cur),
 					iconsize);
 				iconaddr_cur += iconsize;
 				break;
@@ -422,20 +389,20 @@ const rp_image *GameCubeSavePrivate::loadIcon(void)
 			case CARD_ICON_CI_UNIQUE: {
 				// CI8 with a unique palette.
 				// Palette is located immediately after the icon.
-				const unsigned int iconsize = CARD_ICON_W * CARD_ICON_H * 1;
+				static const unsigned int iconsize = CARD_ICON_W * CARD_ICON_H * 1;
 				iconAnimData->frames[i] = ImageDecoder::fromGcnCI8(
 					CARD_ICON_W, CARD_ICON_H,
-					&icondata[iconaddr_cur], iconsize,
-					reinterpret_cast<const uint16_t*>(&icondata[iconaddr_cur+iconsize]), 256*2);
+					icondata.get() + iconaddr_cur, iconsize,
+					reinterpret_cast<const uint16_t*>(icondata.get() + iconaddr_cur + iconsize), 256*2);
 				iconaddr_cur += iconsize + (256*2);
 				break;
 			}
 
 			case CARD_ICON_CI_SHARED: {
-				const unsigned int iconsize = CARD_ICON_W * CARD_ICON_H * 1;
+				static const unsigned int iconsize = CARD_ICON_W * CARD_ICON_H * 1;
 				iconAnimData->frames[i] = ImageDecoder::fromGcnCI8(
 					CARD_ICON_W, CARD_ICON_H,
-					&icondata[iconaddr_cur], iconsize,
+					icondata.get() + iconaddr_cur, iconsize,
 					pal_CI8_shared, 256*2);
 				iconaddr_cur += iconsize;
 				break;
@@ -451,14 +418,14 @@ const rp_image *GameCubeSavePrivate::loadIcon(void)
 		iconAnimData->count++;
 	}
 
-	// Free the icon data.
-	aligned_free(icondata);
-
 	// NOTE: We're not deleting iconAnimData even if we only have
 	// a single icon because iconAnimData() will call loadIcon()
 	// if iconAnimData is nullptr.
 
 	// Set up the icon animation sequence.
+	// FIXME: This isn't done correctly if blank frames are present
+	// and the icon uses the "bounce" animation.
+	// 'rpcli -a' fails as a result.
 	int idx = 0;
 	for (int i = 0; i < iconAnimData->count; i++, idx++) {
 		iconAnimData->seq_index[idx] = i;
@@ -545,7 +512,7 @@ const rp_image *GameCubeSavePrivate::loadBanner(void)
  * Read a Nintendo GameCube save file.
  *
  * A save file must be opened by the caller. The file handle
- * will be dup()'d and must be kept open in order to load
+ * will be ref()'d and must be kept open in order to load
  * data from the disc image.
  *
  * To close the file, either delete this object or call close().
@@ -560,10 +527,11 @@ GameCubeSave::GameCubeSave(IRpFile *file)
 	// This class handles save files.
 	RP_D(GameCubeSave);
 	d->className = "GameCubeSave";
-	d->fileType = FTYPE_SAVE_FILE;
+	d->mimeType = "application/x-gamecube-save";	// unofficial, not on fd.o
+	d->fileType = FileType::SaveFile;
 
 	if (!d->file) {
-		// Could not dup() the file handle.
+		// Could not ref() the file handle.
 		return;
 	}
 
@@ -571,8 +539,10 @@ GameCubeSave::GameCubeSave(IRpFile *file)
 	uint8_t header[1024];
 	d->file->rewind();
 	size_t size = d->file->read(&header, sizeof(header));
-	if (size != sizeof(header))
+	if (size != sizeof(header)) {
+		UNREF_AND_NULL_NOCHK(d->file);
 		return;
+	}
 
 	// Check if this disc image is supported.
 	DetectInfo info;
@@ -581,23 +551,24 @@ GameCubeSave::GameCubeSave(IRpFile *file)
 	info.header.pData = header;
 	info.ext = nullptr;	// Not needed for GCN save files.
 	info.szFile = d->file->size();
-	d->saveType = isRomSupported_static(&info);
+	d->saveType = static_cast<GameCubeSavePrivate::SaveType>(isRomSupported_static(&info));
 
 	// Save the directory entry for later.
 	uint32_t gciOffset;	// offset to GCI header
 	switch (d->saveType) {
-		case GameCubeSavePrivate::SAVE_TYPE_GCI:
+		case GameCubeSavePrivate::SaveType::GCI:
 			gciOffset = 0;
 			break;
-		case GameCubeSavePrivate::SAVE_TYPE_GCS:
+		case GameCubeSavePrivate::SaveType::GCS:
 			gciOffset = 0x110;
 			break;
-		case GameCubeSavePrivate::SAVE_TYPE_SAV:
+		case GameCubeSavePrivate::SaveType::SAV:
 			gciOffset = 0x80;
 			break;
 		default:
 			// Unknown save type.
-			d->saveType = GameCubeSavePrivate::SAVE_TYPE_UNKNOWN;
+			d->saveType = GameCubeSavePrivate::SaveType::Unknown;
+			UNREF_AND_NULL_NOCHK(d->file);
 			return;
 	}
 
@@ -605,7 +576,7 @@ GameCubeSave::GameCubeSave(IRpFile *file)
 
 	// Save the directory entry for later.
 	memcpy(&d->direntry, &header[gciOffset], sizeof(d->direntry));
-	d->byteswap_direntry(&d->direntry, (GameCubeSavePrivate::SaveType)d->saveType);
+	d->byteswap_direntry(&d->direntry, static_cast<GameCubeSavePrivate::SaveType>(d->saveType));
 	// Data area offset.
 	d->dataOffset = gciOffset + 0x40;
 }
@@ -628,7 +599,7 @@ int GameCubeSave::isRomSupported_static(const DetectInfo *info)
 	{
 		// Either no detection information was specified,
 		// or the header is too small.
-		return -1;
+		return static_cast<int>(GameCubeSavePrivate::SaveType::Unknown);
 	}
 
 	if (info->szFile > ((8192*2043) + 0x110)) {
@@ -646,14 +617,14 @@ int GameCubeSave::isRomSupported_static(const DetectInfo *info)
 		// - 272 bytes: GCS-specific header.
 		// - 64 bytes: CARD directory entry.
 		// TODO: GCS has a user-specified description field and other stuff.
-		const uint32_t data_size = (uint32_t)(info->szFile - 336);
+		const uint32_t data_size = static_cast<uint32_t>(info->szFile - 336);
 		if (data_size % 8192 == 0) {
 			// Check the CARD directory entry.
 			if (GameCubeSavePrivate::isCardDirEntry(
-			    &info->header.pData[0x110], data_size, GameCubeSavePrivate::SAVE_TYPE_GCS))
+			    &info->header.pData[0x110], data_size, GameCubeSavePrivate::SaveType::GCS))
 			{
 				// This is a GCS file.
-				return GameCubeSavePrivate::SAVE_TYPE_GCS;
+				return static_cast<int>(GameCubeSavePrivate::SaveType::GCS);
 			}
 		}
 	}
@@ -666,14 +637,14 @@ int GameCubeSave::isRomSupported_static(const DetectInfo *info)
 		// - 128 bytes: SAV-specific header.
 		// - 64 bytes: CARD directory entry.
 		// TODO: SAV has a copy of the description, plus other fields?
-		const uint32_t data_size = (uint32_t)(info->szFile - 192);
+		const uint32_t data_size = static_cast<uint32_t>(info->szFile - 192);
 		if (data_size % 8192 == 0) {
 			// Check the CARD directory entry.
 			if (GameCubeSavePrivate::isCardDirEntry(
-			    &info->header.pData[0x80], data_size, GameCubeSavePrivate::SAVE_TYPE_SAV))
+			    &info->header.pData[0x80], data_size, GameCubeSavePrivate::SaveType::SAV))
 			{
 				// This is a GCS file.
-				return GameCubeSavePrivate::SAVE_TYPE_SAV;
+				return static_cast<int>(GameCubeSavePrivate::SaveType::SAV);
 			}
 		}
 	}
@@ -681,29 +652,19 @@ int GameCubeSave::isRomSupported_static(const DetectInfo *info)
 	// Check for GCI.
 	// GCI files are a multiple of 8 KB, plus 64 bytes:
 	// - 64 bytes: CARD directory entry.
-	const uint32_t data_size = (uint32_t)(info->szFile - 64);
+	const uint32_t data_size = static_cast<uint32_t>(info->szFile - 64);
 	if (data_size % 8192 == 0) {
 		// Check the CARD directory entry.
 		if (GameCubeSavePrivate::isCardDirEntry(
-		    info->header.pData, data_size, GameCubeSavePrivate::SAVE_TYPE_GCI))
+		    info->header.pData, data_size, GameCubeSavePrivate::SaveType::GCI))
 		{
 			// This is a GCI file.
-			return GameCubeSavePrivate::SAVE_TYPE_GCI;
+			return static_cast<int>(GameCubeSavePrivate::SaveType::GCI);
 		}
 	}
 
 	// Not supported.
-	return -1;
-}
-
-/**
- * Is a ROM image supported by this object?
- * @param info DetectInfo containing ROM detection information.
- * @return Class-specific system ID (>= 0) if supported; -1 if not.
- */
-int GameCubeSave::isRomSupported(const DetectInfo *info) const
-{
-	return isRomSupported_static(info);
+	return static_cast<int>(GameCubeSavePrivate::SaveType::Unknown);
 }
 
 /**
@@ -717,11 +678,28 @@ const char *GameCubeSave::systemName(unsigned int type) const
 	if (!d->isValid || !isSystemNameTypeValid(type))
 		return nullptr;
 
-	// Bits 0-1: Type. (short, long, abbreviation)
+	// GameCube has the same name worldwide, so we can
+	// ignore the region selection.
+	static_assert(SYSNAME_TYPE_MASK == 3,
+		"GameCubeSave::systemName() array index optimization needs to be updated.");
+
+	// Bits 0-1: Type. (long, short, abbreviation)
 	static const char *const sysNames[4] = {
-		// FIXME: "NGC" in Japan?
 		"Nintendo GameCube", "GameCube", "GCN", nullptr
 	};
+
+	// Special check for GCN abbreviation in Japan.
+	if ((type & SYSNAME_REGION_MASK) == SYSNAME_REGION_ROM_LOCAL) {
+		// Localized system name.
+		if ((type & SYSNAME_TYPE_MASK) == SYSNAME_TYPE_ABBREVIATION) {
+			// GameCube abbreviation.
+			// If this is Japan or South Korea, use "NGC".
+			const uint32_t cc = SystemRegion::getCountryCode();
+			if (cc == 'JP' || cc == 'KR') {
+				return "NGC";
+			}
+		}
+	}
 
 	return sysNames[type & SYSNAME_TYPE_MASK];
 }
@@ -752,21 +730,25 @@ const char *const *GameCubeSave::supportedFileExtensions_static(void)
 }
 
 /**
- * Get a list of all supported file extensions.
- * This is to be used for file type registration;
- * subclasses don't explicitly check the extension.
+ * Get a list of all supported MIME types.
+ * This is to be used for metadata extractors that
+ * must indicate which MIME types they support.
  *
- * NOTE: The extensions do not include the leading dot,
- * e.g. "bin" instead of ".bin".
+ * NOTE: The array and the strings in the array should
+ * *not* be freed by the caller.
  *
- * NOTE 2: The strings in the std::vector should *not*
- * be freed by the caller.
- *
- * @return List of all supported file extensions.
+ * @return NULL-terminated array of all supported file extensions, or nullptr on error.
  */
-const char *const *GameCubeSave::supportedFileExtensions(void) const
+const char *const *GameCubeSave::supportedMimeTypes_static(void)
 {
-	return supportedFileExtensions_static();
+	static const char *const mimeTypes[] = {
+		// Unofficial MIME types.
+		// TODO: Get these upstreamed on FreeDesktop.org.
+		"application/x-gamecube-save",
+
+		nullptr
+	};
+	return mimeTypes;
 }
 
 /**
@@ -779,15 +761,6 @@ uint32_t GameCubeSave::supportedImageTypes_static(void)
 }
 
 /**
- * Get a bitfield of image types this class can retrieve.
- * @return Bitfield of supported image types. (ImageTypesBF)
- */
-uint32_t GameCubeSave::supportedImageTypes(void) const
-{
-	return supportedImageTypes_static();
-}
-
-/**
  * Get a list of all available image sizes for the specified image type.
  *
  * The first item in the returned vector is the "default" size.
@@ -796,13 +769,9 @@ uint32_t GameCubeSave::supportedImageTypes(void) const
  * @param imageType Image type.
  * @return Vector of available image sizes, or empty vector if no images are available.
  */
-std::vector<RomData::ImageSizeDef> GameCubeSave::supportedImageSizes_static(ImageType imageType)
+vector<RomData::ImageSizeDef> GameCubeSave::supportedImageSizes_static(ImageType imageType)
 {
-	assert(imageType >= IMG_INT_MIN && imageType <= IMG_EXT_MAX);
-	if (imageType < IMG_INT_MIN || imageType > IMG_EXT_MAX) {
-		// ImageType is out of range.
-		return std::vector<ImageSizeDef>();
-	}
+	ASSERT_supportedImageSizes(imageType);
 
 	switch (imageType) {
 		case IMG_INT_ICON: {
@@ -824,21 +793,7 @@ std::vector<RomData::ImageSizeDef> GameCubeSave::supportedImageSizes_static(Imag
 	}
 
 	// Unsupported image type.
-	return std::vector<ImageSizeDef>();
-}
-
-/**
- * Get a list of all available image sizes for the specified image type.
- *
- * The first item in the returned vector is the "default" size.
- * If the width/height is 0, then an image exists, but the size is unknown.
- *
- * @param imageType Image type.
- * @return Vector of available image sizes, or empty vector if no images are available.
- */
-std::vector<RomData::ImageSizeDef> GameCubeSave::supportedImageSizes(ImageType imageType) const
-{
-	return supportedImageSizes_static(imageType);
+	return vector<ImageSizeDef>();
 }
 
 /**
@@ -852,21 +807,34 @@ std::vector<RomData::ImageSizeDef> GameCubeSave::supportedImageSizes(ImageType i
  */
 uint32_t GameCubeSave::imgpf(ImageType imageType) const
 {
-	assert(imageType >= IMG_INT_MIN && imageType <= IMG_EXT_MAX);
-	if (imageType < IMG_INT_MIN || imageType > IMG_EXT_MAX) {
-		// ImageType is out of range.
-		return 0;
-	}
+	ASSERT_imgpf(imageType);
 
+	uint32_t ret = 0;
 	switch (imageType) {
-		case IMG_INT_ICON:
+		case IMG_INT_ICON: {
+			RP_D(const GameCubeSave);
+			// Use nearest-neighbor scaling when resizing.
+			// Also, need to check if this is an animated icon.
+			const_cast<GameCubeSavePrivate*>(d)->loadIcon();
+			if (d->iconAnimData && d->iconAnimData->count > 1) {
+				// Animated icon.
+				ret = IMGPF_RESCALE_NEAREST | IMGPF_ICON_ANIMATED;
+			} else {
+				// Not animated.
+				ret = IMGPF_RESCALE_NEAREST;
+			}
+			break;
+		}
+
 		case IMG_INT_BANNER:
 			// Use nearest-neighbor scaling.
-			return IMGPF_RESCALE_NEAREST;
+			ret = IMGPF_RESCALE_NEAREST;
+			break;
+
 		default:
 			break;
 	}
-	return 0;
+	return ret;
 }
 
 /**
@@ -877,18 +845,19 @@ uint32_t GameCubeSave::imgpf(ImageType imageType) const
 int GameCubeSave::loadFieldData(void)
 {
 	RP_D(GameCubeSave);
-	if (d->fields->isDataLoaded()) {
+	if (!d->fields->empty()) {
 		// Field data *has* been loaded...
 		return 0;
 	} else if (!d->file || !d->file->isOpen()) {
 		// File isn't open.
 		return -EBADF;
-	} else if (!d->isValid || d->saveType < 0 || d->dataOffset < 0) {
+	} else if (!d->isValid || (int)d->saveType < 0 || d->dataOffset < 0) {
 		// Unknown save file type.
 		return -EIO;
 	}
 
 	// Save file header is read and byteswapped in the constructor.
+	const card_direntry *const direntry = &d->direntry;
 	d->fields->reserve(8);	// Maximum of 8 fields.
 
 	// Game ID.
@@ -896,27 +865,124 @@ int GameCubeSave::loadFieldData(void)
 	// (NDDEMO has ID6 "00\0E01".)
 	char id6[7];
 	for (int i = 0; i < 6; i++) {
-		id6[i] = (isprint(d->direntry.id6[i])
-			? d->direntry.id6[i]
+		id6[i] = (ISPRINT(direntry->id6[i])
+			? direntry->id6[i]
 			: '_');
 	}
 	id6[6] = 0;
-	d->fields->addField_string(C_("GameCubeSave", "Game ID"), latin1_to_utf8(id6, 6));
+	d->fields->addField_string(C_("RomData", "Game ID"), latin1_to_utf8(id6, 6));
 
 	// Look up the publisher.
-	const char *publisher = NintendoPublishers::lookup(d->direntry.company);
-	d->fields->addField_string(C_("GameCubeSave", "Publisher"),
-		publisher ? publisher : C_("GameCubeSave", "Unknown"));
+	const char *publisher = NintendoPublishers::lookup(direntry->company);
+	d->fields->addField_string(C_("RomData", "Publisher"),
+		publisher ? publisher : C_("RomData", "Unknown"));
 
 	// Filename.
 	// TODO: Remove trailing spaces.
 	d->fields->addField_string(C_("GameCubeSave", "Filename"),
 		cp1252_sjis_to_utf8(
-			d->direntry.filename, sizeof(d->direntry.filename)));
+			direntry->filename, sizeof(direntry->filename)));
 
 	// Description.
+	union {
+		struct {
+			char desc[32];
+			char file[32];
+		};
+		char full[64];
+	} comment;
+	size_t size = d->file->seekAndRead(d->dataOffset + direntry->commentaddr,
+					   &comment, sizeof(comment));
+	if (size == sizeof(comment)) {
+		// Add the description.
+		// NOTE: Some games have garbage after the first NULL byte
+		// in the two description fields, which prevents the rest
+		// of the field from being displayed.
+
+		// Check for a NULL byte in the game description.
+		size_t desc_len = sizeof(comment.desc);
+		const char *null_pos = static_cast<const char*>(memchr(comment.desc, 0, desc_len));
+		if (null_pos) {
+			// Found a NULL byte.
+			desc_len = null_pos - comment.desc;
+		}
+		string desc = cp1252_sjis_to_utf8(comment.desc, static_cast<int>(desc_len));
+		desc += '\n';
+
+		// Check for a NULL byte in the file description.
+		desc_len = sizeof(comment.file);
+		null_pos = static_cast<const char*>(memchr(comment.file, 0, desc_len));
+		if (null_pos) {
+			// Found a NULL byte.
+			desc_len = null_pos - comment.file;
+		}
+		desc += cp1252_sjis_to_utf8(comment.file, desc_len);
+
+		d->fields->addField_string(C_("GameCubeSave", "Description"), desc);
+	}
+
+	// Last Modified timestamp.
+	d->fields->addField_dateTime(C_("GameCubeSave", "Last Modified"),
+		static_cast<time_t>(direntry->lastmodified) + GC_UNIX_TIME_DIFF,
+		RomFields::RFT_DATETIME_HAS_DATE |
+		RomFields::RFT_DATETIME_HAS_TIME |
+		RomFields::RFT_DATETIME_IS_UTC	// GameCube doesn't support timezones.
+		);
+
+	// File mode.
+	char file_mode[5];
+	file_mode[0] = ((direntry->permission & CARD_ATTRIB_GLOBAL) ? 'G' : '-');
+	file_mode[1] = ((direntry->permission & CARD_ATTRIB_NOMOVE) ? 'M' : '-');
+	file_mode[2] = ((direntry->permission & CARD_ATTRIB_NOCOPY) ? 'C' : '-');
+	file_mode[3] = ((direntry->permission & CARD_ATTRIB_PUBLIC) ? 'P' : '-');
+	file_mode[4] = 0;
+	d->fields->addField_string(C_("GameCubeSave", "Mode"), file_mode, RomFields::STRF_MONOSPACE);
+
+	// Copy count.
+	d->fields->addField_string_numeric(C_("GameCubeSave", "Copy Count"), direntry->copytimes);
+	// Blocks.
+	d->fields->addField_string_numeric(C_("GameCubeSave", "Blocks"), direntry->length);
+
+	// Finished reading the field data.
+	return static_cast<int>(d->fields->count());
+}
+
+/**
+ * Load metadata properties.
+ * Called by RomData::metaData() if the field data hasn't been loaded yet.
+ * @return Number of metadata properties read on success; negative POSIX error code on error.
+ */
+int GameCubeSave::loadMetaData(void)
+{
+	RP_D(GameCubeSave);
+	if (d->metaData != nullptr) {
+		// Metadata *has* been loaded...
+		return 0;
+	} else if (!d->file) {
+		// File isn't open.
+		return -EBADF;
+	} else if (!d->isValid || (int)d->saveType < 0 || d->dataOffset < 0) {
+		// Unknown disc image type.
+		return -EIO;
+	}
+
+	// Save file header is read and byteswapped in the constructor.
+	const card_direntry *const direntry = &d->direntry;
+
+	// Create the metadata object.
+	d->metaData = new RomMetaData();
+	d->metaData->reserve(3);	// Maximum of 4 metadata properties.
+
+	// Look up the publisher.
+	const char *publisher = NintendoPublishers::lookup(direntry->company);
+	if (publisher) {
+		d->metaData->addMetaData_string(Property::Publisher, publisher);
+	}
+
+	// Description. (using this as the Title)
+	// TODO: Consolidate with loadFieldData()?
 	char desc_buf[64];
-	size_t size = d->file->seekAndRead(d->dataOffset + d->direntry.commentaddr,
+	size_t size = d->file->seekAndRead(d->dataOffset + direntry->commentaddr,
 					   desc_buf, sizeof(desc_buf));
 	if (size == sizeof(desc_buf)) {
 		// Add the description.
@@ -929,7 +995,7 @@ int GameCubeSave::loadFieldData(void)
 		const char *null_pos = static_cast<const char*>(memchr(desc_buf, 0, 32));
 		if (null_pos) {
 			// Found a NULL byte.
-			desc_len = (int)(null_pos - desc_buf);
+			desc_len = static_cast<int>(null_pos - desc_buf);
 		}
 		string desc = cp1252_sjis_to_utf8(desc_buf, desc_len);
 		desc += '\n';
@@ -938,37 +1004,21 @@ int GameCubeSave::loadFieldData(void)
 		null_pos = static_cast<const char*>(memchr(&desc_buf[32], 0, 32));
 		if (null_pos) {
 			// Found a NULL byte.
-			desc_len = (int)(null_pos - desc_buf - 32);
+			desc_len = static_cast<int>(null_pos - desc_buf - 32);
 		}
 		desc += cp1252_sjis_to_utf8(&desc_buf[32], desc_len);
 
-		d->fields->addField_string(C_("GameCubeSave", "Description"), desc);
+		d->metaData->addMetaData_string(Property::Title, desc);
 	}
 
 	// Last Modified timestamp.
-	d->fields->addField_dateTime(C_("GameCubeSave", "Last Modified"),
-		(time_t)d->direntry.lastmodified + GC_UNIX_TIME_DIFF,
-		RomFields::RFT_DATETIME_HAS_DATE |
-		RomFields::RFT_DATETIME_HAS_TIME |
-		RomFields::RFT_DATETIME_IS_UTC	// GameCube doesn't support timezones.
-		);
+	// NOTE: Using "CreationDate".
+	// TODO: Adjust for local timezone, since it's UTC.
+	d->metaData->addMetaData_timestamp(Property::CreationDate,
+		static_cast<time_t>(direntry->lastmodified) + GC_UNIX_TIME_DIFF);
 
-	// File mode.
-	char file_mode[5];
-	file_mode[0] = ((d->direntry.permission & CARD_ATTRIB_GLOBAL) ? 'G' : '-');
-	file_mode[1] = ((d->direntry.permission & CARD_ATTRIB_NOMOVE) ? 'M' : '-');
-	file_mode[2] = ((d->direntry.permission & CARD_ATTRIB_NOCOPY) ? 'C' : '-');
-	file_mode[3] = ((d->direntry.permission & CARD_ATTRIB_PUBLIC) ? 'P' : '-');
-	file_mode[4] = 0;
-	d->fields->addField_string(C_("GameCubeSave", "Mode"), file_mode, RomFields::STRF_MONOSPACE);
-
-	// Copy count.
-	d->fields->addField_string_numeric(C_("GameCubeSave", "Copy Count"), d->direntry.copytimes);
-	// Blocks.
-	d->fields->addField_string_numeric(C_("GameCubeSave", "Blocks"), d->direntry.length);
-
-	// Finished reading the field data.
-	return (int)d->fields->count();
+	// Finished reading the metadata.
+	return static_cast<int>(d->metaData->count());
 }
 
 /**
@@ -980,16 +1030,7 @@ int GameCubeSave::loadFieldData(void)
  */
 int GameCubeSave::loadInternalImage(ImageType imageType, const rp_image **pImage)
 {
-	assert(imageType >= IMG_INT_MIN && imageType <= IMG_INT_MAX);
-	assert(pImage != nullptr);
-	if (!pImage) {
-		// Invalid parameters.
-		return -EINVAL;
-	} else if (imageType < IMG_INT_MIN || imageType > IMG_INT_MAX) {
-		// ImageType is out of range.
-		*pImage = nullptr;
-		return -ERANGE;
-	}
+	ASSERT_loadInternalImage(imageType, pImage);
 
 	RP_D(GameCubeSave);
 	switch (imageType) {
@@ -1045,6 +1086,9 @@ int GameCubeSave::loadInternalImage(ImageType imageType, const rp_image **pImage
  *
  * Check imgpf for IMGPF_ICON_ANIMATED first to see if this
  * object has an animated icon.
+ *
+ * The retrieved IconAnimData must be ref()'d by the caller if the
+ * caller stores it instead of using it immediately.
  *
  * @return Animated icon data, or nullptr if no animated icon is present.
  */

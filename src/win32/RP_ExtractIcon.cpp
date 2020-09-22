@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (Win32)                            *
  * RP_ExtractIcon.cpp: IExtractIcon implementation.                        *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 // Reference: http://www.codeproject.com/Articles/338268/COM-in-C
@@ -24,27 +11,13 @@
 #include "RP_ExtractIcon.hpp"
 #include "RpImageWin32.hpp"
 
-// librpbase
-#include "librpbase/RomData.hpp"
-#include "librpbase/TextFuncs.hpp"
-#include "librpbase/file/RpFile.hpp"
-#include "librpbase/img/rp_image.hpp"
-#include "librpbase/img/RpGdiplusBackend.hpp"
+// librpbase, librpfile, librptexture, libromdata
 using namespace LibRpBase;
-
-// libromdata
-#include "libromdata/RomDataFactory.hpp"
+using namespace LibRpFile;
+using LibRpTexture::rp_image;
 using LibRomData::RomDataFactory;
 
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cstdio>
-#include <cstring>
-
-// C++ includes.
-#include <memory>
-#include <string>
-using std::unique_ptr;
+// C++ STL classes.
 using std::wstring;
 
 // CLSID
@@ -54,19 +27,13 @@ const CLSID CLSID_RP_ExtractIcon =
 /** RP_ExtractIcon_Private **/
 #include "RP_ExtractIcon_p.hpp"
 
-// TCreateThumbnail is a templated class,
-// so we have to #include the .cpp file here.
-#include "libromdata/img/TCreateThumbnail.cpp"
-
 RP_ExtractIcon_Private::RP_ExtractIcon_Private()
 	: romData(nullptr)
 { }
 
 RP_ExtractIcon_Private::~RP_ExtractIcon_Private()
 {
-	if (romData) {
-		romData->unref();
-	}
+	UNREF(romData);
 }
 
 /** RP_ExtractIcon **/
@@ -85,6 +52,10 @@ RP_ExtractIcon::~RP_ExtractIcon()
 
 IFACEMETHODIMP RP_ExtractIcon::QueryInterface(REFIID riid, LPVOID *ppvObj)
 {
+#ifdef _MSC_VER
+# pragma warning(push)
+# pragma warning(disable: 4365 4838)
+#endif /* _MSC_VER */
 	static const QITAB rgqit[] = {
 		QITABENT(RP_ExtractIcon, IPersist),
 		QITABENT(RP_ExtractIcon, IPersistFile),
@@ -92,7 +63,10 @@ IFACEMETHODIMP RP_ExtractIcon::QueryInterface(REFIID riid, LPVOID *ppvObj)
 		QITABENT(RP_ExtractIcon, IExtractIconA),
 		{ 0, 0 }
 	};
-	return LibWin32Common::pQISearch(this, rgqit, riid, ppvObj);
+#ifdef _MSC_VER
+# pragma warning(pop)
+#endif /* _MSC_VER */
+	return LibWin32Common::rp_QISearch(this, rgqit, riid, ppvObj);
 }
 
 /** IPersistFile **/
@@ -101,7 +75,7 @@ IFACEMETHODIMP RP_ExtractIcon::QueryInterface(REFIID riid, LPVOID *ppvObj)
 IFACEMETHODIMP RP_ExtractIcon::GetClassID(CLSID *pClassID)
 {
 	if (!pClassID) {
-		return E_FAIL;
+		return E_POINTER;
 	}
 	*pClassID = CLSID_RP_ExtractIcon;
 	return S_OK;
@@ -118,24 +92,31 @@ IFACEMETHODIMP RP_ExtractIcon::Load(LPCOLESTR pszFileName, DWORD dwMode)
 
 	// If we already have a RomData object, unref() it first.
 	RP_D(RP_ExtractIcon);
-	if (d->romData) {
-		d->romData->unref();
-		d->romData = nullptr;
-	}
+	UNREF_AND_NULL(d->romData);
 
 	// pszFileName is the file being worked on.
 	// TODO: If the file was already loaded, don't reload it.
 	d->filename = W2U8(pszFileName);
 
+	// Check for "bad" file systems.
+	const Config *const config = Config::instance();
+	if (FileSystem::isOnBadFS(d->filename.c_str(), config->enableThumbnailOnNetworkFS())) {
+		// This file is on a "bad" file system.
+		return E_FAIL;
+	}
+
 	// Attempt to open the ROM file.
-	unique_ptr<IRpFile> file(new RpFile(d->filename, RpFile::FM_OPEN_READ));
-	if (!file || !file->isOpen()) {
+	RpFile *const file = new RpFile(d->filename, RpFile::FM_OPEN_READ_GZ);
+	if (!file->isOpen()) {
+		// Unable to open the file.
+		file->unref();
 		return E_FAIL;
 	}
 
 	// Get the appropriate RomData class for this ROM.
 	// RomData class *must* support at least one image type.
-	d->romData = RomDataFactory::create(file.get(), true);
+	d->romData = RomDataFactory::create(file, RomDataFactory::RDA_HAS_THUMBNAIL);
+	file->unref();
 
 	// NOTE: Since this is the registered icon handler
 	// for the file type, we have to implement our own
@@ -194,7 +175,7 @@ IFACEMETHODIMP RP_ExtractIcon::GetIconLocation(UINT uFlags,
 	//
 	// TODO: Implement our own icon caching?
 	// TODO: Set pszIconFile[] and piIndex to something else?
-	pszIconFile[0] = 0;
+	pszIconFile[0] = L'\0';
 	*piIndex = 0;
 	*pwFlags = GIL_NOTFILENAME | GIL_DONTCACHE;
 	return S_OK;
@@ -203,8 +184,6 @@ IFACEMETHODIMP RP_ExtractIcon::GetIconLocation(UINT uFlags,
 IFACEMETHODIMP RP_ExtractIcon::Extract(LPCWSTR pszFile, UINT nIconIndex,
 	HICON *phiconLarge, HICON *phiconSmall, UINT nIconSize)
 {
-	// TODO: Use TCreateThumbnail()?
-
 	// NOTE: pszFile and nIconIndex were set in GetIconLocation().
 	// TODO: Validate them to make sure they're the same values
 	// we returned in GetIconLocation()?
@@ -233,13 +212,13 @@ IFACEMETHODIMP RP_ExtractIcon::Extract(LPCWSTR pszFile, UINT nIconIndex,
 
 	// ROM is supported. Get the image.
 	// TODO: Small icon?
-	HBITMAP hBmpImage = nullptr;
-	int ret = d->thumbnailer.getThumbnail(d->romData, LOWORD(nIconSize), hBmpImage);
-	if (ret != 0 || !hBmpImage) {
+	CreateThumbnail::GetThumbnailOutParams_t outParams;
+	outParams.retImg = nullptr;
+	int ret = d->thumbnailer.getThumbnail(d->romData, LOWORD(nIconSize), &outParams);
+	if (ret != 0 || !outParams.retImg) {
 		// Thumbnail not available. Use the fallback.
-		if (hBmpImage) {
-			DeleteObject(hBmpImage);
-			hBmpImage = nullptr;
+		if (outParams.retImg) {
+			DeleteBitmap(outParams.retImg);
 		}
 		LONG lResult = d->Fallback(phiconLarge, phiconSmall, nIconSize);
 		// NOTE: S_FALSE causes icon shenanigans.
@@ -247,7 +226,8 @@ IFACEMETHODIMP RP_ExtractIcon::Extract(LPCWSTR pszFile, UINT nIconIndex,
 	}
 
 	// Convert the HBITMAP to an HICON.
-	HICON hIcon = RpImageWin32::toHICON(hBmpImage);
+	HICON hIcon = RpImageWin32::toHICON(outParams.retImg);
+	DeleteBitmap(outParams.retImg);
 	if (hIcon != nullptr) {
 		// Icon converted.
 		bool iconWasSet = false;
@@ -264,13 +244,11 @@ IFACEMETHODIMP RP_ExtractIcon::Extract(LPCWSTR pszFile, UINT nIconIndex,
 		if (!iconWasSet) {
 			// Not returning the icon.
 			// Delete it to prevent a resource leak.
-			DeleteObject(hIcon);
+			DestroyIcon(hIcon);
 		}
 	} else {
 		// Error converting to HICON.
 		// Use the fallback.
-		DeleteObject(hBmpImage);
-		hBmpImage = nullptr;
 		LONG lResult = d->Fallback(phiconLarge, phiconSmall, nIconSize);
 		// NOTE: S_FALSE causes icon shenanigans.
 		return (lResult == ERROR_SUCCESS ? S_OK : E_FAIL);
@@ -295,7 +273,7 @@ IFACEMETHODIMP RP_ExtractIcon::GetIconLocation(UINT uFlags,
 		return E_INVALIDARG;
 	}
 	wchar_t buf[16];
-	HRESULT hr = GetIconLocation(uFlags, buf, ARRAY_SIZE(buf), piIndex, pwFlags);
+	HRESULT hr = GetIconLocation(uFlags, buf, _countof(buf), piIndex, pwFlags);
 	pszIconFile[0] = 0;	// Blank it out.
 	return hr;
 }
@@ -305,5 +283,6 @@ IFACEMETHODIMP RP_ExtractIcon::Extract(LPCSTR pszFile, UINT nIconIndex,
 {
 	// NOTE: The IExtractIconW interface doesn't use pszFile,
 	// so no conversion is necessary.
+	((void)pszFile);
 	return Extract(L"", nIconIndex, phiconLarge, phiconSmall, nIconSize);
 }

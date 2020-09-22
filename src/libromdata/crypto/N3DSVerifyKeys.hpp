@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * N3DSVerifyKeys.hpp: Nintendo 3DS key verification data.                 *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBROMDATA_CRYPTO_N3DSVERIFYKEYS_HPP__
@@ -27,8 +14,8 @@
 #error This file should only be compiled if decryption is enabled.
 #endif /* !ENABLE_DECRYPTION */
 
-#include "librpbase/common.h"
-#include "librpbase/byteswap.h"
+#include "common.h"
+#include "librpcpu/byteswap.h"
 
 #include "librpbase/crypto/KeyManager.hpp"
 #include "../Handheld/n3ds_structs.h"
@@ -111,6 +98,7 @@ class N3DSVerifyKeys
 		// Encryption key indexes.
 		enum EncryptionKeys {
 			// Retail
+			Key_Retail_SpiBoot,
 			Key_Retail_Slot0x18KeyX,
 			Key_Retail_Slot0x1BKeyX,
 			Key_Retail_Slot0x25KeyX,
@@ -130,6 +118,7 @@ class N3DSVerifyKeys
 			Key_Retail_Slot0x3DKeyNormal_5,
 
 			// Debug
+			Key_Debug_SpiBoot,
 			Key_Debug_FixedCryptoKey,
 			Key_Debug_Slot0x18KeyX,
 			Key_Debug_Slot0x1BKeyX,

@@ -1,43 +1,27 @@
 /***************************************************************************
  * ROM Properties Page shell extension. (librpbase)                        *
- * APNG_dlopen.hpp: APNG dlopen()'d function pointers.                     *
+ * APNG_dlopen.c: APNG dlopen()'d function pointers.                       *
  *                                                                         *
- * Copyright (c) 2014-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2014-2019 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include <png.h>
 
 #include "APNG_dlopen.h"
 
-// C includes.
-#include <assert.h>
-#include <stdio.h>
-#include <stdlib.h>
-
-#include "threads/Atomics.h"
+// librpthreads
+#include "librpthreads/Atomics.h"
 
 #ifndef _WIN32
 // Unix dlopen()
-#include <dlfcn.h>
+# include <dlfcn.h>
 #else
 // Windows LoadLibrary()
-#include "libwin32common/RpWin32_sdk.h"
-#define dlsym(handle, symbol)	((void*)GetProcAddress(handle, symbol))
-#define dlclose(handle)		FreeLibrary(handle)
+# include "libwin32common/RpWin32_sdk.h"
+# define dlsym(handle, symbol)	((void*)GetProcAddress(handle, symbol))
+# define dlclose(handle)	FreeLibrary(handle)
 #endif
 
 // DLL handle.
@@ -82,7 +66,7 @@ static int init_apng(void)
 {
 #ifdef _WIN32
 	BOOL bRet;
-	wchar_t png_dll_filename[16];
+	TCHAR png_dll_filename[16];
 #else /* !_WIN32 */
 	char png_so_filename[16];
 #endif /* _WIN32 */
@@ -99,12 +83,13 @@ static int init_apng(void)
 	// ensure that it's loaded before calling this function!
 	// Otherwise, this will fail.
 #ifndef NDEBUG
-	swprintf(png_dll_filename, _countof(png_dll_filename),
-		 L"libpng%ud.dll", PNG_LIBPNG_VER_DLLNUM);
+	_sntprintf(png_dll_filename, _countof(png_dll_filename),
+		_T("libpng%ud.dll"), PNG_LIBPNG_VER_DLLNUM);
 #else
-	swprintf(png_dll_filename, _countof(png_dll_filename),
-		 L"libpng%u.dll", PNG_LIBPNG_VER_DLLNUM);
+	_sntprintf(png_dll_filename, _countof(png_dll_filename),
+		_T("libpng%u.dll"), PNG_LIBPNG_VER_DLLNUM);
 #endif
+	png_dll_filename[_countof(png_dll_filename)-1] = _T('\0');
 	bRet = GetModuleHandleEx(0, png_dll_filename, &libpng_dll);
 	assert(bRet != FALSE);
 	if (!bRet) {
@@ -115,7 +100,7 @@ static int init_apng(void)
 	// TODO: Get path of already-opened libpng?
 	// TODO: On Linux, __USE_GNU and RTLD_DEFAULT.
 	snprintf(png_so_filename, sizeof(png_so_filename),
-		 "libpng%u.so", PNG_LIBPNG_VER_SONUM);
+		"libpng%u.so", PNG_LIBPNG_VER_SONUM);
 	libpng_dll = dlopen(png_so_filename, RTLD_LOCAL|RTLD_NOW);
 	if (!libpng_dll)
 		return -1;

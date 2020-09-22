@@ -2,39 +2,19 @@
  * ROM Properties Page shell extension. (Win32)                            *
  * RpImageWin32.cpp: rp_image to Win32 conversion functions.               *
  *                                                                         *
- * Copyright (c) 2016 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #include "stdafx.h"
 #include "RpImageWin32.hpp"
 
-// librpbase
-#include "librpbase/img/rp_image.hpp"
-#include "librpbase/img/RpGdiplusBackend.hpp"
-using LibRpBase::rp_image;
-using LibRpBase::RpGdiplusBackend;
+// librptexture
+#include "librptexture/img/RpGdiplusBackend.hpp"
+using LibRpTexture::rp_image;
+using LibRpTexture::RpGdiplusBackend;
 
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cstring>
-
-// C++ includes.
-#include <memory>
-#include <vector>
+// C++ STL classes.
 using std::unique_ptr;
 using std::vector;
 
@@ -46,7 +26,7 @@ namespace Gdiplus {
 	using std::max;
 }
 #include <gdiplus.h>
-#include "librpbase/img/GdiplusHelper.hpp"
+#include "librptexture/img/GdiplusHelper.hpp"
 
 /**
  * Convert an rp_image to a HBITMAP for use as an icon mask.
@@ -104,8 +84,8 @@ HBITMAP RpImageWin32::toHBITMAP_mask(const rp_image *image)
 
 	// Create the bitmap.
 	uint8_t *pvBits;
-	HBITMAP hBitmap = CreateDIBSection(nullptr, static_cast<BITMAPINFO*>(&bmi),
-		DIB_RGB_COLORS, reinterpret_cast<void**>(&pvBits), nullptr, 0);
+	HBITMAP hBitmap = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS,
+		reinterpret_cast<void**>(&pvBits), nullptr, 0);
 	if (!hBitmap)
 		return nullptr;
 
@@ -114,25 +94,43 @@ HBITMAP RpImageWin32::toHBITMAP_mask(const rp_image *image)
 
 	// AND mask: Parse the original image.
 	switch (image->format()) {
-		case rp_image::FORMAT_CI8: {
+		case rp_image::Format::CI8: {
 			// Get the transparent color index.
 			int tr_idx = image->tr_idx();
 			if (tr_idx >= 0) {
 				// Find all pixels matching tr_idx.
 				uint8_t *dest = pvBits;
 				for (int y = image->height()-1; y >= 0; y--) {
+					// TODO: Use stride arithmetic instead of image->scanLine().
 					const uint8_t *src = static_cast<const uint8_t*>(image->scanLine(y));
-					for (int x = width; x > 0; x -= 8) {
+					unsigned int x = (unsigned int)width;
+					for (unsigned int x = (unsigned int)width; x > 7; x -= 8) {
 						uint8_t pxMono = 0;
-						for (int bit = (x >= 8 ? 8 : x); bit > 0; bit--, src++) {
+						for (unsigned int bit = 8; bit > 0; bit--, src++) {
 							// MSB == left-most pixel.
 							pxMono <<= 1;
 							pxMono |= (*src != tr_idx);
 						}
 						*dest++ = pxMono;
 					}
-					// Next line.
-					dest += stride_adj;
+
+					// Handle unaligned bits.
+					if (x > 0) {
+						uint8_t pxMono = 0;
+						for (unsigned int bit = x; bit > 0; bit--, src++) {
+							// MSB == left-most pixel.
+							pxMono <<= 1;
+							pxMono |= (*src != tr_idx);
+						}
+						// Not 8px aligned; shift the bits over.
+						pxMono <<= (8 - x);
+						*dest++ = pxMono;
+					}
+
+					// Clear out unused bytes and go to the next line.
+					for (unsigned int x = (unsigned int)stride_adj; x > 0; x--) {
+						*dest++ = 0;
+					}
 				}
 			} else {
 				// tr_idx isn't set. This means the image is either
@@ -143,24 +141,41 @@ HBITMAP RpImageWin32::toHBITMAP_mask(const rp_image *image)
 			break;
 		}
 
-		case rp_image::FORMAT_ARGB32: {
+		case rp_image::Format::ARGB32: {
 			// Find all pixels with a 0 alpha channel.
-			// FIXME: Needs testing.
 			memset(pvBits, 0xFF, icon_sz);
 			uint8_t *dest = pvBits;
 			for (int y = image->height()-1; y >= 0; y--) {
+				// TODO: Use stride arithmetic instead of image->scanLine().
 				const uint32_t *src = static_cast<const uint32_t*>(image->scanLine(y));
-				for (int x = image->width(); x > 0; x -= 8) {
+				unsigned int x = (unsigned int)width;
+				for (; x > 7; x -= 8) {
 					uint8_t pxMono = 0;
-					for (int bit = (x >= 8 ? 8 : x); bit > 0; bit--, src++) {
+					for (unsigned int bit = 8; bit > 0; bit--, src++) {
 						// MSB == left-most pixel.
 						pxMono <<= 1;
 						pxMono |= ((*src & 0xFF000000) != 0);
 					}
 					*dest++ = pxMono;
 				}
-				// Next line.
-				dest += stride_adj;
+
+				// Handle unaligned bits.
+				if (x > 0) {
+					uint8_t pxMono = 0;
+					for (unsigned int bit = x; bit > 0; bit--, src++) {
+						// MSB == left-most pixel.
+						pxMono <<= 1;
+						pxMono |= ((*src & 0xFF000000) != 0);
+					}
+					// Not 8px aligned; shift the bits over.
+					pxMono <<= (8 - x);
+					*dest++ = pxMono;
+				}
+
+				// Clear out unused bytes and go to the next line.
+				for (unsigned int x = (unsigned int)stride_adj; x > 0; x--) {
+					*dest++ = 0;
+				}
 			}
 			break;
 		}
@@ -245,7 +260,7 @@ HBITMAP RpImageWin32::toHBITMAP(const rp_image *image, uint32_t bgColor,
  */
 HBITMAP RpImageWin32::toHBITMAP_alpha(const rp_image *image)
 {
-	const SIZE size = {0, 0};
+	static const SIZE size = {0, 0};
 	return toHBITMAP_alpha(image, size, false);
 }
 
@@ -293,6 +308,11 @@ HBITMAP RpImageWin32::toHBITMAP_alpha(const rp_image *image, const SIZE &size, b
  */
 HICON RpImageWin32::toHICON(const rp_image *image)
 {
+	HBITMAP hBitmap = nullptr;
+	HBITMAP hbmMask = nullptr;
+	HICON hIcon = nullptr;
+	ICONINFO ii;
+
 	assert(image != nullptr);
 	if (!image || !image->isValid()) {
 		// Invalid image.
@@ -310,22 +330,17 @@ HICON RpImageWin32::toHICON(const rp_image *image)
 
 	// Convert to HBITMAP first.
 	// TODO: Const-ness stuff.
-	HBITMAP hBitmap = const_cast<RpGdiplusBackend*>(backend)->toHBITMAP_alpha();
-	if (!hBitmap) {
-		// Error converting to HBITMAP.
-		return nullptr;
-	}
+	hBitmap = const_cast<RpGdiplusBackend*>(backend)->toHBITMAP_alpha();
+	if (!hBitmap)
+		goto cleanup;
 
 	// Convert the image to an icon mask.
-	HBITMAP hbmMask = toHBITMAP_mask(image);
-	if (!hbmMask) {
-		DeleteObject(hBitmap);
-		return nullptr;
-	}
+	hbmMask = toHBITMAP_mask(image);
+	if (!hbmMask)
+		goto cleanup;
 
 	// Convert to an icon.
 	// Reference: http://forums.codeguru.com/showthread.php?441251-CBitmap-to-HICON-or-HICON-from-HBITMAP&p=1661856#post1661856
-	ICONINFO ii;
 	ii.fIcon = TRUE;
 	ii.xHotspot = 0;
 	ii.yHotspot = 0;
@@ -333,11 +348,14 @@ HICON RpImageWin32::toHICON(const rp_image *image)
 	ii.hbmMask = hbmMask;
 
 	// Create the icon.
-	HICON hIcon = CreateIconIndirect(&ii);
+	hIcon = CreateIconIndirect(&ii);
 
+cleanup:
 	// Delete the original bitmaps and we're done.
-	DeleteObject(hBitmap);
-	DeleteObject(hbmMask);
+	if (hBitmap)
+		DeleteBitmap(hBitmap);
+	if (hbmMask)
+		DeleteBitmap(hbmMask);
 	return hIcon;
 }
 
@@ -362,12 +380,12 @@ rp_image *RpImageWin32::fromHBITMAP(HBITMAP hBitmap)
 			assert(!"fromHBITMAP() doesn't support 8bpp yet.");
 			return nullptr;
 #if 0
-			format = rp_image::FORMAT_CI8;
+			format = rp_image::Format::CI8;
 			copy_len = bm.bmWidth;
 			break;
 #endif
 		case 32:
-			format = rp_image::FORMAT_ARGB32;
+			format = rp_image::Format::ARGB32;
 			copy_len = bm.bmWidth * 4;
 			break;
 		default:
@@ -407,16 +425,15 @@ rp_image *RpImageWin32::fromHBITMAP(HBITMAP hBitmap)
 	}
 
 	// Copy the data into a new rp_image.
-	rp_image *img = new rp_image(bm.bmWidth, height, format);
+	rp_image *const img = new rp_image(bm.bmWidth, height, format);
 	if (!img->isValid()) {
 		// Could not allocate the image.
-		delete img;
+		img->unref();
 		return nullptr;
 	}
 
 	// TODO: Copy the palette for 8-bit.
-
-	// The image might be upside-down.
+	// TODO: The image might be upside-down.
 
 	// Copy the image data.
 	const uint8_t *src = pBits.get();
@@ -448,18 +465,19 @@ HICON RpImageWin32::toHICON(HBITMAP hBitmap)
 	// Temporarily convert the HBITMAP to rp_image
 	// in order to create an icon mask.
 	// NOTE: Windows doesn't seem to have any way to get
-	// direct access to the HBITAMP's pixels, so this step
+	// direct access to the HBITMAP's pixels, so this step
 	// step is required. (GetDIBits() copies the pixels.)
-	unique_ptr<rp_image> img(fromHBITMAP(hBitmap));
+	rp_image *const img = fromHBITMAP(hBitmap);
 	if (!img) {
 		// Error converting to rp_image.
 		return nullptr;
 	}
 
 	// Convert the image to an icon mask.
-	HBITMAP hbmMask = toHBITMAP_mask(img.get());
+	HBITMAP hbmMask = toHBITMAP_mask(img);
 	if (!hbmMask) {
 		// Failed to create the icon mask.
+		img->unref();
 		return nullptr;
 	}
 
@@ -476,6 +494,7 @@ HICON RpImageWin32::toHICON(HBITMAP hBitmap)
 	HICON hIcon = CreateIconIndirect(&ii);
 
 	// Delete the icon mask bitmap and we're done.
-	DeleteObject(hbmMask);
+	DeleteBitmap(hbmMask);
+	img->unref();
 	return hIcon;
 }

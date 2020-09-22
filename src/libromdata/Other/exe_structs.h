@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * exe_structs.h: DOS/Windows executable structures.                       *
  *                                                                         *
- * Copyright (c) 2017 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2017-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 // Based on w32api's winnt.h.
@@ -25,18 +12,18 @@
 // - https://github.com/MaxKellermann/w32api/blob/440c229960e782831d01c6638661f1c40cadbeb5/include/winver.h
 // - http://www.brokenthorn.com/Resources/OSDevPE.html
 // - https://msdn.microsoft.com/en-us/library/windows/desktop/ms648009(v=vs.85).aspx
+// - http://sandsprite.com/CodeStuff/Understanding_imports.html
+// - https://docs.microsoft.com/en-us/windows/win32/debug/pe-format
 
 #ifndef __ROMPROPERTIES_LIBROMDATA_EXE_STRUCTS_H__
 #define __ROMPROPERTIES_LIBROMDATA_EXE_STRUCTS_H__
 
-#include "librpbase/common.h"
 #include <stdint.h>
+#include "common.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#pragma pack(1)
 
 #define IMAGE_DOS_SIGNATURE 0x5A4D
 #define IMAGE_OS2_SIGNATURE 0x454E
@@ -63,25 +50,24 @@ extern "C" {
 
 #define IMAGE_SIZEOF_FILE_HEADER 20
 typedef enum {
-	IMAGE_FILE_RELOCS_STRIPPED		= 1,
-	IMAGE_FILE_EXECUTABLE_IMAGE		= 2,
-	IMAGE_FILE_LINE_NUMS_STRIPPED		= 4,
-	IMAGE_FILE_LOCAL_SYMS_STRIPPED		= 8,
-	IMAGE_FILE_AGGRESIVE_WS_TRIM 		= 16,
-	IMAGE_FILE_LARGE_ADDRESS_AWARE		= 32,
-	IMAGE_FILE_BYTES_REVERSED_LO		= 128,
-	IMAGE_FILE_32BIT_MACHINE		= 256,
-	IMAGE_FILE_DEBUG_STRIPPED		= 512,
-	IMAGE_FILE_REMOVABLE_RUN_FROM_SWAP	= 1024,
-	IMAGE_FILE_NET_RUN_FROM_SWAP		= 2048,
-	IMAGE_FILE_SYSTEM			= 4096,
-	IMAGE_FILE_DLL				= 8192,
-	IMAGE_FILE_UP_SYSTEM_ONLY		= 16384,
-	IMAGE_FILE_BYTES_REVERSED_HI		= 32768,
+	IMAGE_FILE_RELOCS_STRIPPED		=   0x01,
+	IMAGE_FILE_EXECUTABLE_IMAGE		=   0x02,
+	IMAGE_FILE_LINE_NUMS_STRIPPED		=   0x04,
+	IMAGE_FILE_LOCAL_SYMS_STRIPPED		=   0x08,
+	IMAGE_FILE_AGGRESIVE_WS_TRIM 		=   0x10,
+	IMAGE_FILE_LARGE_ADDRESS_AWARE		=   0x20,
+	IMAGE_FILE_BYTES_REVERSED_LO		=   0x80,
+	IMAGE_FILE_32BIT_MACHINE		=  0x100,
+	IMAGE_FILE_DEBUG_STRIPPED		=  0x200,
+	IMAGE_FILE_REMOVABLE_RUN_FROM_SWAP	=  0x400,
+	IMAGE_FILE_NET_RUN_FROM_SWAP		=  0x800,
+	IMAGE_FILE_SYSTEM			= 0x1000,
+	IMAGE_FILE_DLL				= 0x2000,
+	IMAGE_FILE_UP_SYSTEM_ONLY		= 0x4000,
+	IMAGE_FILE_BYTES_REVERSED_HI		= 0x8000,
 } PE_Characteristics;
 
 typedef enum {
-	// TODO: Update from `file`.
 	IMAGE_FILE_MACHINE_UNKNOWN	= 0x0000,
 	IMAGE_FILE_MACHINE_I386		= 0x014C, /* Intel 386 or later processors 
 						     and compatible processors */
@@ -100,17 +86,23 @@ typedef enum {
 	IMAGE_FILE_MACHINE_THUMB	= 0x01C2, /* Thumb */
 	IMAGE_FILE_MACHINE_ARMNT	= 0x01C4, /* Thumb-2 */
 	IMAGE_FILE_MACHINE_AM33		= 0x01D3, /* Matsushita AM33 */
-	IMAGE_FILE_MACHINE_POWERPC	= 0x01F0, /* Power PC little endian */
-	IMAGE_FILE_MACHINE_POWERPCFP	= 0x01F1, /* Power PC with floating point support */
+	IMAGE_FILE_MACHINE_POWERPC	= 0x01F0, /* PowerPC little-endian */
+	IMAGE_FILE_MACHINE_POWERPCFP	= 0x01F1, /* PowerPC with floating point support */
+	IMAGE_FILE_MACHINE_POWERPCBE	= 0x01F2, /* PowerPC big-endian (Xbox 360) */
 	IMAGE_FILE_MACHINE_IA64		= 0x0200, /* Intel Itanium processor family */
 	IMAGE_FILE_MACHINE_MIPS16	= 0x0266, /* MIPS16 */
+	IMAGE_FILE_MACHINE_M68K		= 0x0268, /* Motorola 68000 */
 	IMAGE_FILE_MACHINE_ALPHA64	= 0x0284, /* Alpha AXP (64-bit) */
+	IMAGE_FILE_MACHINE_PA_RISC	= 0x0290, /* PA-RISC */
 	IMAGE_FILE_MACHINE_MIPSFPU	= 0x0366, /* MIPS with FPU */
 	IMAGE_FILE_MACHINE_MIPSFPU16	= 0x0466, /* MIPS16 with FPU */
 	IMAGE_FILE_MACHINE_AXP64	= IMAGE_FILE_MACHINE_ALPHA64, /* Alpha AXP (64-bit) */
 	IMAGE_FILE_MACHINE_TRICORE	= 0x0520, /* Infinieon */
 	IMAGE_FILE_MACHINE_CEF		= 0x0CEF, /* Common Executable Format (Windows CE) */
 	IMAGE_FILE_MACHINE_EBC		= 0x0EBC, /* EFI byte code */
+	IMAGE_FILE_MACHINE_RISCV32	= 0x5032, /* RISC-V 32-bit address space */
+	IMAGE_FILE_MACHINE_RISCV64	= 0x5064, /* RISC-V 64-bit address space */
+	IMAGE_FILE_MACHINE_RISCV128	= 0x5128, /* RISC-V 128-bit address space */
 	IMAGE_FILE_MACHINE_AMD64	= 0x8664, /* x64 */
 	IMAGE_FILE_MACHINE_M32R		= 0x9041, /* Mitsubishi M32R little endian */
 	IMAGE_FILE_MACHINE_ARM64	= 0xAA64, /* ARM64 little-endian */
@@ -153,7 +145,7 @@ typedef enum {
  *
  * All fields are little-endian.
  */
-typedef struct PACKED _IMAGE_DOS_HEADER {
+typedef struct _IMAGE_DOS_HEADER {
 	uint16_t e_magic;	// "MZ"
 	uint16_t e_cblp;
 	uint16_t e_cp;
@@ -180,14 +172,14 @@ ASSERT_STRUCT(IMAGE_DOS_HEADER, 64);
  * Standard PE header.
  * All fields are little-endian.
  */
-typedef struct PACKED _IMAGE_FILE_HEADER {
-	uint16_t Machine;		// See PE_Machine.
+typedef struct _IMAGE_FILE_HEADER {
+	uint16_t Machine;		// See PE_Machine
 	uint16_t NumberOfSections;
-	uint32_t TimeDateStamp;		// UNIX timestamp.
+	uint32_t TimeDateStamp;		// UNIX timestamp
 	uint32_t PointerToSymbolTable;
 	uint32_t NumberOfSymbols;
 	uint16_t SizeOfOptionalHeader;
-	uint16_t Characteristics;
+	uint16_t Characteristics;	// See PE_Characteristics
 } IMAGE_FILE_HEADER;
 ASSERT_STRUCT(IMAGE_FILE_HEADER, IMAGE_SIZEOF_FILE_HEADER);
 
@@ -218,17 +210,17 @@ typedef enum {
  * PE image data directory.
  * All fields are little-endian.
  */
-typedef struct PACKED _IMAGE_DATA_DIRECTORY {
+typedef struct _IMAGE_DATA_DIRECTORY {
 	uint32_t VirtualAddress;
 	uint32_t Size;
 } IMAGE_DATA_DIRECTORY;
-ASSERT_STRUCT(IMAGE_DATA_DIRECTORY, 8);
+ASSERT_STRUCT(IMAGE_DATA_DIRECTORY, 2*sizeof(uint32_t));
 
 /**
  * "Optional" 32-bit PE header.
  * All fields are little-endian.
  */
-typedef struct PACKED _IMAGE_OPTIONAL_HEADER32 {
+typedef struct _IMAGE_OPTIONAL_HEADER32 {
 	uint16_t Magic;
 	uint8_t MajorLinkerVersion;
 	uint8_t MinorLinkerVersion;
@@ -267,7 +259,7 @@ ASSERT_STRUCT(IMAGE_OPTIONAL_HEADER32, 224);
  * "Optional" 64-bit PE header.
  * All fields are little-endian.
  */
-typedef struct PACKED _IMAGE_OPTIONAL_HEADER64 {
+typedef struct _IMAGE_OPTIONAL_HEADER64 {
 	uint16_t Magic;
 	uint8_t MajorLinkerVersion;
 	uint8_t MinorLinkerVersion;
@@ -305,7 +297,7 @@ ASSERT_STRUCT(IMAGE_OPTIONAL_HEADER64, 240);
  * 32-bit PE headers.
  * All fields are little-endian.
  */
-typedef struct PACKED _IMAGE_NT_HEADERS32 {
+typedef struct _IMAGE_NT_HEADERS32 {
 	uint32_t Signature;
 	IMAGE_FILE_HEADER FileHeader;
 	IMAGE_OPTIONAL_HEADER32 OptionalHeader;
@@ -316,7 +308,7 @@ ASSERT_STRUCT(IMAGE_NT_HEADERS32, 248);
  * 64-bit PE32+ headers.
  * All fields are little-endian.
  */
-typedef struct PACKED _IMAGE_NT_HEADERS64 {
+typedef struct _IMAGE_NT_HEADERS64 {
 	uint32_t Signature;
 	IMAGE_FILE_HEADER FileHeader;
 	IMAGE_OPTIONAL_HEADER64 OptionalHeader;
@@ -342,6 +334,24 @@ typedef struct _IMAGE_SECTION_HEADER {
 	uint32_t Characteristics;
 } IMAGE_SECTION_HEADER;
 ASSERT_STRUCT(IMAGE_SECTION_HEADER, IMAGE_SIZEOF_SECTION_HEADER);
+
+/** Import table. **/
+// Reference: http://sandsprite.com/CodeStuff/Understanding_imports.html
+
+/**
+ * Import directory.
+ */
+typedef struct _IMAGE_IMPORT_DIRECTORY {
+	uint32_t rvaImportLookupTable;	// RVA of the import lookup table
+	uint32_t TimeDateStamp;		// UNIX timestamp
+	uint32_t ForwarderChain;
+	uint32_t rvaModuleName;		// RVA of the DLL filename
+	uint32_t rvaImportAddressTable;	// RVA of the thunk table
+} IMAGE_IMPORT_DIRECTORY;
+ASSERT_STRUCT(IMAGE_IMPORT_DIRECTORY, 5*sizeof(uint32_t));
+
+// Import lookup table consists of 32-bit values which are either
+// RVAs to the function name or, if the low(?) bit is set, an ordinal.
 
 /** Win32 resources. **/
 
@@ -375,7 +385,7 @@ typedef enum {
 } ResourceType;
 
 // Resource directory.
-typedef struct PACKED _IMAGE_RESOURCE_DIRECTORY {
+typedef struct _IMAGE_RESOURCE_DIRECTORY {
 	uint32_t Characteristics;
 	uint32_t TimeDateStamp;
 	uint16_t MajorVersion;
@@ -384,9 +394,10 @@ typedef struct PACKED _IMAGE_RESOURCE_DIRECTORY {
 	uint16_t NumberOfIdEntries;
 	// following this struct are named entries, then ID entries
 } IMAGE_RESOURCE_DIRECTORY;
+ASSERT_STRUCT(IMAGE_RESOURCE_DIRECTORY, 16);
 
 // Resource directory entry.
-typedef struct PACKED _IMAGE_RESOURCE_DIRECTORY_ENTRY {
+typedef struct _IMAGE_RESOURCE_DIRECTORY_ENTRY {
 	// Name/ID field.
 	// If bit 31 is set, this is an offset into the string table.
 	// Otherwise, it's a 16-bit ID.
@@ -397,14 +408,15 @@ typedef struct PACKED _IMAGE_RESOURCE_DIRECTORY_ENTRY {
 	// Otherwise, it's an actual resource.
 	uint32_t OffsetToData;
 } IMAGE_RESOURCE_DIRECTORY_ENTRY;
-
+ASSERT_STRUCT(IMAGE_RESOURCE_DIRECTORY_ENTRY, 2*sizeof(uint32_t));
 // Resource data entry.
-typedef struct PACKED _IMAGE_RESOURCE_DATA_ENTRY {
+typedef struct _IMAGE_RESOURCE_DATA_ENTRY {
 	uint32_t OffsetToData;
 	uint32_t Size;
 	uint32_t CodePage;
 	uint32_t Reserved;
 } IMAGE_RESOURCE_DATA_ENTRY;
+ASSERT_STRUCT(IMAGE_RESOURCE_DATA_ENTRY, 4*sizeof(uint32_t));
 
 // Version flags.
 //#define VS_FILE_INFO RT_VERSION	// TODO
@@ -414,30 +426,35 @@ typedef struct PACKED _IMAGE_RESOURCE_DATA_ENTRY {
 #define VS_FFI_STRUCVERSION 0x10000
 #define VS_FFI_FILEFLAGSMASK 0x3F
 typedef enum {
-	VS_FF_DEBUG = 1,
-	VS_FF_PRERELEASE = 2,
-	VS_FF_PATCHED = 4,
-	VS_FF_PRIVATEBUILD = 8,
-	VS_FF_INFOINFERRED = 16,
-	VS_FF_SPECIALBUILD = 32,
+	VS_FF_DEBUG		= 0x01,
+	VS_FF_PRERELEASE	= 0x02,
+	VS_FF_PATCHED		= 0x04,
+	VS_FF_PRIVATEBUILD	= 0x08,
+	VS_FF_INFOINFERRED	= 0x10,
+	VS_FF_SPECIALBUILD	= 0x20,
 } VS_FileFlags;
 
+// updated from: https://source.winehq.org/git/wine.git/blob/7d77d330a5b60be918dbf17d9d9ca357d93bff29:/include/verrsrc.h
 typedef enum {
-	VOS_UNKNOWN = 0,
-	VOS_DOS = 0x10000,
-	VOS_OS216 = 0x20000,
-	VOS_OS232 = 0x30000,
-	VOS_NT = 0x40000,
-	VOS__BASE = 0,
-	VOS__WINDOWS16 = 1,
-	VOS__PM16 = 2,
-	VOS__PM32 = 3,
-	VOS__WINDOWS32 = 4,
-	VOS_DOS_WINDOWS16 = 0x10001,
-	VOS_DOS_WINDOWS32 = 0x10004,
-	VOS_OS216_PM16 = 0x20002,
-	VOS_OS232_PM32 = 0x30003,
-	VOS_NT_WINDOWS32 = 0x40004,
+	VOS_UNKNOWN		= 0,
+
+	VOS_DOS			= 0x10000,
+	VOS_OS216		= 0x20000,
+	VOS_OS232		= 0x30000,
+	VOS_NT			= 0x40000,
+	VOS_WINCE		= 0x50000,
+
+	VOS__BASE		= 0,
+	VOS__WINDOWS16		= 1,
+	VOS__PM16		= 2,
+	VOS__PM32		= 3,
+	VOS__WINDOWS32		= 4,
+
+	VOS_DOS_WINDOWS16	= (VOS_DOS | VOS__WINDOWS16),
+	VOS_DOS_WINDOWS32	= (VOS_DOS | VOS__WINDOWS32),
+	VOS_OS216_PM16		= (VOS_OS216 | VOS__PM16),
+	VOS_OS232_PM32		= (VOS_OS232 | VOS__PM32),
+	VOS_NT_WINDOWS32	= (VOS_NT | VOS__WINDOWS32),
 } VS_OperatingSystem;
 
 typedef enum {
@@ -472,7 +489,7 @@ typedef enum {
 /**
  * Version info resource. (fixed-size data section)
  */
-typedef struct PACKED _VS_FIXEDFILEINFO {
+typedef struct _VS_FIXEDFILEINFO {
 	uint32_t dwSignature;
 	uint32_t dwStrucVersion;
 	uint32_t dwFileVersionMS;
@@ -487,7 +504,7 @@ typedef struct PACKED _VS_FIXEDFILEINFO {
 	uint32_t dwFileDateMS;
 	uint32_t dwFileDateLS;
 } VS_FIXEDFILEINFO;
-ASSERT_STRUCT(VS_FIXEDFILEINFO, 13*4);
+ASSERT_STRUCT(VS_FIXEDFILEINFO, 13*sizeof(uint32_t));
 
 // Manifest IDs.
 typedef enum {
@@ -505,7 +522,7 @@ typedef enum {
 // - http://wiki.osdev.org/NE
 // - http://www.fileformat.info/format/exe/corion-ne.htm
 
-typedef struct PACKED _NE_Header {
+typedef struct _NE_Header {
 	// 0x00
 	uint16_t sig;			// "NE" (0x4E45)
 	uint8_t MajLinkerVersion;	// The major linker version
@@ -530,7 +547,8 @@ typedef struct PACKED _NE_Header {
 	uint16_t ResTableOffset;	// Offset of resources table
 	uint16_t ResidNamTable;		// Offset of resident names table
 	uint16_t ModRefTable;		// Offset of module reference table
-	uint16_t ImportNameTable;	// Offset of imported names table (array of counted strings, terminated with string of length 00h)
+					// (points to entries in ImportNameTable)
+	uint16_t ImportNameTable;	// Offset of imported names table (array of counted strings)
 	uint32_t OffStartNonResTab;	// Offset from start of file to non-resident names table
 	// 0x30
 	uint16_t MovEntryCount;		// Count of moveable entry point listed in entry table
@@ -556,12 +574,12 @@ typedef enum {
 } NE_DGroupType;
 
 typedef enum {
-	NE_GLOBINIT	= (1 << 2),	// Global initialization
-	NE_PMODEONLY	= (1 << 3),	// Protected mode only
-	NE_INSTRUC86	= (1 << 4),	// 8086 instructions
-	NE_INSTRU286	= (1 << 5),	// 80286 instructions
-	NE_INSTRU386	= (1 << 6),	// 80386 instructions
-	NE_INSTRUx87	= (1 << 7),	// 80x87 (FPU) instructions
+	NE_GLOBINIT	= (1U << 2),	// Global initialization
+	NE_PMODEONLY	= (1U << 3),	// Protected mode only
+	NE_INSTRUC86	= (1U << 4),	// 8086 instructions
+	NE_INSTRU286	= (1U << 5),	// 80286 instructions
+	NE_INSTRU386	= (1U << 6),	// 80386 instructions
+	NE_INSTRUx87	= (1U << 7),	// 80x87 (FPU) instructions
 } NE_ProgFlags;
 
 // Application flags (ApplFlags)
@@ -575,11 +593,11 @@ typedef enum {
 } NE_AppType;
 
 typedef enum {
-	NE_OS2APP	= (1 << 3),	// OS/2 family application
+	NE_OS2APP	= (1U << 3),	// OS/2 family application
 	// bit 4 reserved?
-	NE_IMAGEERROR	= (1 << 5),	// Errors in image/executable
-	NE_ONCONFORM	= (1 << 6),	// Non-conforming program?
-	NE_DLL		= (1 << 7),	// DLL or driver (SS:SP invalid, CS:IP -> Far INIT routine)
+	NE_IMAGEERROR	= (1U << 5),	// Errors in image/executable
+	NE_ONCONFORM	= (1U << 6),	// Non-conforming program?
+	NE_DLL		= (1U << 7),	// DLL or driver (SS:SP invalid, CS:IP -> Far INIT routine)
 					// AX=HMODULE, returns AX==0 success, AX!=0 fail
 } NE_ApplFlags;
 
@@ -600,15 +618,15 @@ typedef enum {
 
 // Other OS/2 flags.
 typedef enum {
-	NE_OS2_LFN	= (1 << 0),	// OS/2 Long File Names
-	NE_OS2_PMODE	= (1 << 1),	// OS/2 2.x Protected Mode executable
-	NE_OS2_PFONT	= (1 << 2),	// OS/2 2.x Proportional Fonts
-	NE_OS2_GANGL	= (1 << 3),	// OS/2 Gangload area
+	NE_OS2_LFN	= (1U << 0),	// OS/2 Long File Names
+	NE_OS2_PMODE	= (1U << 1),	// OS/2 2.x Protected Mode executable
+	NE_OS2_PFONT	= (1U << 2),	// OS/2 2.x Proportional Fonts
+	NE_OS2_GANGL	= (1U << 3),	// OS/2 Gangload area
 } NE_OS2EXEFlags;
 
 // 16-bit resource structs.
 
-typedef struct PACKED _NE_NAMEINFO {
+typedef struct _NE_NAMEINFO {
 	uint16_t rnOffset;
 	uint16_t rnLength;
 	uint16_t rnFlags;
@@ -616,13 +634,15 @@ typedef struct PACKED _NE_NAMEINFO {
 	uint16_t rnHandle;
 	uint16_t rnUsage;
 } NE_NAMEINFO;
+ASSERT_STRUCT(NE_NAMEINFO, 6*sizeof(uint16_t));
 
-typedef struct PACKED _NE_TYPEINFO {
+typedef struct _NE_TYPEINFO {
 	uint16_t rtTypeID;
 	uint16_t rtResourceCount;
 	uint32_t rtReserved;
 	// followed by NE_NAMEINFO[]
 } NE_TYPEINFO;
+ASSERT_STRUCT(NE_TYPEINFO, 8);
 
 /** Linear Executable structs. **/
 // NOTE: The header format is the same for LE (Win16 drivers)
@@ -632,7 +652,7 @@ typedef struct PACKED _NE_TYPEINFO {
 // - http://faydoc.tripod.com/formats/exe-LE.htm
 // - http://www.textfiles.com/programming/FORMATS/lxexe.txt
 
-typedef struct PACKED _LE_Header {
+typedef struct _LE_Header {
 	// 0x00
 	uint16_t sig;		// 'LE' (0x4C45)
 	uint8_t byte_order;	// 0 == little-endian; other == big-endian
@@ -689,25 +709,23 @@ typedef enum {
 
 // Module type flags.
 typedef enum {
-	LE_DLL_INIT_GLOBAL		= (0 << 2),
-	LE_DLL_INIT_PER_PROCESS		= (1 << 2),
-	LE_DLL_INIT_MASK		= (1 << 2),
+	LE_DLL_INIT_GLOBAL		= (0U << 2),
+	LE_DLL_INIT_PER_PROCESS		= (1U << 2),
+	LE_DLL_INIT_MASK		= (1U << 2),
 
-	LE_EXE_NO_INTERNAL_FIXUP	= (1 << 4),
-	LE_EXE_NO_EXTERNAL_FIXUP	= (1 << 5),
+	LE_EXE_NO_INTERNAL_FIXUP	= (1U << 4),
+	LE_EXE_NO_EXTERNAL_FIXUP	= (1U << 5),
 
 	// Same sa NE_AppType.
-	LE_WINDOW_TYPE_UNKNOWN		= (0 << 8),
-	LE_WINDOW_TYPE_INCOMPATIBLE	= (1 << 8),
-	LE_WINDOW_TYPE_COMPATIBLE	= (2 << 8),
-	LE_WINDOW_TYPE_USES		= (3 << 8),
-	LE_WINDOW_TYPE_MASK		= (3 << 8),
+	LE_WINDOW_TYPE_UNKNOWN		= (0U << 8),
+	LE_WINDOW_TYPE_INCOMPATIBLE	= (1U << 8),
+	LE_WINDOW_TYPE_COMPATIBLE	= (2U << 8),
+	LE_WINDOW_TYPE_USES		= (3U << 8),
+	LE_WINDOW_TYPE_MASK		= (3U << 8),
 
-	LE_MODULE_NOT_LOADABLE		= (1 << 13),
-	LE_MODULE_IS_DLL		= (1 << 15),
+	LE_MODULE_NOT_LOADABLE		= (1U << 13),
+	LE_MODULE_IS_DLL		= (1U << 15),
 } LE_Module_Type_Flags;
-
-#pragma pack()
 
 #ifdef __cplusplus
 }

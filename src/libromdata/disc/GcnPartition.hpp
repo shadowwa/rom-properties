@@ -2,32 +2,15 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * GcnPartition.hpp: GameCube partition reader.                            *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBROMDATA_DISC_GCNPARTITION_HPP__
 #define __ROMPROPERTIES_LIBROMDATA_DISC_GCNPARTITION_HPP__
 
 #include "librpbase/disc/IPartition.hpp"
-#include "GcnFst.hpp"
-
-namespace LibRpBase {
-	class IRpFile;
-}
+#include "librpbase/disc/IFst.hpp"
 
 namespace LibRomData {
 
@@ -46,10 +29,11 @@ class GcnPartition : public LibRpBase::IPartition
 		 * @param discReader IDiscReader.
 		 * @param partition_offset Partition start offset.
 		 */
-		GcnPartition(IDiscReader *discReader, int64_t partition_offset);
-		virtual ~GcnPartition();
+		explicit GcnPartition(IDiscReader *discReader, off64_t partition_offset);
 	protected:
-		explicit GcnPartition(GcnPartitionPrivate *d);
+		virtual ~GcnPartition();	// call unref() instead
+	protected:
+		explicit GcnPartition(GcnPartitionPrivate *d, IDiscReader *discReader);
 
 	private:
 		typedef IPartition super;
@@ -63,37 +47,26 @@ class GcnPartition : public LibRpBase::IPartition
 		/** IDiscReader **/
 
 		/**
-		 * Is the partition open?
-		 * This usually only returns false if an error occurred.
-		 * @return True if the partition is open; false if it isn't.
-		 */
-		virtual bool isOpen(void) const override final;
-
-		/**
 		 * Read data from the partition.
 		 * @param ptr Output data buffer.
 		 * @param size Amount of data to read, in bytes.
 		 * @return Number of bytes read.
 		 */
-		virtual size_t read(void *ptr, size_t size) override;
+		ATTR_ACCESS_SIZE(write_only, 2, 3)
+		size_t read(void *ptr, size_t size) override;
 
 		/**
 		 * Set the partition position.
 		 * @param pos Partition position.
 		 * @return 0 on success; -1 on error.
 		 */
-		virtual int seek(int64_t pos) override;
-
-		/**
-		 * Seek to the beginning of the partition.
-		 */
-		virtual void rewind(void) override final;
+		int seek(off64_t pos) override;
 
 		/**
 		 * Get the partition position.
 		 * @return Partition position on success; -1 on error.
 		 */
-		virtual int64_t tell(void) override;
+		off64_t tell(void) override;
 
 		/**
 		 * Get the data size.
@@ -101,8 +74,9 @@ class GcnPartition : public LibRpBase::IPartition
 		 * and it's adjusted to exclude hashes.
 		 * @return Data size, or -1 on error.
 		 */
-		virtual int64_t size(void) override final;
+		off64_t size(void) final;
 
+	public:
 		/** IPartition **/
 
 		/**
@@ -110,7 +84,7 @@ class GcnPartition : public LibRpBase::IPartition
 		 * This size includes the partition header and hashes.
 		 * @return Partition size, or -1 on error.
 		 */
-		virtual int64_t partition_size(void) const override final;
+		off64_t partition_size(void) const final;
 
 		/**
 		 * Get the used partition size.
@@ -118,8 +92,9 @@ class GcnPartition : public LibRpBase::IPartition
 		 * but does not include "empty" sectors.
 		 * @return Used partition size, or -1 on error.
 		 */
-		virtual int64_t partition_size_used(void) const override final;
+		off64_t partition_size_used(void) const override;
 
+	public:
 		/** IFst wrapper functions. **/
 
 		/**
@@ -159,7 +134,7 @@ class GcnPartition : public LibRpBase::IPartition
 		 * @param filename Filename.
 		 * @return IRpFile*, or nullptr on error.
 		 */
-		LibRpBase::IRpFile *open(const char *filename);
+		LibRpFile::IRpFile *open(const char *filename);
 };
 
 }

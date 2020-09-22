@@ -3,32 +3,18 @@
  * RpJpeg.cpp: JPEG image handler.                                         *
  * SSSE3-optimized version.                                                *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License       *
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.   *
+ * Copyright (c) 2016-2019 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "RpJpeg_p.hpp"
 
-#include "../common.h"
-using LibRpBase::rp_image;
+// librptexture
+using LibRpTexture::rp_image;
+using LibRpTexture::argb32_t;
 
-// C includes. (C++ namespace)
-#include <cassert>
-
-// SSSE3 headers.
-#include <xmmintrin.h>
+// SSSE3 intrinsics.
 #include <emmintrin.h>
 #include <tmmintrin.h>
 
@@ -45,7 +31,7 @@ namespace LibRpBase {
 void RpJpegPrivate::decodeBGRtoARGB(rp_image *RESTRICT img, jpeg_decompress_struct *RESTRICT cinfo, JSAMPARRAY buffer)
 {
 	ASSERT_ALIGNMENT(16, buffer);
-	assert(img->format() == rp_image::FORMAT_ARGB32);
+	assert(img->format() == rp_image::Format::ARGB32);
 
 	// SSSE3-optimized version based on:
 	// - https://stackoverflow.com/questions/2973708/fast-24-bit-array-32-bit-array-conversion
@@ -64,22 +50,22 @@ void RpJpegPrivate::decodeBGRtoARGB(rp_image *RESTRICT img, jpeg_decompress_stru
 			const __m128i *xmm_src = reinterpret_cast<const __m128i*>(src);
 			__m128i *xmm_dest = reinterpret_cast<__m128i*>(dest);
 
-			__m128i sa = _mm_load_si128(xmm_src);
-			__m128i sb = _mm_load_si128(xmm_src+1);
-			__m128i sc = _mm_load_si128(xmm_src+2);
+			__m128i sa = _mm_load_si128(&xmm_src[0]);
+			__m128i sb = _mm_load_si128(&xmm_src[1]);
+			__m128i sc = _mm_load_si128(&xmm_src[2]);
 
 			__m128i val = _mm_shuffle_epi8(sa, shuf_mask);
 			val = _mm_or_si128(val, alpha_mask);
-			_mm_store_si128(xmm_dest, val);
+			_mm_store_si128(&xmm_dest[0], val);
 			val = _mm_shuffle_epi8(_mm_alignr_epi8(sb, sa, 12), shuf_mask);
 			val = _mm_or_si128(val, alpha_mask);
-			_mm_store_si128(xmm_dest+1, val);
+			_mm_store_si128(&xmm_dest[1], val);
 			val = _mm_shuffle_epi8(_mm_alignr_epi8(sc, sb, 8), shuf_mask);
 			val = _mm_or_si128(val, alpha_mask);
-			_mm_store_si128(xmm_dest+2, val);
+			_mm_store_si128(&xmm_dest[2], val);
 			val = _mm_shuffle_epi8(_mm_alignr_epi8(sc, sc, 4), shuf_mask);
 			val = _mm_or_si128(val, alpha_mask);
-			_mm_store_si128(xmm_dest+3, val);
+			_mm_store_si128(&xmm_dest[3], val);
 		}
 
 		// Remaining pixels.

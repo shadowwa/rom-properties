@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (Win32)                            *
  * RP_ThumbnailProvider.hpp: IThumbnailProvider implementation.            *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 // Reference: http://www.codeproject.com/Articles/338268/COM-in-C
@@ -24,29 +11,15 @@
 #include "RP_ThumbnailProvider.hpp"
 #include "RpImageWin32.hpp"
 
-// librpbase
-#include "librpbase/RomData.hpp"
-#include "librpbase/file/RpFile.hpp"
-#include "librpbase/img/rp_image.hpp"
-#include "librpbase/img/RpImageLoader.hpp"
+// librpbase, librpfile, librptexture
 using namespace LibRpBase;
-
-// libromdata
-#include "libromdata/RomDataFactory.hpp"
-using LibRomData::RomDataFactory;
+using LibRpFile::IRpFile;
+using LibRpTexture::rp_image;
 
 // RpFile_IStream
 #include "RpFile_IStream.hpp"
 
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cstdio>
-#include <cstring>
-
-// C++ includes.
-#include <memory>
-#include <string>
-using std::unique_ptr;
+// C++ STL classes.
 using std::wstring;
 
 // CLSID
@@ -55,10 +28,6 @@ const CLSID CLSID_RP_ThumbnailProvider =
 
 /** RP_ThumbnailProvider_Private **/
 #include "RP_ThumbnailProvider_p.hpp"
-
-// TCreateThumbnail is a templated class,
-// so we have to #include the .cpp file here.
-#include "libromdata/img/TCreateThumbnail.cpp"
 
 /** RP_ThumbnailProvider_Private **/
 
@@ -72,7 +41,7 @@ RP_ThumbnailProvider_Private::~RP_ThumbnailProvider_Private()
 {
 	// pstream is owned by file,
 	// so don't Release() it here.
-	delete file;
+	UNREF(file);
 }
 
 /** RP_ThumbnailProvider **/
@@ -91,12 +60,19 @@ RP_ThumbnailProvider::~RP_ThumbnailProvider()
 
 IFACEMETHODIMP RP_ThumbnailProvider::QueryInterface(REFIID riid, LPVOID *ppvObj)
 {
+#ifdef _MSC_VER
+# pragma warning(push)
+# pragma warning(disable: 4365 4838)
+#endif /* _MSC_VER */
 	static const QITAB rgqit[] = {
 		QITABENT(RP_ThumbnailProvider, IInitializeWithStream),
 		QITABENT(RP_ThumbnailProvider, IThumbnailProvider),
 		{ 0, 0 }
 	};
-	return LibWin32Common::pQISearch(this, rgqit, riid, ppvObj);
+#ifdef _MSC_VER
+# pragma warning(pop)
+#endif /* _MSC_VER */
+	return LibWin32Common::rp_QISearch(this, rgqit, riid, ppvObj);
 }
 
 /** IInitializeWithStream **/
@@ -107,24 +83,20 @@ IFACEMETHODIMP RP_ThumbnailProvider::Initialize(IStream *pstream, DWORD grfMode)
 	// Ignoring grfMode for now. (always read-only)
 	RP_UNUSED(grfMode);
 
+	// TODO: Check for network file systems and disable
+	// thumbnailing if it's too slow.
+
 	// Create an IRpFile wrapper for the IStream.
-	IRpFile *file = new RpFile_IStream(pstream);
-	if (file->lastError() != 0) {
+	RpFile_IStream *const file = new RpFile_IStream(pstream, true);
+	if (!file->isOpen() || file->lastError() != 0) {
 		// Error initializing the IRpFile.
-		delete file;
+		file->unref();
 		return E_FAIL;
 	}
 
 	RP_D(RP_ThumbnailProvider);
-	if (d->file) {
-		// Delete the old file first.
-		IRpFile *old_file = d->file;
-		d->file = file;
-		delete old_file;
-	} else {
-		// No old file to delete.
-		d->file = file;
-	}
+	UNREF(d->file);
+	d->file = file;
 
 	// Save the IStream and grfMode.
 	d->pstream = pstream;
@@ -145,12 +117,19 @@ IFACEMETHODIMP RP_ThumbnailProvider::GetThumbnail(UINT cx, HBITMAP *phbmp, WTS_A
 		return E_INVALIDARG;
 	}
 	*phbmp = nullptr;
-	*pdwAlpha = WTSAT_ARGB;
 
-	int ret = d->thumbnailer.getThumbnail(d->file, cx, *phbmp);
-	if (ret != 0 || !*phbmp) {
+	CreateThumbnail::GetThumbnailOutParams_t outParams;
+	outParams.retImg = nullptr;
+	int ret = d->thumbnailer.getThumbnail(d->file, cx, &outParams);
+	if (ret != 0 || !outParams.retImg) {
 		// ROM is not supported. Use the fallback.
+		if (outParams.retImg) {
+			DeleteBitmap(outParams.retImg);
+		}
 		return d->Fallback(cx, phbmp, pdwAlpha);
 	}
+
+	*phbmp = outParams.retImg;
+	*pdwAlpha = (outParams.sBIT.alpha > 0 ? WTSAT_ARGB : WTSAT_RGB);
 	return S_OK;
 }

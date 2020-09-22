@@ -2,21 +2,8 @@
  * ROM Properties Page shell extension. (libunixcommon)                    *
  * dll-search.c: Function to search for a usable rom-properties library.   *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #include "config.libunixcommon.h"
@@ -26,19 +13,24 @@
 #include <assert.h>
 #include <dlfcn.h>
 #include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include <sys/types.h>
 #include <unistd.h>
+
+// OpenBSD 6.5 doesn't have the static_assert() macro,
+// even though it *does* use LLVM/Clang 7.0.1.
+#ifndef static_assert
+# define static_assert _Static_assert
+#endif
 
 // Supported rom-properties frontends.
 typedef enum {
 	RP_FE_KDE4,
-	RP_FE_KDE5,
-	RP_FE_XFCE,
-	RP_FE_GNOME,
+	RP_FE_KF5,
+	RP_FE_GTK2,	// XFCE (Thunar 1.6)
+	RP_FE_GTK3,	// GNOME, MATE, Cinnamon, XFCE (Thunar 1.8)
 
 	RP_FE_MAX
 } RP_Frontend;
@@ -50,8 +42,8 @@ static const char *const RP_Extension_Path[RP_FE_MAX] = {
 #else
 	NULL,
 #endif
-#ifdef KDE5_PLUGIN_INSTALL_DIR
-	KDE5_PLUGIN_INSTALL_DIR "/rom-properties-kde5.so",
+#ifdef KF5_PLUGIN_INSTALL_DIR
+	KF5_PLUGIN_INSTALL_DIR "/rom-properties-kf5.so",
 #else
 	NULL,
 #endif
@@ -61,7 +53,7 @@ static const char *const RP_Extension_Path[RP_FE_MAX] = {
 	NULL,
 #endif
 #ifdef LibNautilusExtension_EXTENSION_DIR
-	LibNautilusExtension_EXTENSION_DIR "/rom-properties-gnome.so",
+	LibNautilusExtension_EXTENSION_DIR "/rom-properties-gtk3.so",
 #else
 	NULL,
 #endif
@@ -70,12 +62,94 @@ static const char *const RP_Extension_Path[RP_FE_MAX] = {
 // Plugin priority order.
 // - Index: Current desktop environment. (RP_Frontend)
 // - Value: Plugin to use. (RP_Frontend)
-static const uint8_t plugin_prio[4][4] = {
-	{RP_FE_KDE4, RP_FE_KDE5, RP_FE_XFCE, RP_FE_GNOME},	// RP_FE_KDE4
-	{RP_FE_KDE5, RP_FE_KDE4, RP_FE_GNOME, RP_FE_XFCE},	// RP_FE_KDE5
-	{RP_FE_XFCE, RP_FE_GNOME, RP_FE_KDE5, RP_FE_KDE4},	// RP_FE_XFCE
-	{RP_FE_GNOME, RP_FE_XFCE, RP_FE_KDE5, RP_FE_KDE4},	// RP_FE_GNOME
+static const uint8_t plugin_prio[RP_FE_MAX][RP_FE_MAX] = {
+	{RP_FE_KDE4, RP_FE_KF5, RP_FE_GTK2, RP_FE_GTK3},	// RP_FE_KDE4
+	{RP_FE_KF5, RP_FE_KDE4, RP_FE_GTK3, RP_FE_GTK2},	// RP_FE_KF5
+	{RP_FE_GTK2, RP_FE_GTK3, RP_FE_KF5, RP_FE_KDE4},	// RP_FE_GTK2
+	{RP_FE_GTK3, RP_FE_GTK2, RP_FE_KF5, RP_FE_KDE4},	// RP_FE_GTK3
 };
+
+/**
+ * Get a process's executable name.
+ * @param pid		[in] Process ID.
+ * @param pidname	[out] String buffer.
+ * @param len		[in] Size of buf.
+ * @return 0 on success; non-zero on error.
+ */
+int rp_get_process_name(pid_t pid, char *pidname, size_t len, pid_t *ppid)
+{
+	int ret = -EIO;
+
+	// Zero the ppid initially.
+	if (ppid) {
+		*ppid = 0;
+	}
+
+#ifdef __linux__
+	// Open the /proc/$PID/status file.
+	char buf[64];
+	snprintf(buf, sizeof(buf), "/proc/%d/status", pid);
+	errno = 0;
+	FILE *f = fopen(buf, "r");
+	if (!f) {
+		// Unable to open the file...
+		int err = errno;
+		if (err == 0) {
+			err = EIO;
+		}
+		return err;
+	}
+
+	while (!feof(f) && fgets(buf, sizeof(buf), f) != NULL) {
+		if (buf[0] == 0)
+			break;
+
+		// "Name:\t" is always the first line.
+		if (!strncmp(buf, "Name:\t", 6)) {
+			// Found the "Name:" row.
+			const char *const s_value = &buf[6];
+			const size_t s_value_sz = sizeof(buf)-6;
+
+			const char *const chr = memchr(s_value, '\n', s_value_sz);
+			if (!chr)
+				continue;
+
+			size_t namelen = (int)(chr - s_value);
+			if (namelen > len - 1) {
+				namelen = len - 1;
+			}
+			memcpy(pidname, s_value, namelen);
+			pidname[namelen] = '\0';
+
+			if (!ppid) {
+				// Not searching for ppid, so we can stop here.
+				ret = 0;
+				break;
+			}
+		} else if (!strncmp(buf, "PPid:\t", 6)) {
+			// Found the "PPid:" row.
+			if (ppid) {
+				char *endptr = NULL;
+				*ppid = (pid_t)strtol(&buf[6], &endptr, 10);
+				if (*endptr != 0 && *endptr != '\n') {
+					// Invalid numeric value...
+					*ppid = 0;
+				} else {
+					// Valid ppid.
+					ret = 0;
+				}
+				break;
+			}
+		}
+	}
+	fclose(f);
+#else /* !__linux__ */
+	// Not supported.
+	ret = -ENOSYS;
+#endif
+
+	return ret;
+}
 
 /**
  * Walk through the process tree to determine the active desktop environment.
@@ -90,71 +164,44 @@ static RP_Frontend walk_proc_tree(void)
 	pid_t ppid = getppid();
 	while (ppid > 1) {
 		// Open the /proc/$PID/status file.
-		char buf[128];
-		snprintf(buf, sizeof(buf), "/proc/%d/status", ppid);
-		FILE *f = fopen(buf, "r");
-		if (!f) {
-			// Unable to open the file...
-			ppid = 0;
+		char process_name[32];
+
+		const pid_t pid = ppid;
+		int ret = rp_get_process_name(pid, process_name, sizeof(process_name), &ppid);
+		if (ret != 0) {
+			// Error getting the parent process information.
 			break;
 		}
 
-		// Zero the ppid in case we don't find another one.
-		// This prevents infinite loops.
-		ppid = 0;
-
-		while (!feof(f) && fgets(buf, sizeof(buf), f) != NULL) {
-			if (buf[0] == 0)
-				break;
-
-			// "Name:\t" is always the first line.
-			// If it matches an expected version of KDE, we're done.
-			// Otherwise, continue until we find "PPid:\t".
-			if (!strncmp(buf, "Name:\t", 6)) {
-				// Found the "Name:" row.
-				const char *const chr = memchr(buf, '\n', sizeof(buf)-6);
-				if (!chr)
-					continue;
-
-				const int len = chr - buf - 6;
-				if (len == 8) {
-					if (!strncmp(&buf[6], "kdeinit5", 8)) {
-						// Found kdeinit5.
-						ret = RP_FE_KDE5;
-						ppid = 0;
-						break;
-					} else if (!strncmp(&buf[6], "kdeinit4", 8)) {
-						// Found kdeinit4.
-						ret = RP_FE_KDE4;
-						ppid = 0;
-						break;
-					}
-				} else if ((len == 11 && !strncmp(&buf[6], "gnome-panel", 11)) ||
-					   (len == 13 && !strncmp(&buf[6], "gnome-session", 13)))
-				{
-					// GNOME session.
-					ret = RP_FE_GNOME;
-					ppid = 0;
-					break;
-				}
-				// NOTE: Unity and XFCE don't have unique
-				// parent processes.
-			} else if (!strncmp(buf, "PPid:\t", 6)) {
-				// Found the "PPid:" row.
-				char *endptr;
-				ppid = (pid_t)strtol(&buf[6], &endptr, 10);
-				if (*endptr != 0 && *endptr != '\n') {
-					// Invalid numeric value...
-					ppid = 0;
-				}
-				// Check the next process.
-				break;
-			}
+		// Check the parent process name.
+		// NOTE: Unity and XFCE don't have unique parent processes.
+		// FIXME: Handle ksmserver...
+		if (!strcmp(process_name, "kdeinit5")) {
+			// Found kdeinit5.
+			ret = RP_FE_KF5;
+			ppid = 0;
+			break;
+		} else if (!strcmp(process_name, "kdeinit4")) {
+			// Found kdeinit4.
+			ret = RP_FE_KDE4;
+			ppid = 0;
+			break;
+		} else if (!strcmp(process_name, "gnome-panel") ||
+		           !strcmp(process_name, "gnome-session") ||
+		           !strcmp(process_name, "mate-panel") ||
+		           !strcmp(process_name, "mate-session") ||
+		           !strcmp(process_name, "cinnamon-panel") ||
+		           !strcmp(process_name, "cinnamon-session"))
+		{
+			// GNOME, MATE, or Cinnamon session.
+			// TODO: Verify the Cinnamon process names.
+			ret = RP_FE_GTK3;
+			ppid = 0;
+			break;
 		}
-		fclose(f);
 	}
 #else
-	#error Not implemented.
+# warning walk_proc_tree() is not implemented for this OS.
 #endif
 
 	return ret;
@@ -167,30 +214,41 @@ static RP_Frontend walk_proc_tree(void)
  */
 static inline RP_Frontend check_xdg_desktop_name(const char *name)
 {
+	// References:
+	// - https://askubuntu.com/questions/72549/how-to-determine-which-window-manager-is-running
+	// - https://askubuntu.com/a/227669
+
 	// TODO: Check other values for $XDG_CURRENT_DESKTOP.
 	if (!strcasecmp(name, "KDE")) {
 		// KDE.
 		// Check parent processes to determine the version.
-		// NOTE: Assuming KDE5 if unable to determine the KDE version.
+		// NOTE: Assuming KF5 if unable to determine the KDE version.
 		RP_Frontend ret = walk_proc_tree();
 		if (ret >= RP_FE_MAX) {
-			// Unknown. Assume KDE5.
-			ret = RP_FE_KDE5;
+			// Unknown. Assume KF5.
+			ret = RP_FE_KF5;
 		}
 		return ret;
-	} else if (!strcasecmp(name, "GNOME") || !strcasecmp(name, "Unity")) {
-		// GNOME and/or Unity.
-		return RP_FE_GNOME;
-	} else if (!strcasecmp(name, "XFCE")) {
-		// XFCE.
-		return RP_FE_XFCE;
+	} else if (!strcasecmp(name, "GNOME") ||
+	           !strcasecmp(name, "Unity") ||
+	           !strcasecmp(name, "MATE") ||
+	           !strcasecmp(name, "X-Cinnamon") ||
+	           !strcasecmp(name, "Cinnamon"))
+	{
+		// GTK3-based desktop environment. (GNOME or GNOME-like)
+		return RP_FE_GTK3;
+	} else if (!strcasecmp(name, "XFCE") ||
+		   !strcasecmp(name, "LXDE"))
+	{
+		// This *might* be GTK3 if it's new enough.
+		return RP_FE_GTK3;
 	}
 
-	// NOTE: "KDE4" and "KDE5" are not actually used.
+	// NOTE: "KDE4", "KDE5", and "KF5" are not actually used.
 	// They're used here for debugging purposes only.
-	if (!strcasecmp(name, "KDE5")) {
-		// KDE5.
-		return RP_FE_KDE5;
+	if (!strcasecmp(name, "KF5") || !strcasecmp(name, "KDE5")) {
+		// KF5.
+		return RP_FE_KF5;
 	} else if (!strcasecmp(name, "KDE4")) {
 		// KDE4.
 		return RP_FE_KDE4;
@@ -218,7 +276,7 @@ static RP_Frontend get_active_de(void)
 		char *buf = strdup(xdg_current_desktop);
 		char *saveptr = NULL;
 		for (const char *token = strtok_r(buf, ":", &saveptr);
-		     token != nullptr; token = strtok_r(NULL, ":", &saveptr))
+		     token != NULL; token = strtok_r(NULL, ":", &saveptr))
 		{
 			RP_Frontend ret = check_xdg_desktop_name(token);
 			if (ret < RP_FE_MAX) {
@@ -243,8 +301,8 @@ static RP_Frontend get_active_de(void)
 	// Walk the process tree to find a known parent process.
 	RP_Frontend ret = walk_proc_tree();
 	if (ret >= RP_FE_MAX) {
-		// No match. Assume RP_FE_GNOME.
-		ret = RP_FE_GNOME;
+		// No match. Assume RP_FE_GTK3.
+		ret = RP_FE_GTK3;
 	}
 
 	return ret;
@@ -274,26 +332,29 @@ int rp_dll_search(const char *symname, void **ppDll, void **ppfn, PFN_RP_DLL_DEB
 	// Debug: Print the active desktop environment.
 	if (pfnDebug) {
 		static const char *const de_name_tbl[] = {
-			"KDE4", "KDE5", "XFCE", "GNOME"
+			"KDE4", "KF5",
+			"GTK2", "GTK3",
 		};
+		static_assert(sizeof(de_name_tbl)/sizeof(de_name_tbl[0]) == RP_FE_MAX,
+			"de_name_tbl[] needs to be updated.");
 		if (cur_desktop == RP_FE_MAX) {
-			pfnDebug(LEVEL_DEBUG, "*** Could not determine active desktop environment. Defaulting to GNOME.");
+			pfnDebug(LEVEL_DEBUG, "*** Could not determine active desktop environment. Defaulting to GTK3.");
 		} else {
 			pfnDebug(LEVEL_DEBUG, "Active desktop environment: %s", de_name_tbl[cur_desktop]);
 		}
 	}
 
 	if (cur_desktop == RP_FE_MAX) {
-		// Default to GNOME.
-		cur_desktop = RP_FE_GNOME;
+		// Default to GTK3.
+		cur_desktop = RP_FE_GTK3;
 	}
 
-	const uint8_t *prio = &plugin_prio[cur_desktop][0];
+	const uint8_t *const prio = &plugin_prio[cur_desktop][0];
 	*ppDll = NULL;
 	*ppfn = NULL;
-	for (unsigned int i = RP_FE_MAX-1; i > 0; i--, prio++) {
+	for (unsigned int i = 0; i < RP_FE_MAX; i++) {
 		// Attempt to open this plugin.
-		const char *const plugin_path = RP_Extension_Path[*prio];
+		const char *const plugin_path = RP_Extension_Path[prio[i]];
 		if (!plugin_path)
 			continue;
 

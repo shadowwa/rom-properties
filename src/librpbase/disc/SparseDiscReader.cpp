@@ -3,62 +3,38 @@
  * SparseDiscReader.cpp: Disc reader base class for disc image formats     *
  * that use sparse and/or compressed blocks, e.g. CISO, WBFS, GCZ.         *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "SparseDiscReader.hpp"
 #include "SparseDiscReader_p.hpp"
 
-#include "../file/IRpFile.hpp"
-
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cerrno>
+// librpfile
+using LibRpFile::IRpFile;
 
 namespace LibRpBase {
 
 /** SparseDiscReaderPrivate **/
 
-SparseDiscReaderPrivate::SparseDiscReaderPrivate(SparseDiscReader *q, IRpFile *file)
+SparseDiscReaderPrivate::SparseDiscReaderPrivate(SparseDiscReader *q)
 	: q_ptr(q)
-	, file(nullptr)
 	, disc_size(0)
 	, pos(-1)
 	, block_size(0)
 {
-	if (!file) {
-		q->m_lastError = EBADF;
-		return;
-	}
-	this->file = file->dup();
+	// NOTE: Can't check q->m_file here.
 
 	// disc_size, pos, and block_size must be
 	// set by the subclass.
 }
 
-SparseDiscReaderPrivate::~SparseDiscReaderPrivate()
-{
-	delete file;
-}
-
 /** SparseDiscReader **/
 
-SparseDiscReader::SparseDiscReader(SparseDiscReaderPrivate *d)
-	: d_ptr(d)
+SparseDiscReader::SparseDiscReader(SparseDiscReaderPrivate *d, IRpFile *file)
+	: super(file)
+	, d_ptr(d)
 { }
 
 SparseDiscReader::~SparseDiscReader()
@@ -69,17 +45,6 @@ SparseDiscReader::~SparseDiscReader()
 /** IDiscReader functions. **/
 
 /**
- * Is the disc image open?
- * This usually only returns false if an error occurred.
- * @return True if the disc image is open; false if it isn't.
- */
-bool SparseDiscReader::isOpen(void) const
-{
-	RP_D(const SparseDiscReader);
-	return (d->file != nullptr);
-}
-
-/**
  * Read data from the disc image.
  * @param ptr Output data buffer.
  * @param size Amount of data to read, in bytes.
@@ -88,11 +53,11 @@ bool SparseDiscReader::isOpen(void) const
 size_t SparseDiscReader::read(void *ptr, size_t size)
 {
 	RP_D(SparseDiscReader);
-	assert(d->file != nullptr);
+	assert(m_file != nullptr);
 	assert(d->disc_size > 0);
 	assert(d->pos >= 0);
 	assert(d->block_size != 0);
-	if (!d->file || d->disc_size <= 0 || d->pos < 0 || d->block_size == 0) {
+	if (!m_file || d->disc_size <= 0 || d->pos < 0 || d->block_size == 0) {
 		// Disc image wasn't initialized properly.
 		m_lastError = EBADF;
 		return -1;
@@ -109,8 +74,8 @@ size_t SparseDiscReader::read(void *ptr, size_t size)
 
 	// Make sure d->pos + size <= d->disc_size.
 	// If it isn't, we'll do a short read.
-	if (d->pos + (int64_t)size >= d->disc_size) {
-		size = (size_t)(d->disc_size - d->pos);
+	if (d->pos + static_cast<off64_t>(size) >= d->disc_size) {
+		size = static_cast<size_t>(d->disc_size - d->pos);
 	}
 
 	// Check if we're not starting on a block boundary.
@@ -120,13 +85,13 @@ size_t SparseDiscReader::read(void *ptr, size_t size)
 		// Not a block boundary.
 		// Read the end of the block.
 		uint32_t read_sz = block_size - blockStartOffset;
-		if (size < (size_t)read_sz) {
-			read_sz = (uint32_t)size;
+		if (size < static_cast<size_t>(read_sz)) {
+			read_sz = static_cast<uint32_t>(size);
 		}
 
-		const unsigned int blockIdx = (unsigned int)(d->pos / block_size);
-		int rd = this->readBlock(blockIdx, ptr8, blockStartOffset, read_sz);
-		if (rd < 0 || rd != (int)read_sz) {
+		const unsigned int blockIdx = static_cast<unsigned int>(d->pos / block_size);
+		int rd = this->readBlock(blockIdx, blockStartOffset, ptr8, read_sz);
+		if (rd < 0 || rd != static_cast<int>(read_sz)) {
 			// Error reading the data.
 			return (rd > 0 ? rd : 0);
 		}
@@ -144,9 +109,9 @@ size_t SparseDiscReader::read(void *ptr, size_t size)
 	    ret += block_size, d->pos += block_size)
 	{
 		assert(d->pos % block_size == 0);
-		const unsigned int blockIdx = (unsigned int)(d->pos / block_size);
-		int rd = this->readBlock(blockIdx, ptr8, 0, block_size);
-		if (rd < 0 || rd != (int)block_size) {
+		const unsigned int blockIdx = static_cast<unsigned int>(d->pos / block_size);
+		int rd = this->readBlock(blockIdx, 0, ptr8, block_size);
+		if (rd < 0 || rd != static_cast<int>(block_size)) {
 			// Error reading the data.
 			return ret + (rd > 0 ? rd : 0);
 		}
@@ -158,9 +123,9 @@ size_t SparseDiscReader::read(void *ptr, size_t size)
 		assert(d->pos % block_size == 0);
 
 		// Read the start of the block.
-		const unsigned int blockIdx = (unsigned int)(d->pos / block_size);
-		int rd = this->readBlock(blockIdx, ptr8, 0, size);
-		if (rd < 0 || rd != (int)size) {
+		const unsigned int blockIdx = static_cast<unsigned int>(d->pos / block_size);
+		int rd = this->readBlock(blockIdx, 0, ptr8, size);
+		if (rd < 0 || rd != static_cast<int>(size)) {
 			// Error reading the data.
 			return ret + (rd > 0 ? rd : 0);
 		}
@@ -178,23 +143,24 @@ size_t SparseDiscReader::read(void *ptr, size_t size)
  * @param pos disc image position.
  * @return 0 on success; -1 on error.
  */
-int SparseDiscReader::seek(int64_t pos)
+int SparseDiscReader::seek(off64_t pos)
 {
 	RP_D(SparseDiscReader);
-	assert(d->file != nullptr);
+	assert(m_file != nullptr);
 	assert(d->disc_size > 0);
 	assert(d->pos >= 0);
 	assert(d->block_size != 0);
-	if (!d->file || d->disc_size <= 0 || d->pos < 0 || d->block_size == 0) {
+	if (!m_file || d->disc_size <= 0 || d->pos < 0 || d->block_size == 0) {
 		// Disc image wasn't initialized properly.
 		m_lastError = EBADF;
 		return -1;
 	}
 
 	// Handle out-of-range cases.
-	// TODO: How does POSIX behave?
 	if (pos < 0) {
-		d->pos = 0;
+		// Negative is invalid.
+		m_lastError = EINVAL;
+		return -1;
 	} else if (pos >= d->disc_size) {
 		d->pos = d->disc_size;
 	} else {
@@ -204,37 +170,17 @@ int SparseDiscReader::seek(int64_t pos)
 }
 
 /**
- * Seek to the beginning of the disc image.
- */
-void SparseDiscReader::rewind(void)
-{
-	RP_D(SparseDiscReader);
-	assert(d->file != nullptr);
-	assert(d->disc_size > 0);
-	assert(d->pos >= 0);
-	assert(d->block_size != 0);
-	if (!d->file || d->disc_size <= 0 || d->pos < 0 || d->block_size == 0) {
-		// Disc image wasn't initialized properly.
-		m_lastError = EBADF;
-		// TODO: Return a value?
-		return;
-	}
-
-	d->pos = 0;
-}
-
-/**
  * Get the disc image position.
  * @return Disc image position on success; -1 on error.
  */
-int64_t SparseDiscReader::tell(void)
+off64_t SparseDiscReader::tell(void)
 {
-	RP_D(SparseDiscReader);
-	assert(d->file != nullptr);
+	RP_D(const SparseDiscReader);
+	assert(m_file != nullptr);
 	assert(d->disc_size > 0);
 	assert(d->pos >= 0);
 	assert(d->block_size != 0);
-	if (!d->file || d->disc_size <= 0 || d->pos < 0 || d->block_size == 0) {
+	if (!m_file || d->disc_size <= 0 || d->pos < 0 || d->block_size == 0) {
 		// Disc image wasn't initialized properly.
 		m_lastError = EBADF;
 		return -1;
@@ -247,20 +193,74 @@ int64_t SparseDiscReader::tell(void)
  * Get the disc image size.
  * @return Disc image size, or -1 on error.
  */
-int64_t SparseDiscReader::size(void)
+off64_t SparseDiscReader::size(void)
 {
-	RP_D(SparseDiscReader);
-	assert(d->file != nullptr);
+	RP_D(const SparseDiscReader);
+	assert(m_file != nullptr);
 	assert(d->disc_size > 0);
 	assert(d->pos >= 0);
 	assert(d->block_size != 0);
-	if (!d->file || d->disc_size <= 0 || d->pos < 0 || d->block_size == 0) {
+	if (!m_file || d->disc_size <= 0 || d->pos < 0 || d->block_size == 0) {
 		// Disc image wasn't initialized properly.
 		m_lastError = EBADF;
 		return -1;
 	}
 
 	return d->disc_size;
+}
+
+/** SparseDiscReader **/
+
+/**
+ * Read the specified block.
+ *
+ * This can read either a full block or a partial block.
+ * For a full block, set pos = 0 and size = block_size.
+ *
+ * @param blockIdx	[in] Block index.
+ * @param pos		[in] Starting position. (Must be >= 0 and <= the block size!)
+ * @param ptr		[out] Output data buffer.
+ * @param size		[in] Amount of data to read, in bytes. (Must be <= the block size!)
+ * @return Number of bytes read, or -1 if the block index is invalid.
+ */
+int SparseDiscReader::readBlock(uint32_t blockIdx, int pos, void *ptr, size_t size)
+{
+	// Read 'size' bytes of block 'blockIdx', starting at 'pos'.
+	// NOTE: This can only be called by SparseDiscReader,
+	// so the main assertions are already checked there.
+	RP_D(SparseDiscReader);
+	assert(pos >= 0 && pos < (int)d->block_size);
+	assert(size <= d->block_size);
+	// TODO: Make sure overflow doesn't occur.
+	assert(static_cast<off64_t>(pos + size) <= static_cast<off64_t>(d->block_size));
+	if (pos < 0 || static_cast<off64_t>(pos + size) > static_cast<off64_t>(d->block_size)) {
+		// pos+size is out of range.
+		return -1;
+	}
+
+	if (unlikely(size == 0)) {
+		// Nothing to read.
+		return 0;
+	}
+
+	// Get the physical address first.
+	const off64_t physBlockAddr = getPhysBlockAddr(blockIdx);
+	assert(physBlockAddr >= 0);
+	if (physBlockAddr < 0) {
+		// Out of range.
+		return -1;
+	}
+
+	if (physBlockAddr == 0) {
+		// Empty block.
+		memset(ptr, 0, size);
+		return static_cast<int>(size);
+	}
+
+	// Read from the block.
+	size_t sz_read = m_file->seekAndRead(physBlockAddr + pos, ptr, size);
+	m_lastError = m_file->lastError();
+	return (sz_read > 0 ? (int)sz_read : -1);
 }
 
 }

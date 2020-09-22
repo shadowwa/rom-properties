@@ -2,68 +2,44 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * GcnPartitionPrivate.cpp: GameCube partition private class.              *
  *                                                                         *
- * Copyright (c) 2016 by David Korth.                                      *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "GcnPartitionPrivate.hpp"
-#include "librpbase/byteswap.h"
 
 #include "GcnFst.hpp"
 #include "GcnPartition.hpp"
 
 // librpbase
-#include "librpbase/crypto/KeyManager.hpp"
 using LibRpBase::IDiscReader;
-using LibRpBase::KeyManager;
-
-// C includes.
-#include <stdlib.h>
-
-// C includes. (C++ namespace)
-#include <cerrno>
-#include <cstring>
 
 namespace LibRomData {
 
-GcnPartitionPrivate::GcnPartitionPrivate(GcnPartition *q, IDiscReader *discReader,
-	int64_t partition_offset, uint8_t offsetShift)
+GcnPartitionPrivate::GcnPartitionPrivate(GcnPartition *q,
+	off64_t partition_offset, off64_t data_size, uint8_t offsetShift)
 	: q_ptr(q)
-	, offsetShift(offsetShift)
-	, discReader(discReader)
 	, partition_offset(partition_offset)
 	, data_offset(-1)	// -1 == invalid
 	, partition_size(-1)
 	, data_size(-1)
 	, bootLoaded(false)
+	, offsetShift(offsetShift)
 	, fst(nullptr)
 {
+	// NOTE: The discReader parameter is needed because
+	// WiiPartitionPrivate is created *before* the
+	// WiiPartition superclass's discReader field is set.
+
 	// Clear the various structs.
 	memset(&bootBlock, 0, sizeof(bootBlock));
 	memset(&bootInfo, 0, sizeof(bootInfo));
 
-	if (!discReader->isOpen()) {
-		q->m_lastError = discReader->lastError();
-		return;
-	}
-
 	// Save important data.
-	data_offset     = partition_offset;
-	data_size       = discReader->size();
-	partition_size  = data_size;
+	this->data_offset    = partition_offset;
+	this->data_size      = data_size;
+	this->partition_size = data_size;
 }
 
 GcnPartitionPrivate::~GcnPartitionPrivate()
@@ -160,15 +136,15 @@ int GcnPartitionPrivate::loadFst(void)
 		// Sanity check: FST larger than 1 MB is invalid.
 		// TODO: What is the actual largest FST?
 		q->m_lastError = EIO;
-		return -q->m_lastError;
+		return -EIO;
 	} else if (bootBlock.fst_size > bootBlock.fst_max_size) {
 		// FST is invalid.
 		q->m_lastError = EIO;
-		return -q->m_lastError;
+		return -EIO;
 	}
 
 	// Seek to the beginning of the FST.
-	ret = q->seek((int64_t)bootBlock.fst_offset << offsetShift);
+	ret = q->seek(static_cast<off64_t>(bootBlock.fst_offset) << offsetShift);
 	if (ret != 0) {
 		// Seek failed.
 		return -q->m_lastError;
@@ -177,23 +153,25 @@ int GcnPartitionPrivate::loadFst(void)
 	// Read the FST.
 	// TODO: Eliminate the extra copy?
 	uint32_t fstData_len = bootBlock.fst_size << offsetShift;
-	uint8_t *fstData = static_cast<uint8_t*>(malloc(fstData_len));
-	if (!fstData) {
-		// malloc() failed.
-		q->m_lastError = ENOMEM;
-		return -q->m_lastError;
-	}
+	uint8_t *const fstData = new uint8_t[fstData_len];
 	size_t size = q->read(fstData, fstData_len);
 	if (size != fstData_len) {
 		// Short read.
-		free(fstData);
+		delete[] fstData;
 		q->m_lastError = EIO;
-		return -q->m_lastError;
+		return -EIO;
 	}
 
 	// Create the GcnFst.
-	fst = new GcnFst(fstData, fstData_len, offsetShift);
-	free(fstData);	// TODO: Eliminate the extra copy?
+	GcnFst *const gcnFst = new GcnFst(fstData, fstData_len, offsetShift);
+	delete[] fstData;	// TODO: Eliminate the extra copy?
+	if (gcnFst->hasErrors()) {
+		// FST has errors.
+		delete gcnFst;
+		q->m_lastError = EIO;
+		return -EIO;
+	}
+	this->fst = gcnFst;
 	return 0;
 }
 

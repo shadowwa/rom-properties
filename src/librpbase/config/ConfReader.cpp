@@ -2,38 +2,22 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * ConfReader.hpp: Configuration reader base class.                        *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "ConfReader.hpp"
 #include "ConfReader_p.hpp"
 
-// libromdata
-#include "file/FileSystem.hpp"
-
-// Text conversion functions and macros.
+// librpbase, librpfile, librpthreads
 #include "TextFuncs.hpp"
-
-// C includes.
-#include <stdlib.h>
-
-// C includes. (C++ namespace)
-#include <cerrno>
-#include <ctime>
+#ifdef _WIN32
+# include "TextFuncs_wchar.hpp"
+#endif
+#include "librpfile/FileSystem.hpp"
+using namespace LibRpFile;
+using LibRpThreads::MutexLocker;
 
 namespace LibRpBase {
 
@@ -114,7 +98,7 @@ int ConfReader::load(bool force)
 		// Have we checked the timestamp recently?
 		// TODO: Define the threshold somewhere.
 		const time_t cur_time = time(nullptr);
-		if (abs(cur_time - d->conf_last_checked) < 2) {
+		if (llabs(cur_time - d->conf_last_checked) < 2) {
 			// We checked it recently. Assume it's up to date.
 			return 0;
 		}
@@ -152,16 +136,6 @@ int ConfReader::load(bool force)
 			}
 			d->conf_filename += d->conf_rel_filename;
 		}
-
-		// Make sure the configuration directory exists.
-		// NOTE: The filename portion MUST be kept in config_path,
-		// since the last component is ignored by rmkdir().
-		int ret = FileSystem::rmkdir(d->conf_filename);
-		if (ret != 0) {
-			// rmkdir() failed.
-			d->conf_filename.clear();
-			return -ENOENT;
-		}
 	} else if (!force && d->conf_was_found) {
 		// Check if the keys.conf timestamp has changed.
 		// NOTE: Second check once the mutex is locked.
@@ -188,13 +162,23 @@ int ConfReader::load(bool force)
 	// on the local file system, and it's easier to let inih
 	// manage the file itself.
 #ifdef _WIN32
-	// Win32: Use ini_parse_w().
-	int ret = ini_parse_w(RP2W_s(d->conf_filename),
-			ConfReaderPrivate::processConfigLine_static, d);
+	// Win32: Open the file using _tfopen(),
+	// then parse it using ini_parse_file().
+	int ret = 0;
+	errno = 0;
+	FILE *f_ini = _tfopen(U82T_s(d->conf_filename), _T("rb"));
+	if (f_ini) {
+		// Parse the INI file.
+		ret = ini_parse_file(f_ini, ConfReaderPrivate::processConfigLine_static, d);
+		fclose(f_ini);
+	} else {
+		// Error opening the INI file.
+		ret = errno;
+	}
 #else /* !_WIN32 */
 	// Linux or other systems: Use ini_parse().
 	int ret = ini_parse(d->conf_filename.c_str(),
-			ConfReaderPrivate::processConfigLine_static, d);
+		ConfReaderPrivate::processConfigLine_static, d);
 #endif /* _WIN32 */
 	if (ret != 0) {
 		// Error parsing the INI file.

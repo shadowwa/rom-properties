@@ -19,7 +19,7 @@
 /****** GDI Macro APIs *******************************************************/
 
 #undef DeletePen
-static FORCEINLINE BOOL DeleteObject(_In_ HPEN hPen)
+static FORCEINLINE BOOL DeletePen(_In_ HPEN hPen)
 	{ return DeleteObject(STATIC_CAST(HGDIOBJ)(hPen)); }
 #undef SelectPen
 static FORCEINLINE HPEN SelectPen(_In_ HDC hDC, _In_ HPEN hPen)
@@ -258,7 +258,7 @@ static FORCEINLINE int ListBox_ResetContent(_In_ HWND hwndCtl)
 static FORCEINLINE int ListBox_AddString(_In_ HWND hwndCtl, _In_ LPCTSTR lpsz)
 	{ return STATIC_CAST(int)(STATIC_CAST(DWORD)(SNDMSG(hwndCtl, LB_ADDSTRING, 0L, REINTERPRET_CAST(LPARAM)(lpsz)))); }
 #undef ListBox_InsertString
-static FORCEINLINE int ListBox_AddString(_In_ HWND hwndCtl, _In_ int index, _In_ LPCTSTR lpsz)
+static FORCEINLINE int ListBox_InsertString(_In_ HWND hwndCtl, _In_ int index, _In_ LPCTSTR lpsz)
 	{ return STATIC_CAST(int)(STATIC_CAST(DWORD)(SNDMSG(hwndCtl, LB_INSERTSTRING, STATIC_CAST(WPARAM)(index), REINTERPRET_CAST(LPARAM)(lpsz)))); }
 
 #undef ListBox_AddItemData
@@ -346,15 +346,15 @@ static FORCEINLINE void ListBox_SetHorizontalExtent(_In_ HWND hwndCtl, _In_ int 
 static FORCEINLINE BOOL ListBox_SetTabStops(_In_ HWND hwndCtl, _In_ int cTabs, _In_ const int *lpTabs)
 	{ return STATIC_CAST(BOOL)(STATIC_CAST(DWORD)(SNDMSG(hwndCtl, LB_SETTABSTOPS, STATIC_CAST(WPARAM)(cTabs), REINTERPRET_CAST(LPARAM)(lpTabs)))); }
 
-#undef ListBox_SetTabStops
-static FORCEINLINE int ListBox_SetTabStops(_In_ HWND hwndCtl, _In_ int index, _Out_ RECT *lprc)
+#undef ListBox_GetItemRect
+static FORCEINLINE int ListBox_GetItemRect(_In_ HWND hwndCtl, _In_ int index, _Out_ RECT *lprc)
 	{ return STATIC_CAST(int)(STATIC_CAST(DWORD)(SNDMSG(hwndCtl, LB_GETITEMRECT, STATIC_CAST(WPARAM)(index), REINTERPRET_CAST(LPARAM)(lprc)))); }
 
 #undef ListBox_SetCaretIndex
 static FORCEINLINE int ListBox_SetCaretIndex(_In_ HWND hwndCtl, _In_ int index)
 	{ return STATIC_CAST(int)(STATIC_CAST(DWORD)(SNDMSG(hwndCtl, LB_SETCARETINDEX, STATIC_CAST(WPARAM)(index), 0L))); }
 #undef ListBox_GetCaretIndex
-static FORCEINLINE int ListBox_GetCaretIndex(_In_ HWND hwndCtl, _In_ int index)
+static FORCEINLINE int ListBox_GetCaretIndex(_In_ HWND hwndCtl)
 	{ return STATIC_CAST(int)(STATIC_CAST(DWORD)(SNDMSG(hwndCtl, LB_GETCARETINDEX, 0L, 0L))); }
 
 #undef ListBox_FindStringExact
@@ -369,7 +369,9 @@ static FORCEINLINE int ListBox_GetItemHeight(_In_ HWND hwndCtl, _In_ int index)
 	{ return STATIC_CAST(int)(STATIC_CAST(DWORD)(SNDMSG(hwndCtl, LB_GETITEMHEIGHT, STATIC_CAST(WPARAM)(index), 0L))); }
 #endif  /* WINVER >= 0x030a */
 
-#define ListBox_Dir(hwndCtl, attrs, lpszFileSpec)   ((int)(DWORD)SNDMSG((hwndCtl), LB_DIR, (WPARAM)(UINT)(attrs), (LPARAM)(LPCTSTR)(lpszFileSpec)))
+#undef ListBox_Dir
+static FORCEINLINE int ListBox_Dir(_In_ HWND hwndCtl, _In_ UINT attrs, _In_ LPCTSTR lpszFileSpec)
+	{ return STATIC_CAST(int)(STATIC_CAST(DWORD)(SNDMSG(hwndCtl, LB_DIR, STATIC_CAST(WPARAM)(attrs), REINTERPRET_CAST(LPARAM)(lpszFileSpec)))); }
 
 /****** ComboBox control message APIs ****************************************/
 
@@ -381,7 +383,7 @@ static FORCEINLINE int ComboBox_LimitText(_In_ HWND hwndCtl, _In_ int cchLimit)
 static FORCEINLINE DWORD ComboBox_GetEditSel(_In_ HWND hwndCtl)
 	{ return STATIC_CAST(DWORD)(SNDMSG(hwndCtl, CB_GETEDITSEL, 0L, 0L)); }
 #undef ComboBox_SetEditSel
-static FORCEINLINE int ComboBox_LimitText(_In_ HWND hwndCtl, _In_ int ichStart, _In_ int ichEnd)
+static FORCEINLINE int ComboBox_SetEditSel(_In_ HWND hwndCtl, _In_ int ichStart, _In_ int ichEnd)
 	{ return STATIC_CAST(int)(STATIC_CAST(DWORD)(SNDMSG(hwndCtl, CB_SETEDITSEL, 0L, MAKELPARAM(ichStart, ichEnd)))); }
 
 #undef ComboBox_GetCount

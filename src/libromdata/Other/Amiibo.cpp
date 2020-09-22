@@ -2,51 +2,29 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * Amiibo.cpp: Nintendo amiibo NFC dump reader.                            *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "Amiibo.hpp"
-#include "librpbase/RomData_p.hpp"
-
 #include "nfp_structs.h"
 #include "data/AmiiboData.hpp"
 
-// librpbase
-#include "librpbase/byteswap.h"
-#include "librpbase/TextFuncs.hpp"
-#include "librpbase/file/IRpFile.hpp"
-#include "libi18n/i18n.h"
+// librpbase, librpfile
 using namespace LibRpBase;
+using LibRpFile::IRpFile;
 
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cerrno>
-#include <cstdio>
-#include <cstring>
-
-// C++ includes.
-#include <string>
-#include <vector>
+// C++ STL classes.
 using std::string;
 using std::vector;
 
 namespace LibRomData {
 
-class AmiiboPrivate : public RomDataPrivate
+ROMDATA_IMPL(Amiibo)
+ROMDATA_IMPL_IMG(Amiibo)
+
+class AmiiboPrivate final : public RomDataPrivate
 {
 	public:
 		AmiiboPrivate(Amiibo *q, IRpFile *file);
@@ -104,7 +82,7 @@ bool AmiiboPrivate::calcCheckBytes(const uint8_t *serial, uint8_t *pCb0, uint8_t
  * Read a Nintendo amiibo NFC dump.
  *
  * An NFC dump must be opened by the caller. The file handle
- * will be dup()'d and must be kept open in order to load
+ * will be ref()'d and must be kept open in order to load
  * data from the NFC dump.
  *
  * To close the file, either delete this object or call close().
@@ -119,10 +97,11 @@ Amiibo::Amiibo(IRpFile *file)
 	// This class handles NFC dumps.
 	RP_D(Amiibo);
 	d->className = "Amiibo";
-	d->fileType = FTYPE_NFC_DUMP;
+	d->mimeType = "application/x-nintendo-amiibo";	// unofficial, not on fd.o
+	d->fileType = FileType::NFC_Dump;
 
 	if (!d->file) {
-		// Could not dup() the file handle.
+		// Could not ref() the file handle.
 		return;
 	}
 
@@ -144,11 +123,12 @@ Amiibo::Amiibo(IRpFile *file)
 			// fall-through
 		case NFP_FILE_EXTENDED:	// Extended dump.
 			// Size is valid.
-			d->nfpSize = (int)size;
+			d->nfpSize = static_cast<int>(size);
 			break;
 
 		default:
 			// Unsupported file size.
+			UNREF_AND_NULL_NOCHK(d->file);
 			return;
 	}
 
@@ -160,6 +140,10 @@ Amiibo::Amiibo(IRpFile *file)
 	info.ext = nullptr;	// Not needed for NFP.
 	info.szFile = d->file->size();
 	d->isValid = (isRomSupported_static(&info) >= 0);
+
+	if (!d->isValid) {
+		UNREF_AND_NULL_NOCHK(d->file);
+	}
 }
 
 /**
@@ -249,16 +233,6 @@ int Amiibo::isRomSupported_static(const DetectInfo *info)
 }
 
 /**
- * Is a ROM image supported by this object?
- * @param info DetectInfo containing ROM detection information.
- * @return Class-specific system ID (>= 0) if supported; -1 if not.
- */
-int Amiibo::isRomSupported(const DetectInfo *info) const
-{
-	return isRomSupported_static(info);
-}
-
-/**
  * Get the name of the system the loaded ROM is designed for.
  * @param type System name type. (See the SystemName enum.)
  * @return System name, or nullptr if type is invalid.
@@ -319,21 +293,25 @@ const char *const *Amiibo::supportedFileExtensions_static(void)
 }
 
 /**
- * Get a list of all supported file extensions.
- * This is to be used for file type registration;
- * subclasses don't explicitly check the extension.
+ * Get a list of all supported MIME types.
+ * This is to be used for metadata extractors that
+ * must indicate which MIME types they support.
  *
- * NOTE: The extensions include the leading dot,
- * e.g. ".bin" instead of "bin".
- *
- * NOTE 2: The array and the strings in the array should
+ * NOTE: The array and the strings in the array should
  * *not* be freed by the caller.
  *
  * @return NULL-terminated array of all supported file extensions, or nullptr on error.
  */
-const char *const *Amiibo::supportedFileExtensions(void) const
+const char *const *Amiibo::supportedMimeTypes_static(void)
 {
-	return supportedFileExtensions_static();
+	static const char *const mimeTypes[] = {
+		// Unofficial MIME types.
+		// TODO: Get these upstreamed on FreeDesktop.org.
+		"application/x-nintendo-amiibo",
+
+		nullptr
+	};
+	return mimeTypes;
 }
 
 /**
@@ -346,15 +324,6 @@ uint32_t Amiibo::supportedImageTypes_static(void)
 }
 
 /**
- * Get a bitfield of image types this class can retrieve.
- * @return Bitfield of supported image types. (ImageTypesBF)
- */
-uint32_t Amiibo::supportedImageTypes(void) const
-{
-	return supportedImageTypes_static();
-}
-
-/**
  * Get a list of all available image sizes for the specified image type.
  *
  * The first item in the returned vector is the "default" size.
@@ -363,17 +332,13 @@ uint32_t Amiibo::supportedImageTypes(void) const
  * @param imageType Image type.
  * @return Vector of available image sizes, or empty vector if no images are available.
  */
-std::vector<RomData::ImageSizeDef> Amiibo::supportedImageSizes_static(ImageType imageType)
+vector<RomData::ImageSizeDef> Amiibo::supportedImageSizes_static(ImageType imageType)
 {
-	assert(imageType >= IMG_INT_MIN && imageType <= IMG_EXT_MAX);
-	if (imageType < IMG_INT_MIN || imageType > IMG_EXT_MAX) {
-		// ImageType is out of range.
-		return std::vector<ImageSizeDef>();
-	}
+	ASSERT_supportedImageSizes(imageType);
 
 	if (imageType != IMG_EXT_MEDIA) {
 		// Only media scans are supported.
-		return std::vector<ImageSizeDef>();
+		return vector<ImageSizeDef>();
 	}
 
 	// Amiibo scan sizes may vary, but there's always one.
@@ -382,20 +347,6 @@ std::vector<RomData::ImageSizeDef> Amiibo::supportedImageSizes_static(ImageType 
 	};
 	return vector<ImageSizeDef>(sz_EXT_MEDIA,
 		sz_EXT_MEDIA + ARRAY_SIZE(sz_EXT_MEDIA));
-}
-
-/**
- * Get a list of all available image sizes for the specified image type.
- *
- * The first item in the returned vector is the "default" size.
- * If the width/height is 0, then an image exists, but the size is unknown.
- *
- * @param imageType Image type.
- * @return Vector of available image sizes, or empty vector if no images are available.
- */
-std::vector<RomData::ImageSizeDef> Amiibo::supportedImageSizes(ImageType imageType) const
-{
-	return supportedImageSizes_static(imageType);
 }
 
 /**
@@ -409,11 +360,7 @@ std::vector<RomData::ImageSizeDef> Amiibo::supportedImageSizes(ImageType imageTy
  */
 uint32_t Amiibo::imgpf(ImageType imageType) const
 {
-	assert(imageType >= IMG_INT_MIN && imageType <= IMG_EXT_MAX);
-	if (imageType < IMG_INT_MIN || imageType > IMG_EXT_MAX) {
-		// ImageType is out of range.
-		return 0;
-	}
+	ASSERT_imgpf(imageType);
 
 	// NOTE: amiibo.life's amiibo images have alpha transparency.
 	// Hence, no image processing is required.
@@ -428,7 +375,7 @@ uint32_t Amiibo::imgpf(ImageType imageType) const
 int Amiibo::loadFieldData(void)
 {
 	RP_D(Amiibo);
-	if (d->fields->isDataLoaded()) {
+	if (!d->fields->empty()) {
 		// Field data *has* been loaded...
 		return 0;
 	} else if (!d->file) {
@@ -439,17 +386,17 @@ int Amiibo::loadFieldData(void)
 		return -EIO;
 	}
 
-	// NTAG215 data.
+	// NTAG215 data
 	d->fields->reserve(10);	// Maximum of 10 fields.
 
-	// Serial number.
+	// Serial number
 
 	// Convert the 7-byte serial number to ASCII.
 	static const char hex_lookup[16] = {
 		'0','1','2','3','4','5','6','7',
 		'8','9','A','B','C','D','E','F'
 	};
-	char buf[64]; char *pBuf = buf;
+	char buf[32]; char *pBuf = buf;
 	for (int i = 0; i < 8; i++, pBuf += 2) {
 		if (i == 3) {
 			// Byte 3 is CB0.
@@ -458,31 +405,13 @@ int Amiibo::loadFieldData(void)
 		pBuf[0] = hex_lookup[d->nfpData.serial[i] >> 4];
 		pBuf[1] = hex_lookup[d->nfpData.serial[i] & 0x0F];
 	}
+	*pBuf = 0;
 
-	// Verify the check bytes.
-	// TODO: Show calculated check bytes?
-	uint8_t cb0, cb1;
-	int len;
-	if (d->calcCheckBytes(d->nfpData.serial, &cb0, &cb1)) {
-		// Check bytes are valid.
-		len = snprintf(pBuf, sizeof(buf) - (7*2), " (check: %02X %02X)",
-			d->nfpData.serial[3], d->nfpData.serial[8]);
-	} else {
-		// Check bytes are NOT valid.
-		// NOTE: Shouldn't show up anymore because invalid
-		// serial numbers are discarded in isRomSupported_static().
-		len = snprintf(pBuf, sizeof(buf) - (7*2), " (check ERR: %02X %02X)",
-			d->nfpData.serial[3], d->nfpData.serial[8]);
-	}
-
-	len += (7*2);
-	if (len > (int)sizeof(buf))
-		len = (int)sizeof(buf);
 	d->fields->addField_string(C_("Amiibo", "NTAG215 Serial"),
-		len > 0 ? latin1_to_utf8(buf, len) : "",
+		latin1_to_utf8(buf, 7*2),
 		RomFields::STRF_MONOSPACE);
 
-	// NFP data.
+	// NFP data
 	const uint32_t char_id = be32_to_cpu(d->nfpData.char_id);
 	const uint32_t amiibo_id = be32_to_cpu(d->nfpData.amiibo_id);
 
@@ -501,29 +430,30 @@ int Amiibo::loadFieldData(void)
 		// tr: NFP_TYPE_YARN == yarn amiibo
 		NOP_C_("Amiibo|Type", "Yarn"),
 	};
+	const char *const amiibo_type_title = C_("Amiibo", "amiibo Type");
 	if ((char_id & 0xFF) < ARRAY_SIZE(amiibo_type_tbl)) {
-		d->fields->addField_string(C_("Amiibo", "amiibo Type"),
+		d->fields->addField_string(amiibo_type_title,
 			dpgettext_expr(RP_I18N_DOMAIN, "Amiibo|Type", amiibo_type_tbl[char_id & 0xFF]));
 	} else {
 		// Invalid amiibo type.
-		d->fields->addField_string(C_("Amiibo", "amiibo Type"),
-			rp_sprintf(C_("Amiibo", "Unknown (0x%02X)"), (char_id & 0xFF)));
+		d->fields->addField_string(amiibo_type_title,
+			rp_sprintf(C_("RomData", "Unknown (0x%02X)"), (char_id & 0xFF)));
 	}
 
-	// Character series.
+	// Character series
 	const char *const char_series = AmiiboData::lookup_char_series_name(char_id);
 	d->fields->addField_string(C_("Amiibo", "Character Series"),
-		char_series ? char_series : C_("Amiibo", "Unknown"));
+		char_series ? char_series : C_("RomData", "Unknown"));
 
-	// Character name.
+	// Character name
 	const char *const char_name = AmiiboData::lookup_char_name(char_id);
 	d->fields->addField_string(C_("Amiibo", "Character Name"),
-		char_name ? char_name : C_("Amiibo", "Unknown"));
+		char_name ? char_name : C_("RomData", "Unknown"));
 
-	// amiibo series.
+	// amiibo series
 	const char *const amiibo_series = AmiiboData::lookup_amiibo_series_name(amiibo_id);
 	d->fields->addField_string(C_("Amiibo", "amiibo Series"),
-		amiibo_series ? amiibo_series : C_("Amiibo", "Unknown"));
+		amiibo_series ? amiibo_series : C_("RomData", "Unknown"));
 
 	// amiibo name, wave number, and release number.
 	int wave_no, release_no;
@@ -541,11 +471,11 @@ int Amiibo::loadFieldData(void)
 	// tr: Credits for amiibo image downloads.
 	const string credits = rp_sprintf(
 		C_("Amiibo", "amiibo images provided by %s,\nthe Unofficial amiibo Database."),
-		"<a href=\"http://amiibo.life/\">amiibo.life</a>");
+		"<a href=\"https://amiibo.life/\">amiibo.life</a>");
 	d->fields->addField_string(C_("Amiibo", "Credits"), credits, RomFields::STRF_CREDITS);
 
 	// Finished reading the field data.
-	return (int)d->fields->count();
+	return static_cast<int>(d->fields->count());
 }
 
 /**
@@ -563,28 +493,16 @@ int Amiibo::loadFieldData(void)
  *                               enum value.
  * @return 0 on success; negative POSIX error code on error.
  */
-int Amiibo::extURLs(ImageType imageType, std::vector<ExtURL> *pExtURLs, int size) const
+int Amiibo::extURLs(ImageType imageType, vector<ExtURL> *pExtURLs, int size) const
 {
-	assert(imageType >= IMG_EXT_MIN && imageType <= IMG_EXT_MAX);
-	if (imageType < IMG_EXT_MIN || imageType > IMG_EXT_MAX) {
-		// ImageType is out of range.
-		return -ERANGE;
-	}
-	assert(pExtURLs != nullptr);
-	if (!pExtURLs) {
-		// No vector.
-		return -EINVAL;
-	}
+	ASSERT_extURLs(imageType, pExtURLs);
 	pExtURLs->clear();
 
 	// Only one size is available.
 	RP_UNUSED(size);
 
-	RP_D(Amiibo);
-	if (!d->file || !d->file->isOpen()) {
-		// File isn't open.
-		return -EBADF;
-	} else if (!d->isValid) {
+	RP_D(const Amiibo);
+	if (!d->isValid) {
 		// Invalid file.
 		return -EIO;
 	}
@@ -602,7 +520,8 @@ int Amiibo::extURLs(ImageType imageType, std::vector<ExtURL> *pExtURLs, int size
 	auto &extURL = pExtURLs->at(0);
 
 	// Amiibo ID.
-	const string amiibo_id = rp_sprintf("%08X-%08X",
+	char amiibo_id[20];
+	snprintf(amiibo_id, sizeof(amiibo_id), "%08X-%08X",
 		be32_to_cpu(d->nfpData.char_id), be32_to_cpu(d->nfpData.amiibo_id));
 
 	// Cache key. (amiibo ID)

@@ -3,20 +3,7 @@
  * DialogBuilder.cpp: DLGTEMPLATEEX builder class.                         *
  *                                                                         *
  * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 // DLGTEMPLATEEX references:
@@ -37,13 +24,8 @@
 // Windows SDK.
 #include <objbase.h>
 
-// NOTE: We can't use libromdata/common.h here.
-// Define the PACKED attribute manually.
-#ifdef __GNUC__
-#define PACKED __attribute__((packed))
-#else
-#define PACKED
-#endif
+// PACKED attribute.
+#include "common.h"
 
 namespace LibWin32Common {
 
@@ -57,10 +39,10 @@ DialogBuilder::DialogBuilder()
  * These structs contain the main data, but not the
  * variable-length strings.
  *
- * NOTE: These structs MUST be packed!
+ * NOTE: These structs MUST be WORD-packed!
  */
 
-#pragma pack(1)
+#pragma pack(2)
 typedef struct PACKED _DLGTEMPLATEEX {
 	WORD dlgVer;
 	WORD signature;
@@ -73,18 +55,20 @@ typedef struct PACKED _DLGTEMPLATEEX {
 	short cx;
 	short cy;
 } DLGTEMPLATEEX;
+ASSERT_STRUCT(DLGTEMPLATEEX, 26);
 #pragma pack()
 
-#pragma pack(1)
+#pragma pack(2)
 typedef struct PACKED _DLGTEMPLATEEX_FONT {
 	WORD pointsize;
 	WORD weight;
 	BYTE italic;
 	BYTE charset;
 } DLGTEMPLATEEX_FONT;
+ASSERT_STRUCT(DLGTEMPLATEEX_FONT, 6);
 #pragma pack()
 
-#pragma pack(1)
+#pragma pack(2)
 typedef struct PACKED _DLGITEMTEMPLATEEX {
 	DWORD helpID;
 	DWORD exStyle;
@@ -95,6 +79,7 @@ typedef struct PACKED _DLGITEMTEMPLATEEX {
 	short cy;
 	DWORD id;
 } DLGITEMTEMPLATEEX;
+ASSERT_STRUCT(DLGITEMTEMPLATEEX, 24);
 #pragma pack()
 
 /**
@@ -138,11 +123,11 @@ inline void DialogBuilder::write_wstr(LPCWSTR wstr)
 inline void DialogBuilder::write_wstr_ord(LPCWSTR wstr)
 {
 	// FIXME: Prevent buffer overflows.
-	if (((ULONG_PTR)wstr) <= 0xFFFF) {
+	if ((reinterpret_cast<ULONG_PTR>(wstr)) <= 0xFFFF) {
 		// String is an atom.
 		ASSERT_BUFFER(sizeof(WORD)*2);
 		write_word(0xFFFF);
-		write_word(((ULONG_PTR)wstr) & 0xFFFF);
+		write_word(reinterpret_cast<ULONG_PTR>(wstr) & 0xFFFF);
 	} else {
 		// Not an atom. Write a normal string.
 		write_wstr(wstr);
@@ -153,7 +138,7 @@ inline void DialogBuilder::align_dword(void)
 {
 	ULONG_PTR ul = (ULONG_PTR)m_pDlgBuf;
 	ul = (ul + 3) & ~3;
-	m_pDlgBuf = (uint8_t*)ul;
+	m_pDlgBuf = reinterpret_cast<uint8_t*>(ul);
 }
 
 /**
@@ -238,7 +223,7 @@ void DialogBuilder::add(const DLGITEMTEMPLATE *lpItemTemplate, LPCWSTR lpszWindo
 	lpdit->y = lpItemTemplate->y;
 	lpdit->cx = lpItemTemplate->cx;
 	lpdit->cy = lpItemTemplate->cy;
-	lpdit->id = (DWORD)lpItemTemplate->id;
+	lpdit->id = static_cast<DWORD>(lpItemTemplate->id);
 
 	// Window class and text.
 	write_wstr_ord(lpszWindowClass);

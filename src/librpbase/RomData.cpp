@@ -2,43 +2,28 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * RomData.cpp: ROM data base class.                                       *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth                                  *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth                                  *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
-#include "config.librpbase.h"
-
+#include "stdafx.h"
 #include "RomData.hpp"
 #include "RomData_p.hpp"
 
-#include "TextFuncs.hpp"
-#include "file/IRpFile.hpp"
-#include "threads/Atomics.h"
 #include "libi18n/i18n.h"
 
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cerrno>
-#include <ctime>
+// libcachecommon
+#include "libcachecommon/CacheKeys.hpp"
 
-// C++ includes.
-#include <string>
-#include <vector>
+// C++ STL classes.
 using std::string;
 using std::vector;
+
+// librpfile, librptexture
+#include "librptexture/img/rp_image.hpp"
+using LibRpFile::IRpFile;
+using LibRpFile::RpFile;
+using LibRpTexture::rp_image;
 
 namespace LibRpBase {
 
@@ -49,136 +34,39 @@ namespace LibRpBase {
  *
  * @param q RomData class.
  * @param file ROM file.
- * @param fields Array of ROM Field descriptions.
- * @param count Number of ROM Field descriptions.
  */
 RomDataPrivate::RomDataPrivate(RomData *q, IRpFile *file)
 	: q_ptr(q)
-	, ref_cnt(1)
 	, isValid(false)
+	, isCompressed(false)
 	, file(nullptr)
 	, fields(new RomFields())
+	, metaData(nullptr)
 	, className(nullptr)
-	, fileType(RomData::FTYPE_ROM_IMAGE)
+	, mimeType(nullptr)
+	, fileType(RomData::FileType::ROM_Image)
 {
 	// Initialize i18n.
 	rp_i18n_init();
 
-	if (!file)
-		return;
-
-	// dup() the file.
-	this->file = file->dup();
+	if (file) {
+		// Reference the file.
+		this->file = file->ref();
+		this->filename = this->file->filename();
+		this->isCompressed = this->file->isCompressed();
+	}
 }
 
 RomDataPrivate::~RomDataPrivate()
 {
 	delete fields;
+	delete metaData;
 
-	// Close the file if it's still open.
-	delete this->file;
+	// Unreference the file.
+	UNREF(this->file);
 }
 
 /** Convenience functions. **/
-
-static inline int calc_frac_part(int64_t size, int64_t mask)
-{
-	float f = (float)(size & (mask - 1)) / (float)mask;
-	int frac_part = (int)(f * 1000.0f);
-
-	// MSVC added round() and roundf() in MSVC 2013.
-	// Use our own rounding code instead.
-	int round_adj = (frac_part % 10 > 5);
-	frac_part /= 10;
-	frac_part += round_adj;
-	return frac_part;
-}
-
-/**
- * Format a file size.
- * @param size File size.
- * @return Formatted file size.
- */
-string RomDataPrivate::formatFileSize(int64_t size)
-{
-	const char *suffix;
-	// frac_part is always 0 to 100.
-	// If whole_part >= 10, frac_part is divided by 10.
-	int whole_part, frac_part;
-
-	// TODO: Optimize this?
-	// TODO: Localize this?
-	if (size < 0) {
-		// Invalid size. Print the value as-is.
-		suffix = nullptr;
-		whole_part = (int)size;
-		frac_part = 0;
-	} else if (size < (2LL << 10)) {
-		// tr: Bytes (< 1,024)
-		suffix = NC_("RomData|FileSize", "byte", "bytes", (int)size);
-		whole_part = (int)size;
-		frac_part = 0;
-	} else if (size < (2LL << 20)) {
-		// tr: Kilobytes
-		suffix = C_("RomData|FileSize", "KB");
-		whole_part = (int)(size >> 10);
-		frac_part = calc_frac_part(size, (1LL << 10));
-	} else if (size < (2LL << 30)) {
-		// tr: Megabytes
-		suffix = C_("RomData|FileSize", "MB");
-		whole_part = (int)(size >> 20);
-		frac_part = calc_frac_part(size, (1LL << 20));
-	} else if (size < (2LL << 40)) {
-		// tr: Gigabytes
-		suffix = C_("RomData|FileSize", "GB");
-		whole_part = (int)(size >> 30);
-		frac_part = calc_frac_part(size, (1LL << 30));
-	} else if (size < (2LL << 50)) {
-		// tr: Terabytes
-		suffix = C_("RomData|FileSize", "TB");
-		whole_part = (int)(size >> 40);
-		frac_part = calc_frac_part(size, (1LL << 40));
-	} else if (size < (2LL << 60)) {
-		// tr: Petabytes
-		suffix = C_("RomData|FileSize", "PB");
-		whole_part = (int)(size >> 50);
-		frac_part = calc_frac_part(size, (1LL << 50));
-	} else /*if (size < (2ULL << 70))*/ {
-		// tr: Exabytes
-		suffix = C_("RomData|FileSize", "EB");
-		whole_part = (int)(size >> 60);
-		frac_part = calc_frac_part(size, (1LL << 60));
-	}
-
-	if (size < (2LL << 10)) {
-		// Bytes or negative value. No fractional part.
-		if (suffix) {
-			return rp_sprintf("%d %s", whole_part, suffix);
-		} else {
-			return rp_sprintf("%d", whole_part);
-		}
-	} else {
-		// TODO: Localized decimal point?
-		int frac_digits = 2;
-		if (whole_part >= 10) {
-			int round_adj = (frac_part % 10 > 5);
-			frac_part /= 10;
-			frac_part += round_adj;
-			frac_digits = 1;
-		}
-		if (suffix) {
-			return rp_sprintf("%d.%0*d %s",
-				whole_part, frac_digits, frac_part, suffix);
-		} else {
-			return rp_sprintf("%d.%0*d",
-				whole_part, frac_digits, frac_part);
-		}
-	}
-
-	// Should not get here...
-	assert(!"Invalid code path.");
-	return "QUACK";
-}
 
 /**
  * Get the GameTDB URL for a given game.
@@ -195,7 +83,7 @@ string RomDataPrivate::getURL_GameTDB(
 	const char *region, const char *gameID,
 	const char *ext)
 {
-	return rp_sprintf("http://art.gametdb.com/%s/%s/%s/%s%s",
+	return rp_sprintf("https://art.gametdb.com/%s/%s/%s/%s%s",
 		system, type, region, gameID, ext);
 }
 
@@ -210,6 +98,46 @@ string RomDataPrivate::getURL_GameTDB(
  * @return GameTDB cache key.
  */
 string RomDataPrivate::getCacheKey_GameTDB(
+	const char *system, const char *type,
+	const char *region, const char *gameID,
+	const char *ext)
+{
+	return rp_sprintf("%s/%s/%s/%s%s",
+		system, type, region, gameID, ext);
+}
+
+/**
+ * Get the RPDB URL for a given game.
+ * @param system System name.
+ * @param type Image type.
+ * @param region Region name.
+ * @param gameID Game ID.
+ * @param ext File extension, e.g. ".png" or ".jpg".
+ * TODO: PAL multi-region selection?
+ * @return RPDB URL.
+ */
+string RomDataPrivate::getURL_RPDB(
+	const char *system, const char *type,
+	const char *region, const char *gameID,
+	const char *ext)
+{
+	// Game ID may need to be urlencoded.
+	string gameID_urlencode = LibCacheCommon::urlencode(gameID);
+	return rp_sprintf("https://rpdb.gerbilsoft.com/%s/%s/%s/%s%s",
+		system, type, region, gameID_urlencode.c_str(), ext);
+}
+
+/**
+ * Get the RPDB cache key for a given game.
+ * @param system System name.
+ * @param type Image type.
+ * @param region Region name.
+ * @param gameID Game ID.
+ * @param ext File extension, e.g. ".png" or ".jpg".
+ * TODO: PAL multi-region selection?
+ * @return RPDB cache key.
+ */
+string RomDataPrivate::getCacheKey_RPDB(
 	const char *system, const char *type,
 	const char *region, const char *gameID,
 	const char *ext)
@@ -244,7 +172,8 @@ const RomData::ImageSizeDef *RomDataPrivate::selectBestSize(const std::vector<Ro
 			// Find the smallest image.
 			const RomData::ImageSizeDef *ret = &sizeDefs[0];
 			int sz = std::min(ret->width, ret->height);
-			for (auto iter = sizeDefs.begin()+1; iter != sizeDefs.end(); ++iter) {
+			const auto sizeDefs_cend = sizeDefs.cend();
+			for (auto iter = sizeDefs.cbegin()+1; iter != sizeDefs_cend; ++iter) {
 				const RomData::ImageSizeDef *sizeDef = &(*iter);
 				if (sizeDef->width < sz || sizeDef->height < sz) {
 					ret = sizeDef;
@@ -258,7 +187,8 @@ const RomData::ImageSizeDef *RomDataPrivate::selectBestSize(const std::vector<Ro
 			// Find the largest image.
 			const RomData::ImageSizeDef *ret = &sizeDefs[0];
 			int sz = std::max(ret->width, ret->height);
-			for (auto iter = sizeDefs.begin()+1; iter != sizeDefs.end(); ++iter) {
+			const auto sizeDefs_cend = sizeDefs.cend();
+			for (auto iter = sizeDefs.cbegin()+1; iter != sizeDefs_cend; ++iter) {
 				const RomData::ImageSizeDef *sizeDef = &(*iter);
 				if (sizeDef->width > sz || sizeDef->height > sz) {
 					ret = sizeDef;
@@ -282,7 +212,8 @@ const RomData::ImageSizeDef *RomDataPrivate::selectBestSize(const std::vector<Ro
 		// Found a match already.
 		return ret;
 	}
-	for (auto iter = sizeDefs.cbegin()+1; iter != sizeDefs.cend(); ++iter) {
+	const auto sizeDefs_cend = sizeDefs.cend();
+	for (auto iter = sizeDefs.cbegin()+1; iter != sizeDefs_cend; ++iter) {
 		const RomData::ImageSizeDef *sizeDef = &(*iter);
 		const int szchk = std::max(sizeDef->width, sizeDef->height);
 		if (sz >= size) {
@@ -326,7 +257,7 @@ time_t RomDataPrivate::ascii_yyyymmdd_to_unix_time(const char *ascii_date)
 	// Convert the date to an unsigned integer first.
 	unsigned int ymd = 0;
 	for (unsigned int i = 0; i < 8; i++) {
-		if (unlikely(!isdigit(ascii_date[i]))) {
+		if (unlikely(!ISDIGIT(ascii_date[i]))) {
 			// Invalid digit.
 			return -1;
 		}
@@ -366,22 +297,154 @@ time_t RomDataPrivate::ascii_yyyymmdd_to_unix_time(const char *ascii_date)
 	return timegm(&ymdtime);
 }
 
+/**
+ * Convert a BCD timestamp to Unix time.
+ * @param bcd_tm BCD timestamp. (YY YY MM DD HH mm ss)
+ * @param size Size of BCD timestamp. (4 or 7)
+ * @return Unix time, or -1 if an error occurred.
+ *
+ * NOTE: -1 is a valid Unix timestamp (1970/01/01), but is
+ * not likely to be valid, since the first programmable
+ * video game consoles were released in the late 1970s.
+ */
+time_t RomDataPrivate::bcd_to_unix_time(const uint8_t *bcd_tm, size_t size)
+{
+	// Convert BCD time to Unix time.
+	// NOTE: struct tm has some oddities:
+	// - tm_year: year - 1900
+	// - tm_mon: 0 == January
+	struct tm bcdtime;
+
+	// Check for invalid BCD values.
+	for (unsigned int i = 0; i < size; i++) {
+		if ((bcd_tm[i] & 0x0F) > 9 || (bcd_tm[i] & 0xF0) > 0x90) {
+			// Invalid BCD value.
+			return -1;
+		}
+	}
+
+	if (size >= 4) {
+		bcdtime.tm_year = ((bcd_tm[0] >> 4) * 1000) +
+				  ((bcd_tm[0] & 0x0F) * 100) +
+				  ((bcd_tm[1] >> 4) * 10) +
+				   (bcd_tm[1] & 0x0F) - 1900;
+		bcdtime.tm_mon  = ((bcd_tm[2] >> 4) * 10) +
+				   (bcd_tm[2] & 0x0F) - 1;
+		bcdtime.tm_mday = ((bcd_tm[3] >> 4) * 10) +
+				   (bcd_tm[3] & 0x0F);
+		if (size >= 7) {
+			bcdtime.tm_hour = ((bcd_tm[4] >> 4) * 10) +
+					   (bcd_tm[4] & 0x0F);
+			bcdtime.tm_min  = ((bcd_tm[5] >> 4) * 10) +
+					   (bcd_tm[5] & 0x0F);
+			bcdtime.tm_sec  = ((bcd_tm[6] >> 4) * 10) +
+					   (bcd_tm[6] & 0x0F);
+		} else {
+			// No HH/mm/ss portion.
+			bcdtime.tm_hour = 0;
+			bcdtime.tm_min  = 0;
+			bcdtime.tm_sec  = 0;
+		}
+	} else {
+		// Invalid BCD time.
+		return -1;
+	}
+
+	// tm_wday and tm_yday are output variables.
+	bcdtime.tm_wday = 0;
+	bcdtime.tm_yday = 0;
+	bcdtime.tm_isdst = 0;
+
+	// If conversion fails, this will return -1.
+	return timegm(&bcdtime);
+}
+
+/**
+ * Convert an ISO PVD timestamp to UNIX time.
+ * @param pvd_time PVD timestamp (16-char buffer)
+ * @param tz_offset PVD timezone offset
+ * @return UNIX time, or -1 if invalid or not set.
+ */
+time_t RomDataPrivate::pvd_time_to_unix_time(const char pvd_time[16], int8_t tz_offset)
+{
+	// TODO: Verify tz_offset range? [-48,+52]
+	assert(pvd_time != nullptr);
+	if (!pvd_time)
+		return -1;
+
+	// PVD time is in ASCII format:
+	// YYYYMMDDHHmmssccz
+	// - YYYY: Year
+	// - MM: Month
+	// - DD: Day
+	// - HH: Hour
+	// - mm: Minute
+	// - ss: Second
+	// - cc: Centisecond (not supported in UNIX time)
+	// - z: (int8) Timezone offset in 15min intervals: [0, 100] -> [-48, 52]
+	//   - -48: GMT-1200
+	//   -  52: GMT+1300
+
+	// NOTE: pvd_time is NOT null-terminated, so we need to
+	// copy it to a temporary buffer.
+	char buf[17];
+	memcpy(buf, pvd_time, 16);
+	buf[16] = '\0';
+
+	struct tm pvdtime;
+	int csec;
+	char chr;
+	int ret = sscanf(buf, "%04d%02d%02d%02d%02d%02d%02d%c",
+		&pvdtime.tm_year, &pvdtime.tm_mon, &pvdtime.tm_mday,
+		&pvdtime.tm_hour, &pvdtime.tm_min, &pvdtime.tm_sec, &csec,
+		&chr);
+	if (ret != 7) {
+		// Some argument wasn't parsed correctly.
+		return -1;
+	}
+
+	// If year is 0, the entry is probably all zeroes.
+	if (pvdtime.tm_year == 0) {
+		return -1;
+	}
+
+	// Adjust values for struct tm.
+	pvdtime.tm_year -= 1900;	// year - 1900
+	pvdtime.tm_mon--;		// 0 == January
+
+	// tm_wday and tm_yday are output variables.
+	pvdtime.tm_wday = 0;
+	pvdtime.tm_yday = 0;
+	pvdtime.tm_isdst = 0;
+
+	// If conversion fails, this will return -1.
+	time_t unixtime = timegm(&pvdtime);
+	if (unixtime == -1)
+		return -1;
+
+	// Convert to UTC using the timezone offset.
+	// NOTE: Timezone offset is negative for west of GMT,
+	// so we need to subtract it from the UNIX timestamp.
+	// NOTE: Restricting to [-52, 52] as per the Linux kernel's isofs module.
+	// TODO: Return the timezone offset separately.
+	if (-52 <= tz_offset && tz_offset <= 52) {
+		unixtime -= (static_cast<int>(tz_offset) * (15*60));
+	}
+	return unixtime;
+}
+
 /** RomData **/
 
 /**
  * ROM data base class.
  *
  * A ROM file must be opened by the caller. The file handle
- * will be dup()'d and must be kept open in order to load
+ * will be ref()'d and must be kept open in order to load
  * data from the ROM.
  *
  * To close the file, either delete this object or call close().
  *
- * In addition, subclasses must pass an array of RomFieldDesc structs.
- *
  * @param file ROM file.
- * @param fields Array of ROM Field descriptions.
- * @param count Number of ROM Field descriptions.
  */
 RomData::RomData(IRpFile *file)
 	: d_ptr(new RomDataPrivate(this, file))
@@ -391,15 +454,12 @@ RomData::RomData(IRpFile *file)
  * ROM data base class.
  *
  * A ROM file must be opened by the caller. The file handle
- * will be dup()'d and must be kept open in order to load
+ * will be ref()'d and must be kept open in order to load
  * data from the ROM.
  *
  * To close the file, either delete this object or call close().
  *
  * NOTE: Check isValid() to determine if this is a valid ROM.
- *
- * In addition, subclasses must pass an array of RomFieldDesc structs
- * using an allocated RomDataPrivate subclass.
  *
  * @param d RomDataPrivate subclass.
  */
@@ -410,31 +470,6 @@ RomData::RomData(RomDataPrivate *d)
 RomData::~RomData()
 {
 	delete d_ptr;
-}
-
-/**
- * Take a reference to this RomData* object.
- * @return this
- */
-LibRpBase::RomData *RomData::ref(void)
-{
-	RP_D(RomData);
-	ATOMIC_INC_FETCH(&d->ref_cnt);
-	return this;
-}
-
-/**
- * Unreference this RomData* object.
- * If ref_cnt reaches 0, the RomData* object is deleted.
- */
-void RomData::unref(void)
-{
-	RP_D(RomData);
-	assert(d->ref_cnt > 0);
-	if (ATOMIC_DEC_FETCH(&d->ref_cnt) <= 0) {
-		// All references removed.
-		delete this;
-	}
 }
 
 /**
@@ -453,7 +488,7 @@ bool RomData::isValid(void) const
  */
 bool RomData::isOpen(void) const
 {
-	RP_D(RomData);
+	RP_D(const RomData);
 	return (d->file != nullptr);
 }
 
@@ -462,9 +497,40 @@ bool RomData::isOpen(void) const
  */
 void RomData::close(void)
 {
+	// Unreference the file.
 	RP_D(RomData);
-	delete d->file;
-	d->file = nullptr;
+	UNREF_AND_NULL(d->file);
+}
+
+/**
+ * Get a reference to the internal file.
+ * @return Reference to file, or nullptr on error.
+ */
+IRpFile *RomData::ref_file(void)
+{
+	RP_D(RomData);
+	return (d->file ? d->file->ref() : nullptr);
+}
+
+/**
+ * Get the filename that was loaded.
+ * @return Filename, or nullptr on error.
+ */
+const char *RomData::filename(void) const
+{
+	RP_D(const RomData);
+	return (!d->filename.empty() ? d->filename.c_str() : nullptr);
+}
+
+/**
+ * Is the file compressed? (transparent decompression)
+ * If it is, then ROM operations won't be allowed.
+ * @return True if compressed; false if not.
+ */
+bool RomData::isCompressed(void) const
+{
+	RP_D(const RomData);
+	return d->isCompressed;
 }
 
 /**
@@ -485,6 +551,7 @@ const char *RomData::className(void) const
 RomData::FileType RomData::fileType(void) const
 {
 	RP_D(const RomData);
+	assert(d->fileType != FileType::Unknown);
 	return d->fileType;
 }
 
@@ -495,59 +562,89 @@ RomData::FileType RomData::fileType(void) const
 const char *RomData::fileType_string(void) const
 {
 	RP_D(const RomData);
-	assert(d->fileType >= FTYPE_UNKNOWN && d->fileType < FTYPE_LAST);
-	if (d->fileType <= FTYPE_UNKNOWN || d->fileType >= FTYPE_LAST) {
-		return nullptr;
+	assert(d->fileType >= FileType::Unknown && d->fileType < FileType::Max);
+	if (d->fileType < FileType::Unknown || d->fileType >= FileType::Max) {
+		return C_("RomData|FileType", "(unknown file type)");
 	}
 
 	static const char *const fileType_names[] = {
-		// FTYPE_UNKNOWN
-		nullptr,
-		// tr: FTYPE_ROM_IMAGE
+		// FileType::Unknown
+		NOP_C_("RomData|FileType", "(unknown file type)"),
+		// tr: FileType::ROM_Image
 		NOP_C_("RomData|FileType", "ROM Image"),
-		// tr: FTYPE_DISC_IMAGE
+		// tr: FileType::DiscImage
 		NOP_C_("RomData|FileType", "Disc Image"),
-		// tr: FTYPE_SAVE_FILE
+		// tr: FileType::SaveFile
 		NOP_C_("RomData|FileType", "Save File"),
-		// tr: FTYPE_EMBEDDED_DISC_IMAGE
+		// tr: FileType::EmbeddedDiscImage
 		NOP_C_("RomData|FileType", "Embedded Disc Image"),
-		// tr: FTYPE_APPLICATION_PACKAGE
+		// tr: FileType::ApplicationPackage
 		NOP_C_("RomData|FileType", "Application Package"),
-		// tr: FTYPE_NFC_DUMP
+		// tr: FileType::NFC_Dump
 		NOP_C_("RomData|FileType", "NFC Dump"),
-		// tr: FTYPE_DISK_IMAGE
+		// tr: FileType::DiskImage
 		NOP_C_("RomData|FileType", "Disk Image"),
-		// tr: FTYPE_EXECUTABLE
+		// tr: FileType::Executable
 		NOP_C_("RomData|FileType", "Executable"),
-		// tr: FTYPE_DLL
+		// tr: FileType::DLL
 		NOP_C_("RomData|FileType", "Dynamic Link Library"),
-		// tr: FTYPE_DEVICE_DRIVER
+		// tr: FileType::DeviceDriver
 		NOP_C_("RomData|FileType", "Device Driver"),
-		// tr: FTYPE_RESOURCE_LIBRARY
+		// tr: FileType::ResourceLibrary
 		NOP_C_("RomData|FileType", "Resource Library"),
-		// tr: FTYPE_ICON_FILE
+		// tr: FileType::IconFile
 		NOP_C_("RomData|FileType", "Icon File"),
-		// tr: FTYPE_BANNER_FILE
+		// tr: FileType::BannerFile
 		NOP_C_("RomData|FileType", "Banner File"),
-		// tr: FTYPE_HOMEBREW
+		// tr: FileType::Homebrew
 		NOP_C_("RomData|FileType", "Homebrew Application"),
-		// tr: FTYPE_EMMC_DUMP
+		// tr: FileType::eMMC_Dump
 		NOP_C_("RomData|FileType", "eMMC Dump"),
-		// tr: FTYPE_TITLE_CONTENTS
-		NOP_C_("RomData|FileType", "Title Contents"),
-		// tr: FTYPE_FIRMWARE_BINARY
+		// tr: FileType::ContainerFile
+		NOP_C_("RomData|FileType", "Container File"),
+		// tr: FileType::FirmwareBinary
 		NOP_C_("RomData|FileType", "Firmware Binary"),
-		// tr: FTYPE_TEXTURE_FILE
+		// tr: FileType::TextureFile
 		NOP_C_("RomData|FileType", "Texture File"),
+		// tr: FileType::RelocatableObject
+		NOP_C_("RomData|FileType", "Relocatable Object File"),
+		// tr: FileType::SharedLibrary
+		NOP_C_("RomData|FileType", "Shared Library"),
+		// tr: FileType::CoreDump
+		NOP_C_("RomData|FileType", "Core Dump"),
+		// tr: FileType::AudioFile
+		NOP_C_("RomData|FileType", "Audio File"),
+		// tr: FileType::BootSector
+		NOP_C_("RomData|FileType", "Boot Sector"),
+		// tr: FileType::Bundle (Mac OS X bundle)
+		NOP_C_("RomData|FileType", "Bundle"),
+		// tr: FileType::ResourceFile
+		NOP_C_("RomData|FileType", "Resource File"),
+		// tr: FileType::Partition
+		NOP_C_("RomData|FileType", "Partition"),
+		// tr: FileType::MetadataFile
+		NOP_C_("RomData|FileType", "Metadata File"),
+		// tr: FileType::PatchFile
+		NOP_C_("RomData|FileType", "Patch File"),
 	};
-	static_assert(ARRAY_SIZE(fileType_names) == FTYPE_LAST,
+	static_assert(ARRAY_SIZE(fileType_names) == (int)FileType::Max,
 		"fileType_names[] needs to be updated.");
  
-	const char *const fileType = fileType_names[d->fileType];
+	const char *const fileType = fileType_names[(int)d->fileType];
 	if (fileType != nullptr) {
 		return dpgettext_expr(RP_I18N_DOMAIN, "RomData|FileType", fileType);
 	}
 	return nullptr;
+}
+
+/**
+ * Get the file's MIME type.
+ * @return MIME type, or nullptr if unknown.
+ */
+const char *RomData::mimeType(void) const
+{
+	RP_D(const RomData);
+	return d->mimeType;
 }
 
 /**
@@ -617,7 +714,7 @@ int RomData::loadInternalImage(ImageType imageType, const rp_image **pImage)
 	} else if (imageType < IMG_INT_MIN || imageType > IMG_INT_MAX) {
 		// ImageType is out of range.
 		*pImage = nullptr;
-		return -ERANGE;
+		return -EINVAL;
 	}
 
 	// No images supported by the base class.
@@ -627,13 +724,24 @@ int RomData::loadInternalImage(ImageType imageType, const rp_image **pImage)
 }
 
 /**
+ * Load metadata properties.
+ * Called by RomData::metaData() if the field data hasn't been loaded yet.
+ * @return Number of metadata properties read on success; negative POSIX error code on error.
+ */
+int RomData::loadMetaData(void)
+{
+	// Not implemented for the base class.
+	return -ENOTSUP;
+}
+
+/**
  * Get the ROM Fields object.
  * @return ROM Fields object.
  */
 const RomFields *RomData::fields(void) const
 {
 	RP_D(const RomData);
-	if (!d->fields->isDataLoaded()) {
+	if (d->fields->empty()) {
 		// Data has not been loaded.
 		// Load it now.
 		int ret = const_cast<RomData*>(this)->loadFieldData();
@@ -644,10 +752,27 @@ const RomFields *RomData::fields(void) const
 }
 
 /**
+ * Get the ROM Metadata object.
+ * @return ROM Metadata object.
+ */
+const RomMetaData *RomData::metaData(void) const
+{
+	RP_D(const RomData);
+	if (!d->metaData || d->metaData->empty()) {
+		// Data has not been loaded.
+		// Load it now.
+		int ret = const_cast<RomData*>(this)->loadMetaData();
+		if (ret < 0)
+			return nullptr;
+	}
+	return d->metaData;
+}
+
+/**
  * Get an internal image from the ROM.
  *
- * NOTE: The rp_image is owned by this object.
- * Do NOT delete this object until you're done using this rp_image.
+ * The retrieved image must be ref()'d by the caller if the
+ * caller stores it instead of using it immediately.
  *
  * @param imageType Image type to load.
  * @return Internal image, or nullptr if the ROM doesn't have one.
@@ -663,8 +788,23 @@ const rp_image *RomData::image(ImageType imageType) const
 
 	// Load the internal image.
 	// The subclass maintains ownership of the image.
+#ifdef _DEBUG
+	// TODO: Verify casting on 32-bit.
+	#define INVALID_IMG_PTR ((const rp_image*)((intptr_t)-1LL))
+	const rp_image *img = INVALID_IMG_PTR;
+#else /* !_DEBUG */
 	const rp_image *img;
+#endif
 	int ret = const_cast<RomData*>(this)->loadInternalImage(imageType, &img);
+
+	// SANITY CHECK: If loadInternalImage() returns 0,
+	// img *must* be valid. Otherwise, it must be nullptr.
+	assert((ret == 0 && img != nullptr) ||
+	       (ret != 0 && img == nullptr));
+
+	// SANITY CHECK: `img` must not be -1LL.
+	assert(img != INVALID_IMG_PTR);
+
 	return (ret == 0 ? img : nullptr);
 }
 
@@ -688,7 +828,7 @@ int RomData::extURLs(ImageType imageType, vector<ExtURL> *pExtURLs, int size) co
 	assert(imageType >= IMG_EXT_MIN && imageType <= IMG_EXT_MAX);
 	if (imageType < IMG_EXT_MIN || imageType > IMG_EXT_MAX) {
 		// ImageType is out of range.
-		return -ERANGE;
+		return -EINVAL;
 	}
 	assert(pExtURLs != nullptr);
 	if (!pExtURLs) {
@@ -752,6 +892,8 @@ const char *RomData::getImageTypeName(ImageType imageType) {
 		NOP_C_("RomData|ImageType", "External cover scan (front and back)"),
 		// tr: IMG_EXT_BOX
 		NOP_C_("RomData|ImageType", "External box scan"),
+		// tr: IMG_EXT_TITLE_SCREEN
+		NOP_C_("RomData|ImageType", "External title screen"),
 	};
 	static_assert(ARRAY_SIZE(imageType_names) == IMG_EXT_MAX + 1,
 		"imageType_names[] needs to be updated.");
@@ -765,12 +907,153 @@ const char *RomData::getImageTypeName(ImageType imageType) {
  * Check imgpf for IMGPF_ICON_ANIMATED first to see if this
  * object has an animated icon.
  *
+ * The retrieved IconAnimData must be ref()'d by the caller if the
+ * caller stores it instead of using it immediately.
+ *
  * @return Animated icon data, or nullptr if no animated icon is present.
  */
 const IconAnimData *RomData::iconAnimData(void) const
 {
 	// No animated icon by default.
 	return nullptr;
+}
+
+/**
+ * Does this ROM image have "dangerous" permissions?
+ *
+ * @return True if the ROM image has "dangerous" permissions; false if not.
+ */
+bool RomData::hasDangerousPermissions(void) const
+{
+	// No dangerous permissions by default.
+	return false;
+}
+
+/**
+ * Get the list of operations that can be performed on this ROM.
+ * @return List of operations.
+ */
+vector<RomData::RomOp> RomData::romOps(void) const
+{
+	RP_D(const RomData);
+	vector<RomOp> v_ops = romOps_int();
+
+	if (d->isCompressed) {
+		// Some RomOps can't be run on a compressed file.
+		// Disable those that can't.
+		// TODO: Indicate why they're disabled?
+		std::for_each(v_ops.begin(), v_ops.end(),
+			[](RomData::RomOp &op) {
+				if (op.flags & RomOp::ROF_REQ_WRITABLE) {
+					op.flags &= ~RomOp::ROF_ENABLED;
+				}
+			}
+		);
+	}
+
+	return v_ops;
+}
+
+/**
+ * Perform a ROM operation.
+ * @param id		[in] Operation index.
+ * @param pParams	[in/out] Parameters and results. (for e.g. UI updates)
+ * @return 0 on success; negative POSIX error code on error.
+ */
+int RomData::doRomOp(int id, RomOpParams *pParams)
+{
+	RP_D(RomData);
+	// TODO: Function to retrieve only a single RomOp.
+	const vector<RomOp> v_ops = romOps_int();
+	assert(id >= 0);
+	assert(id < (int)v_ops.size());
+	assert(pParams != nullptr);
+	if (id < 0 || id >= (int)v_ops.size() || !pParams) {
+		return -EINVAL;
+	}
+
+	bool closeFileAfter;
+	if (d->file) {
+		closeFileAfter = false;
+	} else {
+		// Reopen the file.
+		closeFileAfter = true;
+		RpFile *const file = new RpFile(d->filename, RpFile::FM_OPEN_WRITE);
+		if (!file->isOpen()) {
+			// Error opening the file.
+			int ret = -file->lastError();
+			if (ret == 0) {
+				ret = -EIO;
+			}
+			pParams->status = ret;
+			pParams->msg = C_("RomData", "Unable to reopen the file for writing.");
+			UNREF(file);
+			return ret;
+		}
+		d->file = file;
+	}
+
+	// If the ROM operation requires a writable file,
+	// make sure it's writable.
+	if (v_ops[id].flags & RomOp::ROF_REQ_WRITABLE) {
+		// Writable file is required.
+		if (d->file->isCompressed()) {
+			// Cannot write to a compressed file.
+			pParams->status = -EIO;
+			pParams->msg = C_("RomData", "Cannot perform this ROM operation on a compressed file.");
+			if (closeFileAfter) {
+				UNREF_AND_NULL_NOCHK(d->file);
+			}
+			return -EIO;
+		}
+
+		if (!d->file->isWritable()) {
+			// File is not writable. We'll need to reopen it.
+			int ret = d->file->makeWritable();
+			if (ret != 0) {
+				// Error making the file writable.
+				pParams->status = ret;
+				pParams->msg = C_("RomData", "Cannot perform this ROM operation on a read-only file.");
+				if (closeFileAfter) {
+					UNREF_AND_NULL_NOCHK(d->file);
+				}
+				return ret;
+			}
+		}
+	}
+
+	int ret = doRomOp_int(id, pParams);
+	if (closeFileAfter) {
+		UNREF_AND_NULL_NOCHK(d->file);
+	}
+	return ret;
+}
+
+/**
+ * Get the list of operations that can be performed on this ROM.
+ * Internal function; called by RomData::romOps().
+ * @return List of operations.
+ */
+vector<RomData::RomOp> RomData::romOps_int(void) const
+{
+	// Default implementation has no ROM operations.
+	return vector<RomData::RomOp>();
+}
+
+/**
+ * Perform a ROM operation.
+ * Internal function; called by RomData::doRomOp().
+ * @param id		[in] Operation index.
+ * @param pParams	[in/out] Parameters and results. (for e.g. UI updates)
+ * @return 0 on success; positive for "field updated" (subtract 1 for index); negative POSIX error code on error.
+ */
+int RomData::doRomOp_int(int id, RomOpParams *pParams)
+{
+	// Default implementation has no ROM operations.
+	RP_UNUSED(id);
+	pParams->status = -ENOTSUP;
+	pParams->msg = C_("RomData", "RomData object does not support any ROM operations.");
+	return -ENOTSUP;
 }
 
 }

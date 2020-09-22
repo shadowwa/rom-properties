@@ -2,28 +2,12 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * Nintendo3DSSysTitles.cpp: Nintendo 3DS system title lookup.             *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2019 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
+#include "stdafx.h"
 #include "Nintendo3DSSysTitles.hpp"
-#include "libi18n/i18n.h"
-
-// C includes.
-#include <stdlib.h>
 
 namespace LibRomData {
 
@@ -51,7 +35,7 @@ class Nintendo3DSSysTitlesPrivate
 		}; */
 
 		// Regions.
-		static const char *const regions[6];
+		static const char regions[6][4];
 
 		static const SysTitle sys_title_00040010[];	// System applications.
 		static const SysTitle sys_title_00040030[];	// System applets.
@@ -62,8 +46,7 @@ class Nintendo3DSSysTitlesPrivate
 /** Nintendo3DSSysTitlesPrivate **/
 
 // Regions.
-// TODO: char array instead of pointers.
-const char *const Nintendo3DSSysTitlesPrivate::regions[6] = {
+const char Nintendo3DSSysTitlesPrivate::regions[6][4] = {
 	"JPN", "USA", "EUR",
 	"CHN", "KOR", "TWN",
 };
@@ -107,7 +90,7 @@ const Nintendo3DSSysTitlesPrivate::SysTitle Nintendo3DSSysTitlesPrivate::sys_tit
 	{{0x00008702, 0x00009302, 0x00009C02, 0x0000A502, 0x0000AD02, 0x0000B502}, NOP_C_("Nintendo3DSSysTitles", "Game Notes")},
 	{{0x00008802, 0x00009402, 0x00009D02, 0x0000A602, 0x0000AE02, 0x0000B602}, NOP_C_("Nintendo3DSSysTitles", "Internet Browser")},
 	{{0x00008D02, 0x00009602, 0x00009F02, 0x0000A702, 0x0000AF02, 0x0000B702}, NOP_C_("Nintendo3DSSysTitles", "Friend List")},
-	{{0x00008E02, 0x00009702, 0x0000A002, 0x0000A802, 0x0000B002, 0x0000B802}, NOP_C_("Nintendo3DSSysTitles", "Notificaitons")},
+	{{0x00008E02, 0x00009702, 0x0000A002, 0x0000A802, 0x0000B002, 0x0000B802}, NOP_C_("Nintendo3DSSysTitles", "Notifications")},
 	{{0x0000C002, 0x0000C802, 0x0000D002, 0x0000D802, 0x0000DE02, 0x0000E402}, NOP_C_("Nintendo3DSSysTitles", "Software Keyboard")},
 	{{0x0000C003, 0x0000C803, 0x0000D003, 0x0000D803, 0x0000DE03, 0x0000E403}, NOP_C_("Nintendo3DSSysTitles", "Software Keyboard (SAFE_MODE)")},
 	{{0x0000C102, 0x0000C902, 0x0000D102, 0x0000D902, 0x0000DF02, 0x0000E502}, NOP_C_("Nintendo3DSSysTitles", "Mii picker")},

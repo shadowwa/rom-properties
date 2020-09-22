@@ -1,21 +1,8 @@
 /***************************************************************************
  * c++11-compat.msvc.h: C++ 2011 compatibility header. (MSVC)              *
  *                                                                         *
- * Copyright (c) 2011-2015 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2011-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __CXX11_COMPAT_MSVC_H__
@@ -28,6 +15,10 @@
 /** C++ 2011 **/
 
 #ifdef __cplusplus
+
+#if (_MSC_VER < 1700)
+#  error Minimum supported MSVC version is MSVC 2012 (11.0)
+#endif
 
 /**
  * Enable compatibility for C++ 2011 features that aren't
@@ -49,30 +40,6 @@
  * MSVC 2015 also added support for constexpr.
  */
 #define CXX11_COMPAT_CONSTEXPR
-#endif
-
-#if (_MSC_VER < 1700)
-/**
- * MSVC 2010 (10.0) does support override, but not final.
- * However, it has a "sealed" keyword that works almost
- * the same way as final.
- *
- * 'sealed' is available starting with MSVC 2005 (8.0).
- * TODO: Verify MSVC 2002 and 2003.
- */
-#if (_MSC_VER >= 1400)
-#define final sealed
-#endif
-#endif
-
-#if (_MSC_VER < 1600)
-/**
- * MSVC 2008 (9.0) and older: No C++ 2011 support at all.
- * Probably won't compile at all due to lack of stdint.h.
- */
-#define CXX11_COMPAT_NULLPTR
-#define CXX11_COMPAT_OVERRIDE
-#define CXX11_COMPAT_STATIC_ASSERT
 #endif
 
 #endif /* __cplusplus */

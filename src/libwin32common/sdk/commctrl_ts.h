@@ -11,6 +11,46 @@
 #include "tsbase.h"
 #include <commctrl.h>
 
+//====== IMAGE APIS ===========================================================
+#ifndef NOIMAGEAPIS
+
+#undef ImageList_AddIcon
+static FORCEINLINE int ImageList_AddIcon(_In_ HIMAGELIST himl, _In_ HICON hicon)
+{
+	return ImageList_ReplaceIcon(himl, -1, hicon);
+}
+
+#undef ImageList_RemoveAll
+static FORCEINLINE BOOL ImageList_RemoveAll(_In_ HIMAGELIST himl)
+{
+	return ImageList_Remove(himl, -1);
+}
+
+#undef ImageList_ExtractIcon
+static FORCEINLINE HICON ImageList_ExtractIcon(_In_ HINSTANCE hi, _In_ HIMAGELIST himl, _In_ int i)
+{
+	((void)hi);
+	return ImageList_GetIcon(himl, i, 0);
+}
+
+#undef ImageList_LoadBitmap
+static FORCEINLINE HIMAGELIST ImageList_LoadBitmapA(_In_ HINSTANCE hi, _In_ LPCSTR lpbmp, _In_ int cx, _In_ int cGrow, _In_ COLORREF crMask)
+{
+	return ImageList_LoadImageA(hi, lpbmp, cx, cGrow, crMask, IMAGE_BITMAP, 0);
+}
+static FORCEINLINE HIMAGELIST ImageList_LoadBitmapW(_In_ HINSTANCE hi, _In_ LPCWSTR lpbmp, _In_ int cx, _In_ int cGrow, _In_ COLORREF crMask)
+{
+	return ImageList_LoadImageW(hi, lpbmp, cx, cGrow, crMask, IMAGE_BITMAP, 0);
+}
+
+#ifdef UNICODE
+# define ImageList_LoadBitmap ImageList_LoadBitmapW
+#else
+# define ImageList_LoadBitmap ImageList_LoadBitmapA
+#endif
+
+#endif /* NOIMAGEAPIS */
+
 //====== HEADER CONTROL =======================================================
 #ifndef NOHEADER
 
@@ -119,18 +159,18 @@ static FORCEINLINE int Header_ClearAllFilters(_In_ HWND hwndHD)
 
 #if (_WIN32_WINNT >= 0x600)
 #undef Header_GetItemDropDownRect
-static FORCEINLINE BOOL Header_GetItemDropDownRect(_In_ HWND hwndHD, _In_ int iItem, _Inout_ LPERCT lpItemRect)
+static FORCEINLINE BOOL Header_GetItemDropDownRect(_In_ HWND hwndHD, _In_ int iItem, _Inout_ LPRECT lpItemRect)
 	{ return STATIC_CAST(BOOL)(STATIC_CAST(DWORD)(SNDMSG(hwndHD, HDM_GETITEMDROPDOWNRECT, STATIC_CAST(WPARAM)(iItem), REINTERPRET_CAST(LPARAM)(lpItemRect)))); }
 
 #undef Header_GetOverflowRect
-static FORCEINLINE BOOL Header_GetOverflowRect(_In_ HWND hwndHD, _Inout_ LPERCT lpItemRect)
+static FORCEINLINE BOOL Header_GetOverflowRect(_In_ HWND hwndHD, _Inout_ LPRECT lpItemRect)
 	{ return STATIC_CAST(BOOL)(STATIC_CAST(DWORD)(SNDMSG(hwndHD, HDM_GETOVERFLOWRECT, 0, REINTERPRET_CAST(LPARAM)(lpItemRect)))); }
 
 #undef Header_GetFocusedItem
-static FORCEINLINE int Header_GetOverflowRect(_In_ HWND hwndHD)
+static FORCEINLINE int Header_GetFocusedItem(_In_ HWND hwndHD)
 	{ return STATIC_CAST(int)(STATIC_CAST(DWORD)(SNDMSG(hwndHD, HDM_GETFOCUSEDITEM, 0, 0))); }
 
-#undef Header_GetFocusedItem
+#undef Header_SetFocusedItem
 static FORCEINLINE BOOL Header_SetFocusedItem(_In_ HWND hwndHD, _In_ int iItem)
 	{ return STATIC_CAST(BOOL)(STATIC_CAST(DWORD)(SNDMSG(hwndHD, HDM_SETFOCUSEDITEM, 0, STATIC_CAST(LPARAM)(iItem)))); }
 #endif // _WIN32_WINNT >= 0x600
@@ -846,9 +886,12 @@ static FORCEINLINE UINT TreeView_SetItemState(_In_ HWND hwndTV, _In_ HTREEITEM h
 
 #define TreeView_GetLineColor(hwnd) \
     (COLORREF)SNDMSG((hwnd), TVM_GETLINECOLOR, 0, 0)
+#endif /* TODO */
+
 #endif /* _WIN32_IE >= 0x0500 */
 
 #if (_WIN32_WINNT >= 0x0501)
+#if 0 /* TODO */
 #define TreeView_MapAccIDToHTREEITEM(hwnd, id) \
     (HTREEITEM)SNDMSG((hwnd), TVM_MAPACCIDTOHTREEITEM, id, 0)
 
@@ -863,8 +906,8 @@ static FORCEINLINE UINT TreeView_SetItemState(_In_ HWND hwndTV, _In_ HTREEITEM h
 
 #define TreeView_SetAutoScrollInfo(hwnd, uPixPerSec, uUpdateTime) \
     SNDMSG((hwnd), TVM_SETAUTOSCROLLINFO, (WPARAM)(uPixPerSec), (LPARAM)(uUpdateTime))
-#endif /* _WIN32_WINNT >= 0x0501 */
 #endif /* TODO */
+#endif /* _WIN32_WINNT >= 0x0501 */
 
 #if (_WIN32_WINNT >= 0x0600)
 #if 0 /* TODO */
@@ -1199,46 +1242,52 @@ static FORCEINLINE BOOL Animate_IsPlaying(_In_ HWND hwnd)
 // ====================== Button Control =============================
 #ifndef NOBUTTON
 
-#if 0 /* TODO */
 #if (_WIN32_WINNT >= 0x0501)
-#define Button_GetIdealSize(hwnd, psize)\
-    (BOOL)SNDMSG((hwnd), BCM_GETIDEALSIZE, 0, (LPARAM)(psize))
+#undef Button_GetIdealSize
+static FORCEINLINE BOOL Button_GetIdealSize(_In_ HWND hwnd, _Out_ SIZE *pSize)
+	{ return STATIC_CAST(BOOL)(STATIC_CAST(DWORD)(SNDMSG(hwnd, BCM_GETIDEALSIZE, 0, REINTERPRET_CAST(LPARAM)(pSize)))); }
 
-#define Button_SetImageList(hwnd, pbuttonImagelist)\
-    (BOOL)SNDMSG((hwnd), BCM_SETIMAGELIST, 0, (LPARAM)(pbuttonImagelist))
+#undef Button_SetImageList
+static FORCEINLINE BOOL Button_SetImageList(_In_ HWND hwnd, _In_ PBUTTON_IMAGELIST pbuttonImageList)
+	{ return STATIC_CAST(BOOL)(STATIC_CAST(DWORD)(SNDMSG(hwnd, BCM_SETIMAGELIST, 0, REINTERPRET_CAST(LPARAM)(pbuttonImageList)))); }
 
-#define Button_GetImageList(hwnd, pbuttonImagelist)\
-    (BOOL)SNDMSG((hwnd), BCM_GETIMAGELIST, 0, (LPARAM)(pbuttonImagelist))
-
-#define Button_SetTextMargin(hwnd, pmargin)\
-    (BOOL)SNDMSG((hwnd), BCM_SETTEXTMARGIN, 0, (LPARAM)(pmargin))
-#define Button_GetTextMargin(hwnd, pmargin)\
-    (BOOL)SNDMSG((hwnd), BCM_GETTEXTMARGIN, 0, (LPARAM)(pmargin))
+#undef Button_SetTextMargin
+static FORCEINLINE BOOL Button_SetTextMargin(_In_ HWND hwnd, _In_ const RECT *pmargin)
+	{ return STATIC_CAST(BOOL)(STATIC_CAST(DWORD)(SNDMSG(hwnd, BCM_SETTEXTMARGIN, 0, REINTERPRET_CAST(LPARAM)(pmargin)))); }
+#undef Button_GetTextMargin
+static FORCEINLINE BOOL Button_GetTextMargin(_In_ HWND hwnd, _Out_ RECT *pmargin)
+	{ return STATIC_CAST(BOOL)(STATIC_CAST(DWORD)(SNDMSG(hwnd, BCM_GETTEXTMARGIN, 0, REINTERPRET_CAST(LPARAM)(pmargin)))); }
 #endif /*_WIN32_WINNT >= 0x0501 */
 
 #if _WIN32_WINNT >= 0x0600
-#define Button_SetDropDownState(hwnd, fDropDown) \
-    (BOOL)SNDMSG((hwnd), BCM_SETDROPDOWNSTATE, (WPARAM)(fDropDown), 0)
+#undef Button_SetDropDownState
+static FORCEINLINE BOOL Button_SetDropDownState(_In_ HWND hwnd, _In_ BOOL fDropDown)
+	{ return STATIC_CAST(BOOL)(STATIC_CAST(DWORD)(SNDMSG(hwnd, BCM_SETDROPDOWNSTATE, STATIC_CAST(WPARAM)(fDropDown), 0))); }
 
-#define Button_SetSplitInfo(hwnd, pInfo) \
-    (BOOL)SNDMSG((hwnd), BCM_SETSPLITINFO, 0, (LPARAM)(pInfo))
+#undef Button_SetSplitInfo
+static FORCEINLINE BOOL Button_SetSplitInfo(_In_ HWND hwnd, _In_ const BUTTON_SPLITINFO *pInfo)
+	{ return STATIC_CAST(BOOL)(STATIC_CAST(DWORD)(SNDMSG(hwnd, BCM_SETSPLITINFO, 0, REINTERPRET_CAST(LPARAM)(pInfo)))); }
 
-#define Button_GetSplitInfo(hwnd, pInfo) \
-    (BOOL)SNDMSG((hwnd), BCM_GETSPLITINFO, 0, (LPARAM)(pInfo))
+#undef Button_GetSplitInfo
+static FORCEINLINE BOOL Button_GetSplitInfo(_In_ HWND hwnd, _Inout_ BUTTON_SPLITINFO *pInfo)
+	{ return STATIC_CAST(BOOL)(STATIC_CAST(DWORD)(SNDMSG(hwnd, BCM_GETSPLITINFO, 0, REINTERPRET_CAST(LPARAM)(pInfo)))); }
 
-#define Button_SetNote(hwnd, psz) \
-    (BOOL)SNDMSG((hwnd), BCM_SETNOTE, 0, (LPARAM)(psz))
+#undef Button_SetNote
+static FORCEINLINE BOOL Button_SetNote(_In_ HWND hwnd, _In_ PCWSTR psz)
+	{ return STATIC_CAST(BOOL)(STATIC_CAST(DWORD)(SNDMSG(hwnd, BCM_SETNOTE, 0, REINTERPRET_CAST(LPARAM)(psz)))); }
 
-#define Button_GetNote(hwnd, psz, pcc) \
-    (BOOL)SNDMSG((hwnd), BCM_GETNOTE, (WPARAM)pcc, (LPARAM)psz)
+#undef Button_GetNote
+static FORCEINLINE BOOL Button_GetNote(_In_ HWND hwnd, _Out_ LPWSTR psz, _In_ int pcc)
+	{ return STATIC_CAST(BOOL)(STATIC_CAST(DWORD)(SNDMSG(hwnd, BCM_GETNOTE, STATIC_CAST(WPARAM)(pcc), REINTERPRET_CAST(LPARAM)(psz)))); }
 
-#define Button_GetNoteLength(hwnd) \
-    (LRESULT)SNDMSG((hwnd), BCM_GETNOTELENGTH, 0, 0)
+#undef Button_GetNoteLength
+static FORCEINLINE LRESULT Button_GetNoteLength(_In_ HWND hwnd)
+	{ return STATIC_CAST(LRESULT)(SNDMSG(hwnd, BCM_GETNOTELENGTH, 0, 0)); }
 
-#define Button_SetElevationRequiredState(hwnd, fRequired) \
-    (LRESULT)SNDMSG((hwnd), BCM_SETSHIELD, 0, (LPARAM)fRequired)
+#undef Button_SetElevationRequiredState
+static FORCEINLINE LRESULT Button_SetElevationRequiredState(_In_ HWND hwnd, _In_ BOOL fRequired)
+	{ return STATIC_CAST(LRESULT)(SNDMSG(hwnd, BCM_SETSHIELD, 0, STATIC_CAST(LPARAM)(fRequired))); }
 #endif /* _WIN32_WINNT >= 0x0600 */
-#endif /* TODO */
 
 #endif /* NOBUTTON */
 
@@ -1250,8 +1299,8 @@ static FORCEINLINE BOOL Animate_IsPlaying(_In_ HWND hwnd)
 static FORCEINLINE BOOL Edit_SetCueBannerText(_In_ HWND hwnd, _In_ LPCWSTR lpcwText)
 	{ return STATIC_CAST(BOOL)(STATIC_CAST(DWORD)(SNDMSG(hwnd, EM_SETCUEBANNER, 0, REINTERPRET_CAST(LPARAM)(lpcwText)))); }
 #undef Edit_SetCueBannerTextFocused
-static FORCEINLINE BOOL Edit_SetCueBannerText(_In_ HWND hwnd, _In_ LPCWSTR lpcwText, _In_ BOOL fDrawFocused)
-	{ return STATIC_CAST(BOOL)(STATIC_CAST(DWORD)(SNDMSG(hwnd, EM_SETCUEBANNER, STATIC_CAST(BOOL)(fDrawFocused), REINTERPRET_CAST(LPARAM)(lpcwText)))); }
+static FORCEINLINE BOOL Edit_SetCueBannerTextFocused(_In_ HWND hwnd, _In_ LPCWSTR lpcwText, _In_ BOOL fDrawFocused)
+	{ return STATIC_CAST(BOOL)(STATIC_CAST(DWORD)(SNDMSG(hwnd, EM_SETCUEBANNER, STATIC_CAST(WPARAM)(fDrawFocused), REINTERPRET_CAST(LPARAM)(lpcwText)))); }
 #undef Edit_GetCueBannerText
 static FORCEINLINE BOOL Edit_GetCueBannerText(_In_ HWND hwnd, _Out_ LPWSTR lpwText, _In_ int cchText)
 	{ return STATIC_CAST(BOOL)(STATIC_CAST(DWORD)(SNDMSG(hwnd, EM_GETCUEBANNER, REINTERPRET_CAST(WPARAM)(lpwText), STATIC_CAST(LPARAM)(cchText)))); }
@@ -1272,7 +1321,7 @@ static FORCEINLINE void Edit_SetHilite(_In_ HWND hwndCtl, _In_ int ichStart, _In
 	{ (void)SNDMSG(hwndCtl, EM_SETHILITE, STATIC_CAST(WPARAM)(ichStart), STATIC_CAST(LPARAM)(ichEnd)); }
 #undef Edit_GetHilite
 static FORCEINLINE DWORD Edit_GetHilite(_In_ HWND hwndCtl)
-	{ (void)SNDMSG(hwndCtl, EM_GETHILITE, 0L, 0L); }
+	{ return STATIC_CAST(DWORD)(SNDMSG(hwndCtl, EM_GETHILITE, 0L, 0L)); }
 #endif /* _WIN32_WINNT */
 
 #endif /* NOEDIT */
@@ -1285,7 +1334,7 @@ static FORCEINLINE BOOL ComboBox_SetMinVisible(_In_ HWND hwnd, _In_ int iMinVisi
 	{ return STATIC_CAST(BOOL)(STATIC_CAST(DWORD)(SNDMSG(hwnd, CB_SETMINVISIBLE, STATIC_CAST(WPARAM)(iMinVisible), 0))); }
 
 #undef ComboBox_GetMinVisible
-static FORCEINLINE int ComboBox_SetMinVisible(_In_ HWND hwnd)
+static FORCEINLINE int ComboBox_GetMinVisible(_In_ HWND hwnd)
 	{ return STATIC_CAST(int)(STATIC_CAST(DWORD)(SNDMSG(hwnd, CB_GETMINVISIBLE, 0, 0))); }
 
 #undef ComboBox_SetCueBannerText

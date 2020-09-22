@@ -1,9 +1,9 @@
 # Find Gnome's libnautilus-extension libraries and headers.
 # If found, the following variables will be defined:
-# - LibNautilusExtension_FOUND: System has ThunarX.
-# - LibNautilusExtension_INCLUDE_DIRS: ThunarX include directories.
-# - LibNautilusExtension_LIBRARIES: ThunarX libraries.
-# - LibNautilusExtension_DEFINITIONS: Compiler switches required for using ThunarX.
+# - LibNautilusExtension_FOUND: System has libnautilus-extension.
+# - LibNautilusExtension_INCLUDE_DIRS: libnautilus-extension include directories.
+# - LibNautilusExtension_LIBRARIES: libnautilus-extension libraries.
+# - LibNautilusExtension_DEFINITIONS: Compiler switches required for using libnautilus-extension.
 # - LibNautilusExtension_EXTENSION_DIR: Extensions directory. (for installation)
 #
 # In addition, a target Gnome::libnautilus-extension will be created with all of
@@ -26,5 +26,5 @@ FIND_LIBRARY_PKG_CONFIG(LibNautilusExtension
 IF(LibNautilusExtension_FOUND AND NOT LibNautilusExtension_EXTENSION_DIR)
 	MESSAGE(WARNING "LibNautilusExtension_EXTENSION_DIR is not set; using defaults.")
 	INCLUDE(DirInstallPaths)
-	SET(LibNautilusExtension_EXTENSION_DIR "${DIR_INSTALL_LIB}/nautilus/extensions-3.0" CACHE INTERNAL "LibNautilusExtension_EXTENSION_DIR")
+	SET(LibNautilusExtension_EXTENSION_DIR "${CMAKE_INSTALL_PREFIX}/${DIR_INSTALL_LIB}/nautilus/extensions-3.0" CACHE INTERNAL "LibNautilusExtension_EXTENSION_DIR")
 ENDIF(LibNautilusExtension_FOUND AND NOT LibNautilusExtension_EXTENSION_DIR)

@@ -3,21 +3,8 @@
  * NCCHReader_p.hpp: Nintendo 3DS NCCH reader.                             *
  * Private class declaration.                                              *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBROMDATA_DISC_NCCHREADER_P_HPP__
@@ -26,8 +13,8 @@
 #include "librpbase/config.librpbase.h"
 #include "NCCHReader.hpp"
 
-// librpbase
-#include "librpbase/byteswap.h"
+// librpbase, librpcpu
+#include "librpcpu/byteswap.h"
 #include "librpbase/crypto/KeyManager.hpp"
 #ifdef ENABLE_DECRYPTION
 #include "../crypto/CtrKeyScrambler.hpp"
@@ -51,16 +38,9 @@ namespace LibRomData {
 class NCCHReaderPrivate
 {
 	public:
-		NCCHReaderPrivate(NCCHReader *q, LibRpBase::IRpFile *file,
-			uint8_t media_unit_shift,
-			int64_t ncch_offset, uint32_t ncch_length);
-		NCCHReaderPrivate(NCCHReader *q, LibRpBase::IDiscReader *discReader,
-			uint8_t media_unit_shift,
-			int64_t ncch_offset, uint32_t ncch_length);
+		NCCHReaderPrivate(NCCHReader *q, uint8_t media_unit_shift,
+			off64_t ncch_offset, uint32_t ncch_length);
 		~NCCHReaderPrivate();
-
-	private:
-		void init(void);
 
 	private:
 		RP_DISABLE_COPY(NCCHReaderPrivate)
@@ -68,14 +48,8 @@ class NCCHReaderPrivate
 		NCCHReader *const q_ptr;
 
 	public:
-		bool useDiscReader;	// TODO: Make IDiscReader a subclass of IRpFile?
-		union {
-			LibRpBase::IRpFile *file;		// 3DS ROM image.
-			LibRpBase::IDiscReader *discReader;	// Disc reader for encrypted CIAs.
-		};
-
 		// NCCH offsets.
-		const int64_t ncch_offset;	// NCCH start offset, in bytes.
+		const off64_t ncch_offset;	// NCCH start offset, in bytes.
 		const uint32_t ncch_length;	// NCCH length, in bytes.
 		const uint8_t media_unit_shift;
 
@@ -88,9 +62,9 @@ class NCCHReaderPrivate
 		// Loaded headers.
 		enum HeadersPresent {
 			HEADER_NONE	= 0,
-			HEADER_NCCH	= (1 << 0),
-			HEADER_EXHEADER	= (1 << 1),
-			HEADER_EXEFS	= (1 << 2),
+			HEADER_NCCH	= (1U << 0),
+			HEADER_EXHEADER	= (1U << 1),
+			HEADER_EXEFS	= (1U << 2),
 		};
 		uint32_t headers_loaded;	// HeadersPresent
 
@@ -108,10 +82,13 @@ class NCCHReaderPrivate
 		// We won't extract any information from them,
 		// other than the type and the fact that they're
 		// not encrypted.
-		enum NonNCCHContentType {
-			NONCCH_UNKNOWN	= 0,
-			NONCCH_NDHT,
-			NONCCH_NARC,
+		enum class NonNCCHContentType {
+			Unknown	= 0,
+
+			NDHT,	// Nintendo DS Cart Whitelist
+			NARC,	// Nintendo Archive
+
+			Max
 		};
 		NonNCCHContentType nonNcchContentType;
 
@@ -179,11 +156,25 @@ class NCCHReaderPrivate
 		 */
 		int findEncSection(uint32_t address) const;
 
-		// KeyY index for title key encryption. (CIA only)
-		uint8_t titleKeyEncIdx;
 		// TMD content index.
 		uint16_t tmd_content_index;
+
+		// Are we using debug keys?
+		bool isDebug;
 #endif /* ENABLE_DECRYPTION */
+
+		/**
+		 * Close the file and/or IDiscReader.
+		 */
+		inline void closeFileOrDiscReader(void)
+		{
+			RP_Q(NCCHReader);
+			if (q->m_hasDiscReader) {
+				UNREF_AND_NULL_NOCHK(q->m_discReader);
+			} else if (q->m_file) {
+				UNREF_AND_NULL_NOCHK(q->m_file);
+			}
+		}
 };
 
 }

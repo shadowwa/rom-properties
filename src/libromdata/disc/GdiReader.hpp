@@ -2,20 +2,8 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * GdiReader.hpp: GD-ROM reader for Dreamcast GDI images.                  *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License       *
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.   *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBROMDATA_DISC_GDIREADER_HPP__
@@ -23,13 +11,10 @@
 
 #include "librpbase/disc/SparseDiscReader.hpp"
 
-namespace LibRpBase {
-	class IRpFile;
-}
-
 namespace LibRomData {
 
 class IsoPartition;
+class ISO;
 
 class GdiReaderPrivate;
 class GdiReader : public LibRpBase::SparseDiscReader
@@ -37,11 +22,11 @@ class GdiReader : public LibRpBase::SparseDiscReader
 	public:
 		/**
 		 * Construct a GdiReader with the specified file.
-		 * The file is dup()'d, so the original file can be
-		 * closed afterwards.
+		 * The file is ref()'d, so the original file can be
+		 * unref()'d by the caller afterwards.
 		 * @param file File to read from.
 		 */
-		explicit GdiReader(LibRpBase::IRpFile *file);
+		explicit GdiReader(LibRpFile::IRpFile *file);
 
 	private:
 		typedef SparseDiscReader super;
@@ -58,6 +43,7 @@ class GdiReader : public LibRpBase::SparseDiscReader
 		 * @param szHeader Size of header.
 		 * @return Class-specific disc format ID (>= 0) if supported; -1 if not.
 		 */
+		ATTR_ACCESS_SIZE(read_only, 1, 2)
 		static int isDiscSupported_static(const uint8_t *pHeader, size_t szHeader);
 
 		/**
@@ -66,10 +52,21 @@ class GdiReader : public LibRpBase::SparseDiscReader
 		 * @param szHeader Size of header.
 		 * @return Class-specific disc format ID (>= 0) if supported; -1 if not.
 		 */
-		virtual int isDiscSupported(const uint8_t *pHeader, size_t szHeader) const override final;
+		ATTR_ACCESS_SIZE(read_only, 2, 3)
+		int isDiscSupported(const uint8_t *pHeader, size_t szHeader) const final;
 
 	protected:
 		/** SparseDiscReader functions. **/
+
+		/**
+		 * Get the physical address of the specified logical block index.
+		 *
+		 * NOTE: Not implemented in this subclass.
+		 *
+		 * @param blockIdx	[in] Block index.
+		 * @return Physical block address. (-1 due to not being implemented)
+		 */
+		off64_t getPhysBlockAddr(uint32_t blockIdx) const final;
 
 		/**
 		 * Read the specified block.
@@ -78,12 +75,13 @@ class GdiReader : public LibRpBase::SparseDiscReader
 		 * For a full block, set pos = 0 and size = block_size.
 		 *
 		 * @param blockIdx	[in] Block index.
-		 * @param ptr		[out] Output data buffer.
 		 * @param pos		[in] Starting position. (Must be >= 0 and <= the block size!)
+		 * @param ptr		[out] Output data buffer.
 		 * @param size		[in] Amount of data to read, in bytes. (Must be <= the block size!)
 		 * @return Number of bytes read, or -1 if the block index is invalid.
 		 */
-		virtual int readBlock(uint32_t blockIdx, void *ptr, int pos, size_t size) override final;
+		ATTR_ACCESS_SIZE(write_only, 4, 5)
+		int readBlock(uint32_t blockIdx, int pos, void *ptr, size_t size) final;
 
 	public:
 		/** GDI-specific functions. **/
@@ -107,6 +105,13 @@ class GdiReader : public LibRpBase::SparseDiscReader
 		 * @return IsoPartition, or nullptr on error.
 		 */
 		IsoPartition *openIsoPartition(int trackNumber);
+
+		/**
+		 * Create an ISO RomData object for a given track number.
+		 * @param trackNumber Track number. (1-based)
+		 * @return ISO object, or nullptr on error.
+		 */
+		ISO *openIsoRomData(int trackNumber);
 };
 
 }

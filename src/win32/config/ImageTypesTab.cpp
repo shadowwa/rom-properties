@@ -2,44 +2,21 @@
  * ROM Properties Page shell extension. (Win32)                            *
  * ImageTypesTab.cpp: Image type priorities tab. (Part of ConfigDialog.)   *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #include "stdafx.h"
 #include "ImageTypesTab.hpp"
+#include "res/resource.h"
 
-// libwin32common
-#include "libwin32common/WinUI.hpp"
+// librpbase, librpfile
+using namespace LibRpBase;
+using namespace LibRpFile;
 
-// librpbase
-#include "librpbase/config/Config.hpp"
-using LibRpBase::Config;
-
-// libi18n
-#include "libi18n/i18n.h"
-
-#include "resource.h"
-
-// C includes. (C++ namespace)
-#include <cassert>
-
-// C++ includes.
-#include <string>
-using std::wstring;
+// C++ STL classes.
+using std::array;
+using std::tstring;
 
 // TImageTypesConfig is a templated class,
 // so we have to #include the .cpp file here.
@@ -56,36 +33,31 @@ class ImageTypesTabPrivate : public TImageTypesConfig<HWND>
 		typedef TImageTypesConfig<HWND> super;
 		RP_DISABLE_COPY(ImageTypesTabPrivate)
 
-	public:
-		// Property for "D pointer".
-		// This points to the ImageTypesTabPrivate object.
-		static const wchar_t D_PTR_PROP[];
-
 	protected:
 		/** TImageTypesConfig functions. (protected) **/
 
 		/**
 		 * Create the labels in the grid.
 		 */
-		virtual void createGridLabels(void) override final;
+		void createGridLabels(void) final;
 
 		/**
 		 * Create a ComboBox in the grid.
 		 * @param cbid ComboBox ID.
 		 */
-		virtual void createComboBox(unsigned int cbid) override final;
+		void createComboBox(unsigned int cbid) final;
 
 		/**
 		 * Add strings to a ComboBox in the grid.
 		 * @param cbid ComboBox ID.
 		 * @param max_prio Maximum priority value. (minimum is 1)
 		 */
-		virtual void addComboBoxStrings(unsigned int cbid, int max_prio) override final;
+		void addComboBoxStrings(unsigned int cbid, int max_prio) final;
 
 		/**
 		 * Finish adding the ComboBoxes.
 		 */
-		virtual void finishComboBoxes(void) override final;
+		void finishComboBoxes(void) final;
 
 		/**
 		 * Initialize the Save subsystem.
@@ -93,7 +65,7 @@ class ImageTypesTabPrivate : public TImageTypesConfig<HWND>
 		 * must be opened with an appropriate writer class.
 		 * @return 0 on success; negative POSIX error code on error.
 		 */
-		virtual int saveStart(void) override final;
+		int saveStart(void) final;
 
 		/**
 		 * Write an ImageType configuration entry.
@@ -101,7 +73,7 @@ class ImageTypesTabPrivate : public TImageTypesConfig<HWND>
 		 * @param imageTypeList Image type list, comma-separated.
 		 * @return 0 on success; negative POSIX error code on error.
 		 */
-		virtual int saveWriteEntry(const char *sysName, const char *imageTypeList) override final;
+		int saveWriteEntry(const char *sysName, const char *imageTypeList) final;
 
 		/**
 		 * Close the Save subsystem.
@@ -109,7 +81,7 @@ class ImageTypesTabPrivate : public TImageTypesConfig<HWND>
 		 * must be opened with an appropriate writer class.
 		 * @return 0 on success; negative POSIX error code on error.
 		 */
-		virtual int saveFinish(void) override final;
+		int saveFinish(void) final;
 
 	protected:
 		/** TImageTypesConfig functions. (public) **/
@@ -120,7 +92,7 @@ class ImageTypesTabPrivate : public TImageTypesConfig<HWND>
 		 * @param cbid ComboBox ID.
 		 * @param prio New priority value. (0xFF == no)
 		 */
-		virtual void cboImageType_setPriorityValue(unsigned int cbid, unsigned int prio) override final;
+		void cboImageType_setPriorityValue(unsigned int cbid, unsigned int prio) final;
 
 	public:
 		/**
@@ -157,7 +129,7 @@ class ImageTypesTabPrivate : public TImageTypesConfig<HWND>
 
 		// Temporary configuration filename.
 		// Set by saveStart(); cleared by saveFinish().
-		wchar_t *tmp_conf_filename;
+		tstring tmp_conf_filename;
 };
 
 // Control base ID.
@@ -169,7 +141,6 @@ ImageTypesTabPrivate::ImageTypesTabPrivate()
 	: hPropSheetPage(nullptr)
 	, hWndPropSheet(nullptr)
 	, cboImageType_lastAdded(nullptr)
-	, tmp_conf_filename(nullptr)
 {
 	// Clear the grid parameters.
 	pt_cboImageType.x = 0;
@@ -185,15 +156,10 @@ ImageTypesTabPrivate::~ImageTypesTabPrivate()
 	// (Cleared by finishComboBoxes().)
 	assert(cboImageType_lastAdded == nullptr);
 
-	// tmp_conf_filename should be nullptr,
+	// tmp_conf_filename should be empty,
 	// since it's only used when saving.
-	assert(tmp_conf_filename == nullptr);
-	free(tmp_conf_filename);
+	assert(tmp_conf_filename.empty());
 }
-
-// Property for "D pointer".
-// This points to the ImageTypesTabPrivate object.
-const wchar_t ImageTypesTabPrivate::D_PTR_PROP[] = L"ImageTypesTabPrivate";
 
 /** TImageTypesConfig functions. (protected) **/
 
@@ -233,10 +199,19 @@ void ImageTypesTabPrivate::createGridLabels(void)
 	MapWindowPoints(HWND_DESKTOP, GetParent(lblDesc2), (LPPOINT)&rect_lblDesc2, 2);
 
 	// Determine the size of the largest image type label.
+	// NOTE: Keeping heights of each label in order to
+	// vertically-align labels on the bottom.
+	array<int, IMG_TYPE_COUNT> h_lbl;
 	SIZE sz_lblImageType = {0, 0};
 	for (int i = IMG_TYPE_COUNT-1; i >= 0; i--) {
+		if (i == RomData::IMG_INT_MEDIA) {
+			// No INT MEDIA boxes, so eliminate the column.
+			continue;
+		}
+
 		SIZE szCur;
-		LibWin32Common::measureTextSize(hWndPropSheet, hFontDlg, RP2W_c(imageTypeName(i)), &szCur);
+		LibWin32Common::measureTextSize(hWndPropSheet, hFontDlg, U82T_c(imageTypeName(i)), &szCur);
+		h_lbl[i] = szCur.cy;
 		if (szCur.cx > sz_lblImageType.cx) {
 			sz_lblImageType.cx = szCur.cx;
 		}
@@ -249,7 +224,7 @@ void ImageTypesTabPrivate::createGridLabels(void)
 	SIZE sz_lblSysName = {0, 0};
 	for (int sys = SYS_COUNT-1; sys >= 0; sys--) {
 		SIZE szCur;
-		LibWin32Common::measureTextSize(hWndPropSheet, hFontDlg, RP2W_c(sysName(sys)), &szCur);
+		LibWin32Common::measureTextSize(hWndPropSheet, hFontDlg, U82T_c(sysName(sys)), &szCur);
 		if (szCur.cx > sz_lblSysName.cx) {
 			sz_lblSysName.cx = szCur.cx;
 		}
@@ -279,10 +254,16 @@ void ImageTypesTabPrivate::createGridLabels(void)
 	POINT curPt = {rect_lblDesc2.left + sz_lblSysName.cx + (dlgMargin.right/2),
 		rect_lblDesc2.bottom + dlgMargin.bottom};
 	for (unsigned int i = 0; i < IMG_TYPE_COUNT; i++) {
+		if (i == RomData::IMG_INT_MEDIA) {
+			// No INT MEDIA boxes, so eliminate the column.
+			continue;
+		}
+
+		const int y_lbl = curPt.y + (sz_lblImageType.cy - h_lbl[i]);
 		HWND lblImageType = CreateWindowEx(WS_EX_NOPARENTNOTIFY | WS_EX_TRANSPARENT,
-			WC_STATIC, RP2W_c(imageTypeName(i)),
+			WC_STATIC, U82T_c(imageTypeName(i)),
 			WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | SS_CENTER,
-			curPt.x, curPt.y, sz_lblImageType.cx, sz_lblImageType.cy,
+			curPt.x, y_lbl, sz_lblImageType.cx, h_lbl[i],
 			hWndPropSheet, (HMENU)IDC_STATIC, nullptr, nullptr);
 		SetWindowFont(lblImageType, hFontDlg, FALSE);
 		curPt.x += sz_lblImageType.cx;
@@ -305,7 +286,7 @@ void ImageTypesTabPrivate::createGridLabels(void)
 	for (unsigned int sys = 0; sys < SYS_COUNT; sys++) {
 		// System name label.
 		HWND lblSysName = CreateWindowEx(WS_EX_NOPARENTNOTIFY | WS_EX_TRANSPARENT,
-			WC_STATIC, RP2W_c(sysName(sys)),
+			WC_STATIC, U82T_c(sysName(sys)),
 			WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | SS_RIGHT,
 			curPt.x, curPt.y,
 			sz_lblSysName.cx, sz_lblSysName.cy,
@@ -333,8 +314,7 @@ void ImageTypesTabPrivate::createComboBox(unsigned int cbid)
 	if (!validateSysImageType(sys, imageType))
 		return;
 
-	// Get the font of the parent dialog.
-	// TODO: Cache this?
+	// Get the parent dialog's font.
 	HFONT hFontDlg = GetWindowFont(GetParent(hWndPropSheet));
 	assert(hFontDlg != nullptr);
 	if (!hFontDlg) {
@@ -343,10 +323,14 @@ void ImageTypesTabPrivate::createComboBox(unsigned int cbid)
 	}
 
 	// Create the ComboBox.
-	const POINT ptComboBox = {
+	POINT ptComboBox = {
 		pt_cboImageType.x + (sz_cboImageType.cx * (LONG)imageType),
 		pt_cboImageType.y + (sz_cboImageType.cy * (LONG)sys)
 	};
+	if (imageType >= RomData::IMG_INT_MEDIA) {
+		// No INT MEDIA boxes, so eliminate the column.
+		ptComboBox.x -= sz_cboImageType.cx;
+	}
 
 	HWND hComboBox = CreateWindowEx(WS_EX_NOPARENTNOTIFY,
 		WC_COMBOBOX, nullptr,
@@ -379,18 +363,14 @@ void ImageTypesTabPrivate::addComboBoxStrings(unsigned int cbid, int max_prio)
 	if (!cboImageType)
 		return;
 
-	// Dropdown strings.
-	// NOTE: One more string than the total number of image types,
-	// since we have a string for "No".
-	static const wchar_t s_values[IMG_TYPE_COUNT+1][4] = {
-		L"No", L"1", L"2", L"3", L"4", L"5", L"6", L"7", L"8"
-	};
-	static_assert(ARRAY_SIZE(s_values) == IMG_TYPE_COUNT+1, "s_values[] is the wrong size.");
-
 	// NOTE: Need to add one more than the total number,
 	// since "No" counts as an entry.
-	for (int i = 0; i <= max_prio; i++) {
-		ComboBox_AddString(cboImageType, s_values[i]);
+	assert(max_prio <= IMG_TYPE_COUNT);
+	ComboBox_AddString(cboImageType, U82T_c(C_("ImageTypesTab|Values", "No")));
+	for (int i = 1; i <= max_prio; i++) {
+		TCHAR buf[16];
+		_sntprintf(buf, _countof(buf), _T("%d"), i);
+		ComboBox_AddString(cboImageType, buf);
 	}
 	ComboBox_SetCurSel(cboImageType, 0);
 }
@@ -414,8 +394,7 @@ void ImageTypesTabPrivate::finishComboBoxes(void)
 	if (!lblCredits)
 		return;
 
-	SetWindowPos(lblCredits,
-		cboImageType_lastAdded ? cboImageType_lastAdded : hWndPropSheet,
+	SetWindowPos(lblCredits, cboImageType_lastAdded,
 		0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 	cboImageType_lastAdded = nullptr;
 }
@@ -436,13 +415,18 @@ int ImageTypesTabPrivate::saveStart(void)
 		return -ENOENT;
 	}
 
-	// Store the configuration filename.
-	assert(tmp_conf_filename == nullptr);
-	if (tmp_conf_filename) {
-		// Shouldn't be set here...
-		free(tmp_conf_filename);
+	// Make sure the configuration directory exists.
+	// NOTE: The filename portion MUST be kept in config_path,
+	// since the last component is ignored by rmkdir().
+	int ret = FileSystem::rmkdir(filename);
+	if (ret != 0) {
+		// rmkdir() failed.
+		return -EIO;
 	}
-	tmp_conf_filename = wcsdup(RP2W_s(filename));
+
+	// Store the configuration filename.
+	assert(tmp_conf_filename.empty());
+	tmp_conf_filename = U82T_s(filename);
 	return 0;
 }
 
@@ -454,11 +438,11 @@ int ImageTypesTabPrivate::saveStart(void)
  */
 int ImageTypesTabPrivate::saveWriteEntry(const char *sysName, const char *imageTypeList)
 {
-	assert(tmp_conf_filename != nullptr);
-	if (!tmp_conf_filename) {
+	assert(!tmp_conf_filename.empty());
+	if (tmp_conf_filename.empty()) {
 		return -ENOENT;
 	}
-	WritePrivateProfileString(L"ImageTypes", RP2W_c(sysName), RP2W_c(imageTypeList), tmp_conf_filename);
+	WritePrivateProfileString(_T("ImageTypes"), U82T_c(sysName), U82T_c(imageTypeList), tmp_conf_filename.c_str());
 	return 0;
 }
 
@@ -471,12 +455,11 @@ int ImageTypesTabPrivate::saveWriteEntry(const char *sysName, const char *imageT
 int ImageTypesTabPrivate::saveFinish(void)
 {
 	// Clear the configuration filename.
-	assert(tmp_conf_filename != nullptr);
-	if (!tmp_conf_filename) {
+	assert(!tmp_conf_filename.empty());
+	if (tmp_conf_filename.empty()) {
 		return -ENOENT;
 	}
-	free(tmp_conf_filename);
-	tmp_conf_filename = nullptr;
+	tmp_conf_filename.clear();
 	return 0;
 }
 
@@ -528,24 +511,15 @@ INT_PTR CALLBACK ImageTypesTabPrivate::dlgProc(HWND hDlg, UINT uMsg, WPARAM wPar
 			d->hWndPropSheet = hDlg;
 
 			// Store the D object pointer with this particular page dialog.
-			SetProp(hDlg, D_PTR_PROP, reinterpret_cast<HANDLE>(d));
+			SetWindowLongPtr(hDlg, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(d));
 
 			// Create the control grid.
 			d->createGrid();
 			return TRUE;
 		}
 
-		case WM_DESTROY: {
-			// Remove the D_PTR_PROP property from the page.
-			// The D_PTR_PROP property stored the pointer to the
-			// ImageTypesTabPrivate object.
-			RemoveProp(hDlg, D_PTR_PROP);
-			return TRUE;
-		}
-
 		case WM_NOTIFY: {
-			ImageTypesTabPrivate *const d = static_cast<ImageTypesTabPrivate*>(
-				GetProp(hDlg, D_PTR_PROP));
+			auto *const d = reinterpret_cast<ImageTypesTabPrivate*>(GetWindowLongPtr(hDlg, GWLP_USERDATA));
 			if (!d) {
 				// No ImageTypesTabPrivate. Can't do anything...
 				return FALSE;
@@ -561,15 +535,18 @@ INT_PTR CALLBACK ImageTypesTabPrivate::dlgProc(HWND hDlg, UINT uMsg, WPARAM wPar
 					}
 					break;
 
+#ifdef UNICODE
 				case NM_CLICK:
 				case NM_RETURN:
 					// SysLink control notification.
+					// NOTE: SysLink control only supports Unicode.
 					if (pHdr->idFrom == IDC_IMAGETYPES_CREDITS) {
 						// Open the URL.
 						PNMLINK pNMLink = reinterpret_cast<PNMLINK>(lParam);
-						ShellExecute(nullptr, L"open", pNMLink->item.szUrl, nullptr, nullptr, SW_SHOW);
+						ShellExecute(nullptr, _T("open"), pNMLink->item.szUrl, nullptr, nullptr, SW_SHOW);
 					}
 					break;
+#endif /* UNICODE */
 
 				case PSN_SETACTIVE:
 					// Enable the "Defaults" button.
@@ -583,8 +560,7 @@ INT_PTR CALLBACK ImageTypesTabPrivate::dlgProc(HWND hDlg, UINT uMsg, WPARAM wPar
 		}
 
 		case WM_COMMAND: {
-			ImageTypesTabPrivate *const d = static_cast<ImageTypesTabPrivate*>(
-				GetProp(hDlg, D_PTR_PROP));
+			auto *const d = reinterpret_cast<ImageTypesTabPrivate*>(GetWindowLongPtr(hDlg, GWLP_USERDATA));
 			if (!d) {
 				// No ImageTypesTabPrivate. Can't do anything...
 				return FALSE;
@@ -614,8 +590,7 @@ INT_PTR CALLBACK ImageTypesTabPrivate::dlgProc(HWND hDlg, UINT uMsg, WPARAM wPar
 		}
 
 		case WM_RP_PROP_SHEET_RESET: {
-			ImageTypesTabPrivate *const d = static_cast<ImageTypesTabPrivate*>(
-				GetProp(hDlg, D_PTR_PROP));
+			auto *const d = reinterpret_cast<ImageTypesTabPrivate*>(GetWindowLongPtr(hDlg, GWLP_USERDATA));
 			if (!d) {
 				// No ImageTypesTabPrivate. Can't do anything...
 				return FALSE;
@@ -627,8 +602,7 @@ INT_PTR CALLBACK ImageTypesTabPrivate::dlgProc(HWND hDlg, UINT uMsg, WPARAM wPar
 		}
 
 		case WM_RP_PROP_SHEET_DEFAULTS: {
-			ImageTypesTabPrivate *const d = static_cast<ImageTypesTabPrivate*>(
-				GetProp(hDlg, D_PTR_PROP));
+			auto *const d = reinterpret_cast<ImageTypesTabPrivate*>(GetWindowLongPtr(hDlg, GWLP_USERDATA));
 			if (!d) {
 				// No ImageTypesTabPrivate. Can't do anything...
 				return FALSE;
@@ -705,16 +679,18 @@ HPROPSHEETPAGE ImageTypesTab::getHPropSheetPage(void)
 		return nullptr;
 	}
 
+	// FIXME: SysLink controls won't work in ANSI builds.
+
 	// tr: Tab title.
-	const wstring wsTabTitle = RP2W_c(C_("ImageTypesTab", "Image Types"));
+	const tstring tsTabTitle = U82T_c(C_("ImageTypesTab", "Image Types"));
 
 	PROPSHEETPAGE psp;
 	psp.dwSize = sizeof(psp);	
-	psp.dwFlags = PSP_USECALLBACK | PSP_USETITLE;
+	psp.dwFlags = PSP_USECALLBACK | PSP_USETITLE | PSP_DLGINDIRECT;
 	psp.hInstance = HINST_THISCOMPONENT;
-	psp.pszTemplate = MAKEINTRESOURCE(IDD_CONFIG_IMAGETYPES);
+	psp.pResource = LoadDialog_i18n(IDD_CONFIG_IMAGETYPES);
 	psp.pszIcon = nullptr;
-	psp.pszTitle = wsTabTitle.c_str();
+	psp.pszTitle = tsTabTitle.c_str();
 	psp.pfnDlgProc = ImageTypesTabPrivate::dlgProc;
 	psp.lParam = reinterpret_cast<LPARAM>(d);
 	psp.pcRefParent = nullptr;

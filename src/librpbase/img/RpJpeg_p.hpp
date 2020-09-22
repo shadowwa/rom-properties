@@ -2,27 +2,20 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * RpJpeg_p.hpp: JPEG image handler. (Private class)                       *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License       *
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.   *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBRPBASE_IMG_RPJPEG_P_HPP__
 #define __ROMPROPERTIES_LIBRPBASE_IMG_RPJPEG_P_HPP__
 
-#include "../common.h"
-#include "rp_image.hpp"
+#include "common.h"
+
+// librptexture
+#include "librptexture/img/rp_image.hpp"
+
+// jpeglib.h needs stdio included first.
+#include <cstdio>
 
 // JPEG header.
 #include <jpeglib.h>
@@ -44,9 +37,11 @@
 # define RPJPEG_HAS_SSSE3 1
 #endif
 
-namespace LibRpBase {
+namespace LibRpFile {
+	class IRpFile;
+}
 
-class IRpFile;
+namespace LibRpBase {
 
 class RpJpegPrivate
 {
@@ -86,7 +81,7 @@ class RpJpegPrivate
 		struct MySourceMgr {
 			jpeg_source_mgr pub;
 
-			IRpFile *infile;	// Source stream.
+			LibRpFile::IRpFile *infile;	// Source stream.
 			JOCTET *buffer;		// Start of buffer.
 			bool start_of_file;	// Have we gotten any data yet?
 		};
@@ -125,7 +120,7 @@ class RpJpegPrivate
 		 * @param cinfo j_decompress_ptr
 		 * @param file IRpFile
 		 */
-		static void jpeg_IRpFile_src(j_decompress_ptr cinfo, IRpFile *infile);
+		static void jpeg_IRpFile_src(j_decompress_ptr cinfo, LibRpFile::IRpFile *infile);
 
 	public:
 #ifdef RPJPEG_HAS_SSSE3
@@ -137,7 +132,7 @@ class RpJpegPrivate
 		 * @param cinfo		[in/out] JPEG decompression struct.
 		 * @param buffer 	[in/out] Line buffer. (Must be 16-byte aligned!)
 		 */
-		static void decodeBGRtoARGB(LibRpBase::rp_image *RESTRICT img, jpeg_decompress_struct *RESTRICT cinfo, JSAMPARRAY buffer);
+		static void decodeBGRtoARGB(LibRpTexture::rp_image *RESTRICT img, jpeg_decompress_struct *RESTRICT cinfo, JSAMPARRAY buffer);
 #endif /* RPJPEG_HAS_SSSE3 */
 };
 

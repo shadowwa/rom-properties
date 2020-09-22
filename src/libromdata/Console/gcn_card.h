@@ -43,13 +43,11 @@ distribution.
 #define __MCRECOVER_CARD_H__
 
 #include <stdint.h>
-#include "librpbase/common.h"
+#include "common.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#pragma pack(1)
 
 /**
  * Memory card system locations.
@@ -69,18 +67,20 @@ extern "C" {
  * - Revision bef3d7229eca9a7f9568abf72de6b4d467feee9f
  * - File: Source/Core/Core/Src/HW/GCMemcard.h
  */
-typedef struct PACKED _card_header {
+typedef struct _card_header {
 	// The following is uint32_t serial[8] in libogc.
 	// It's used as an 8-word key for F-Zero GX and PSO "encryption".
 	union {
 		uint32_t serial_full[8];
-		struct {
+#pragma pack(1)
+		struct PACKED {
 			uint8_t serial[12];	// Serial number. (TODO: Should be 8...)
 			uint64_t formatTime;	// Format time. (OSTime value; 1 tick == 1/40,500,000 sec)
 			uint32_t sramBias;	// SRAM bias at time of format.
 			uint32_t sramLang;	// SRAM language.
 			uint8_t reserved1[4];	// usually 0
 		};
+#pragma pack()
 	};
 
 	uint16_t device_id;	// 0 if formatted in slot A; 1 if formatted in slot B
@@ -91,22 +91,24 @@ typedef struct PACKED _card_header {
 	uint16_t chksum1;	// Checksum.
 	uint16_t chksum2;	// Inverted checksum.
 } card_header;
+ASSERT_STRUCT(card_header, 512);
 
 /**
  * Directory control block.
  */
-typedef struct PACKED _card_dircntrl {
+typedef struct _card_dircntrl {
 	uint8_t pad[58];
 	uint16_t updated;	// Update counter.
 	uint16_t chksum1;	// Checksum 1.
 	uint16_t chksum2;	// Checksum 2.
 } card_dircntrl;
+ASSERT_STRUCT(card_dircntrl, 64);
 
 /**
  * Directory entry.
  * Addresses are relative to the start of the file.
  */
-typedef struct PACKED _card_direntry {
+typedef struct _card_direntry {
 	union {
 		struct {
 			char gamecode[4];	// Game code.
@@ -128,19 +130,21 @@ typedef struct PACKED _card_direntry {
 	uint16_t pad_01;	// Padding. (0xFFFF)
 	uint32_t commentaddr;	// Comment address.
 } card_direntry;
+ASSERT_STRUCT(card_direntry, 64);
 
 /**
  * Directory table.
  */
-typedef struct PACKED _card_dat {
+typedef struct _card_dat {
 	struct _card_direntry entries[CARD_MAXFILES];
 	struct _card_dircntrl dircntrl;
 } card_dat;
+ASSERT_STRUCT(card_dat, 8192);
 
 /**
  * Block allocation table.
  */
-typedef struct PACKED _card_bat {
+typedef struct _card_bat {
 	uint16_t chksum1;	// Checksum 1.
 	uint16_t chksum2;	// Checksum 2.
 	uint16_t updated;	// Update counter.
@@ -151,6 +155,7 @@ typedef struct PACKED _card_bat {
 	// before looking it up in the FAT!
 	uint16_t fat[0xFFB];	// File allocation table.
 } card_bat;
+ASSERT_STRUCT(card_bat, 8192);
 
 // File attributes.
 #define CARD_ATTRIB_PUBLIC	0x04
@@ -201,8 +206,6 @@ typedef struct PACKED _card_bat {
 // Difference between GameCube timebase and Unix timebase.
 // (GameCube starts at 2000/01/01; Unix starts at 1970/01/01.)
 #define GC_UNIX_TIME_DIFF	0x386D4380
-
-#pragma pack()
 
 #ifdef __cplusplus
 }

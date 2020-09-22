@@ -2,29 +2,20 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * KeyStoreUI.hpp: Key store UI base class.                                *
  *                                                                         *
- * Copyright (c) 2012-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2012-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBROMDATA_CONFIG_KEYSTOREUI_HPP__
 #define __ROMPROPERTIES_LIBROMDATA_CONFIG_KEYSTOREUI_HPP__
 
-#include "librpbase/common.h"
-#include "librpbase/TextFuncs.hpp"
+#include "common.h"
+
+// C includes.
 #include <stdint.h>
+
+// C++ includes.
+#include <string>
 
 namespace LibRomData {
 
@@ -43,17 +34,17 @@ class KeyStoreUI
 	public:
 		/** Key struct. **/
 		struct Key {
-			enum Status {
-				Status_Empty = 0,	// Key is empty.
-				Status_Unknown,		// Key status is unknown.
-				Status_NotAKey,		// Not a key.
-				Status_Incorrect,	// Key is incorrect.
-				Status_OK,		// Key is OK.
+			enum class Status : uint8_t {
+				Empty = 0,	// Key is empty.
+				Unknown,	// Key status is unknown.
+				NotAKey,	// Not a key.
+				Incorrect,	// Key is incorrect.
+				OK,		// Key is OK.
 			};
 
 			std::string name;	// Key name.
 			std::string value;	// Key value. (as rp-string for display purposes)
-			uint8_t status;		// Key status. (See the Status enum.)
+			Status status;		// Key status. (See the Status enum.)
 			bool modified;		// True if the key has been modified since last reset() or allKeysSaved().
 			bool allowKanji;	// Allow kanji for UTF-16LE + BOM.
 		};
@@ -204,20 +195,21 @@ class KeyStoreUI
 		virtual void modified_int(void) = 0;
 
 	public:
-		enum ImportStatus {
-			Import_InvalidParams = 0,	// Invalid parameters. (Should not happen!)
-			Import_OpenError,		// Could not open the file. (TODO: More info?)
-			Import_ReadError,		// Could not read the file. (TODO: More info?)
-			Import_InvalidFile,		// File is not the correct type.
-			Import_NoKeysImported,		// No keys were imported.
-			Import_KeysImported,		// Keys were imported.
+		enum class ImportStatus : uint8_t {
+			InvalidParams = 0,	// Invalid parameters. (Should not happen!)
+			OpenError,		// Could not open the file. (TODO: More info?)
+			ReadError,		// Could not read the file. (TODO: More info?)
+			InvalidFile,		// File is not the correct type.
+			NoKeysImported,		// No keys were imported.
+			KeysImported,		// Keys were imported.
 		};
 
 		/**
 		 * Return data for the import functions.
 		 */
 		struct ImportReturn {
-			uint8_t status;			/* ImportStatus */
+			ImportStatus status;		/* ImportStatus */
+			uint8_t error_code;		// POSIX error code. (0 for success or unknown)
 			uint8_t keysExist;		// Keys not imported because they're already in the file.
 			uint8_t keysInvalid;		// Keys not imported because they didn't verify.
 			uint8_t keysNotUsed;		// Keys not imported because they aren't used by rom-properties.

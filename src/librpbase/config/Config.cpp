@@ -2,47 +2,21 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * Config.cpp: Configuration manager.                                      *
  *                                                                         *
- * Copyright (c) 2016-2017 by David Korth.                                 *
- *                                                                         *
- * This program is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU General Public License as published by the   *
- * Free Software Foundation; either version 2 of the License, or (at your  *
- * option) any later version.                                              *
- *                                                                         *
- * This program is distributed in the hope that it will be useful, but     *
- * WITHOUT ANY WARRANTY; without even the implied warranty of              *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
- * GNU General Public License for more details.                            *
- *                                                                         *
- * You should have received a copy of the GNU General Public License along *
- * with this program; if not, write to the Free Software Foundation, Inc., *
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.           *
+ * Copyright (c) 2016-2020 by David Korth.                                 *
+ * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
+
+#include "stdafx.h"
+#include "config.librpbase.h"
 
 #include "Config.hpp"
 #include "ConfReader_p.hpp"
 
-// C includes.
-#include <stdlib.h>
-
-// C includes. (C++ namespace)
-#include <cassert>
-#include <cctype>
-
-// C++ includes.
-#include <algorithm>
-#include <memory>
-#include <string>
-#include <unordered_map>
+// C++ STL classes.
 using std::string;
-using std::unique_ptr;
 using std::unordered_map;
 
 #include "RomData.hpp"
-
-// Uninitialized vector class.
-// Reference: http://andreoffringa.org/?q=uvector
-#include "uvector.h"
 
 namespace LibRpBase {
 
@@ -66,7 +40,7 @@ class ConfigPrivate : public ConfReaderPrivate
 		/**
 		 * Reset the configuration to the default values.
 		 */
-		void reset(void) override final;
+		void reset(void) final;
 
 		/**
 		 * Process a configuration line.
@@ -78,7 +52,7 @@ class ConfigPrivate : public ConfReaderPrivate
 		 * @return 1 on success; 0 on error.
 		 */
 		int processConfigLine(const char *section,
-			const char *name, const char *value) override final;
+			const char *name, const char *value) final;
 
 	public:
 		/**
@@ -106,6 +80,14 @@ class ConfigPrivate : public ConfReaderPrivate
 		bool extImgDownloadEnabled;
 		bool useIntIconForSmallSizes;
 		bool downloadHighResScans;
+		bool storeFileOriginInfo;
+
+		// DMG title screen mode. [index is ROM type]
+		Config::DMG_TitleScreen_Mode dmgTSMode[Config::DMG_TitleScreen_Mode::DMG_TS_MAX];
+
+		// Other options.
+		bool showDangerousPermissionsOverlayIcon;
+		bool enableThumbnailOnNetworkFS;
 };
 
 /** ConfigPrivate **/
@@ -119,8 +101,11 @@ Config ConfigPrivate::instance;
  * Default image type priority.
  * Used if a custom configuration is not defined
  * for a given system.
+ *
+ * TODO: Per-system defaults?
  */
 const uint8_t ConfigPrivate::defImgTypePrio[] = {
+	RomData::IMG_EXT_TITLE_SCREEN,	// WiiWare only
 	RomData::IMG_EXT_MEDIA,
 	RomData::IMG_EXT_COVER,
 	RomData::IMG_EXT_BOX,
@@ -136,8 +121,14 @@ ConfigPrivate::ConfigPrivate()
 	, extImgDownloadEnabled(true)
 	, useIntIconForSmallSizes(true)
 	, downloadHighResScans(true)
+	, storeFileOriginInfo(true)
+	/* Overlay icon */
+	, showDangerousPermissionsOverlayIcon(true)
+	/* Enable thumbnailing and metadata on network FS */
+	, enableThumbnailOnNetworkFS(false)
 {
 	// NOTE: Configuration is also initialized in the reset() function.
+	memset(dmgTSMode, 0, sizeof(dmgTSMode));
 }
 
 /**
@@ -151,15 +142,26 @@ void ConfigPrivate::reset(void)
 
 	// Reserve 1 KB for the image type priorities store.
 	vImgTypePrio.reserve(1024);
-#if !defined(_MSC_VER) || _MSC_VER >= 1700
+#ifdef HAVE_UNORDERED_MAP_RESERVE
 	// Reserve 16 entries for the map.
 	mapImgTypePrio.reserve(16);
 #endif
 
-	// Download options.
+	// Download options
 	extImgDownloadEnabled = true;
 	useIntIconForSmallSizes = true;
 	downloadHighResScans = true;
+	storeFileOriginInfo = true;
+
+	// DMG title screen mode.
+	dmgTSMode[Config::DMG_TitleScreen_Mode::DMG_TS_DMG] = Config::DMG_TitleScreen_Mode::DMG_TS_DMG;
+	dmgTSMode[Config::DMG_TitleScreen_Mode::DMG_TS_SGB] = Config::DMG_TitleScreen_Mode::DMG_TS_SGB;
+	dmgTSMode[Config::DMG_TitleScreen_Mode::DMG_TS_CGB] = Config::DMG_TitleScreen_Mode::DMG_TS_CGB;
+
+	// Overlay icon
+	showDangerousPermissionsOverlayIcon = true;
+	// Enable thumbnail and metadata on network FS
+	enableThumbnailOnNetworkFS = false;
 }
 
 /**
@@ -194,6 +196,8 @@ int ConfigPrivate::processConfigLine(const char *section, const char *name, cons
 			param = &useIntIconForSmallSizes;
 		} else if (!strcasecmp(name, "DownloadHighResScans")) {
 			param = &downloadHighResScans;
+		} else if (!strcasecmp(name, "StoreFileOriginInfo")) {
+			param = &storeFileOriginInfo;
 		} else {
 			// Invalid option.
 			return 1;
@@ -201,9 +205,59 @@ int ConfigPrivate::processConfigLine(const char *section, const char *name, cons
 
 		// Parse the value.
 		// Acceptable values are "true", "false", "1", and "0".
-		if (!strcasecmp(value, "true") || !strcasecmp(value, "1")) {
+		if (!strcasecmp(value, "true") || !strcmp(value, "1")) {
 			*param = true;
-		} else if (!strcasecmp(value, "false") || !strcasecmp(value, "0")) {
+		} else if (!strcasecmp(value, "false") || !strcmp(value, "0")) {
+			*param = false;
+		} else {
+			// TODO: Show a warning or something?
+		}
+	} else if (!strcasecmp(section, "DMGTitleScreenMode")) {
+		// DMG title screen mode.
+		Config::DMG_TitleScreen_Mode dmg_key, dmg_value;
+
+		// Parse the key.
+		if (!strcasecmp(name, "DMG")) {
+			dmg_key = Config::DMG_TitleScreen_Mode::DMG_TS_DMG;
+		} else if (!strcasecmp(name, "SGB")) {
+			dmg_key = Config::DMG_TitleScreen_Mode::DMG_TS_SGB;
+		} else if (!strcasecmp(name, "CGB")) {
+			dmg_key = Config::DMG_TitleScreen_Mode::DMG_TS_CGB;
+		} else {
+			// Invalid key.
+			return 1;
+		}
+
+		// Parse the value.
+		if (!strcasecmp(value, "DMG")) {
+			dmg_value = Config::DMG_TitleScreen_Mode::DMG_TS_DMG;
+		} else if (!strcasecmp(value, "SGB")) {
+			dmg_value = Config::DMG_TitleScreen_Mode::DMG_TS_SGB;
+		} else if (!strcasecmp(value, "CGB")) {
+			dmg_value = Config::DMG_TitleScreen_Mode::DMG_TS_CGB;
+		} else {
+			// Invalid value.
+			return 1;
+		}
+
+		dmgTSMode[dmg_key] = dmg_value;
+	} else if (!strcasecmp(section, "Options")) {
+		// Options.
+		bool *param;
+		if (!strcasecmp(name, "ShowDangerousPermissionsOverlayIcon")) {
+			param = &showDangerousPermissionsOverlayIcon;
+		} else if (!strcasecmp(name, "EnableThumbnailOnNetworkFS")) {
+			param = &enableThumbnailOnNetworkFS;
+		} else {
+			// Invalid option.
+			return 1;
+		}
+
+		// Parse the value.
+		// Acceptable values are "true", "false", "1", and "0".
+		if (!strcasecmp(value, "true") || !strcmp(value, "1")) {
+			*param = true;
+		} else if (!strcasecmp(value, "false") || !strcmp(value, "0")) {
 			*param = false;
 		} else {
 			// TODO: Show a warning or something?
@@ -225,7 +279,7 @@ int ConfigPrivate::processConfigLine(const char *section, const char *name, cons
 		}
 
 		// Parse the comma-separated values.
-		const unsigned int vStartPos = (unsigned int)vImgTypePrio.size();
+		const size_t vStartPos = vImgTypePrio.size();
 		unsigned int count = 0;	// Number of image types.
 		uint32_t imgbf = 0;	// Image type bitfield to prevent duplicates.
 		while (*pos) {
@@ -239,7 +293,7 @@ int ConfigPrivate::processConfigLine(const char *section, const char *name, cons
 
 			// If no comma was found, read the remainder of the field.
 			// Otherwise, read from pos to comma-1.
-			unsigned int len = (comma ? (unsigned int)(comma-pos) : (unsigned int)strlen(pos));
+			size_t len = (comma ? static_cast<size_t>(comma-pos) : strlen(pos));
 
 			// If the first entry is "no", then all thumbnails
 			// for this system are disabled.
@@ -259,12 +313,12 @@ int ConfigPrivate::processConfigLine(const char *section, const char *name, cons
 			}
 
 			// Check for spaces at the start of the string.
-			while (isspace(*pos) && len > 0) {
+			while (ISSPACE(*pos) && len > 0) {
 				pos++;
 				len--;
 			}
 			// Check for spaces at the end of the string.
-			while (len > 0 && isspace(pos[len-1])) {
+			while (len > 0 && ISSPACE(pos[len-1])) {
 				len--;
 			}
 
@@ -278,7 +332,6 @@ int ConfigPrivate::processConfigLine(const char *section, const char *name, cons
 			}
 
 			// Check the image type.
-			// TODO: Hash comparison?
 			// First byte of 'name' is a length value for optimization purposes.
 			// NOTE: "\x08ExtMedia" is interpreted as a 0x8E byte by both
 			// MSVC 2015 and gcc-4.5.2. In order to get it to work correctly,
@@ -294,16 +347,17 @@ int ConfigPrivate::processConfigLine(const char *section, const char *name, cons
 				"\x0A" "ExtCover3D",
 				"\x0C" "ExtCoverFull",
 				"\x06" "ExtBox",
+				"\x0E" "ExtTitleScreen",
 			};
 			static_assert(ARRAY_SIZE(imageTypeNames) == RomData::IMG_EXT_MAX+1, "imageTypeNames[] is the wrong size.");
 
-			RomData::ImageType imgType = (RomData::ImageType)-1;
+			RomData::ImageType imgType = static_cast<RomData::ImageType>(-1);
 			for (int i = 0; i < ARRAY_SIZE(imageTypeNames); i++) {
-				if ((unsigned int)imageTypeNames[i][0] == len &&
+				if (static_cast<size_t>(imageTypeNames[i][0]) == len &&
 				    !strncasecmp(pos, &imageTypeNames[i][1], len))
 				{
 					// Found a match!
-					imgType = (RomData::ImageType)i;
+					imgType = static_cast<RomData::ImageType>(i);
 					break;
 				}
 			}
@@ -318,11 +372,11 @@ int ConfigPrivate::processConfigLine(const char *section, const char *name, cons
 			}
 
 			// Check for duplicates.
-			if (imgbf & (1 << imgType)) {
+			if (imgbf & (1U << imgType)) {
 				// Duplicate image type!
 				continue;
 			}
-			imgbf |= (1 << imgType);
+			imgbf |= (1U << imgType);
 
 			// Add the image type.
 			// Maximum of 32 due to imgbf width.
@@ -331,7 +385,7 @@ int ConfigPrivate::processConfigLine(const char *section, const char *name, cons
 				// Too many image types...
 				break;
 			}
-			vImgTypePrio.push_back((uint8_t)imgType);
+			vImgTypePrio.push_back(static_cast<uint8_t>(imgType));
 			count++;
 
 			if (!comma)
@@ -344,10 +398,11 @@ int ConfigPrivate::processConfigLine(const char *section, const char *name, cons
 		if (count > 0) {
 			// Convert the class name to lowercase.
 			string className(name);
-			std::transform(className.begin(), className.end(), className.begin(), ::tolower);
+			std::transform(className.begin(), className.end(), className.begin(),
+				[](unsigned char c) { return std::tolower(c); });
 
 			// Add the class name information to the map.
-			uint32_t keyIdx = vStartPos;
+			uint32_t keyIdx = static_cast<uint32_t>(vStartPos);
 			keyIdx |= (count << 24);
 			mapImgTypePrio.insert(std::make_pair(className, keyIdx));
 		}
@@ -381,7 +436,7 @@ Config *Config::instance(void)
 	return &ConfigPrivate::instance;
 }
 
-/** Image types. **/
+/** Image types **/
 
 /**
  * Get the image type priority data for the specified class name.
@@ -426,7 +481,7 @@ Config::ImgTypeResult Config::getImgTypePrio(const char *className, ImgTypePrio_
 	}
 
 	// Is the first entry RomData::IMG_DISABLED?
-	if (d->vImgTypePrio[idx] == (uint8_t)RomData::IMG_DISABLED) {
+	if (d->vImgTypePrio[idx] == static_cast<uint8_t>(RomData::IMG_DISABLED)) {
 		// Thumbnails are disabled for this class.
 		return IMGTR_DISABLED;
 	}
@@ -453,7 +508,7 @@ void Config::getDefImgTypePrio(ImgTypePrio_t *imgTypePrio) const
 	}
 }
 
-/** Download options. **/
+/** Download options **/
 
 /**
  * Should we download images from external databases?
@@ -487,6 +542,63 @@ bool Config::downloadHighResScans(void) const
 {
 	RP_D(const Config);
 	return d->downloadHighResScans;
+}
+
+/**
+ * Store file origin information?
+ * NOTE: Call load() before using this function.
+ * @return True if we should; false if not.
+ */
+bool Config::storeFileOriginInfo(void) const
+{
+	RP_D(const Config);
+	return d->storeFileOriginInfo;
+}
+
+/** DMG title screen mode **/
+
+/**
+ * Which title screen should we use for the specified DMG ROM type?
+ * @param romType DMG ROM type.
+ * @return Title screen to use.
+ */
+Config::DMG_TitleScreen_Mode Config::dmgTitleScreenMode(DMG_TitleScreen_Mode romType) const
+{
+	assert(romType >= DMG_TitleScreen_Mode::DMG_TS_DMG);
+	assert(romType <  DMG_TitleScreen_Mode::DMG_TS_MAX);
+	if (romType <  DMG_TitleScreen_Mode::DMG_TS_DMG ||
+	    romType >= DMG_TitleScreen_Mode::DMG_TS_MAX)
+	{
+		// Invalid ROM type. Return DMG.
+		return DMG_TitleScreen_Mode::DMG_TS_DMG;
+	}
+
+	RP_D(const Config);
+	return d->dmgTSMode[romType];
+}
+
+/** Other options **/
+
+/**
+ * Show an overlay icon for "dangerous" permissions?
+ * NOTE: Call load() before using this function.
+ * @return True if we should show the overlay icon; false if not.
+ */
+bool Config::showDangerousPermissionsOverlayIcon(void) const
+{
+	RP_D(const Config);
+	return d->showDangerousPermissionsOverlayIcon;
+}
+
+/**
+ * Enable thumbnailing and metadata on network filesystems?
+ * NOTE: Call load() before using this function.
+ * @return True if we should enable; false if not.
+ */
+bool Config::enableThumbnailOnNetworkFS(void) const
+{
+	RP_D(const Config);
+	return d->enableThumbnailOnNetworkFS;
 }
 
 }
