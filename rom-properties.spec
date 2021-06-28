@@ -1,5 +1,5 @@
 Name:          rom-properties
-Version:       1.7.1
+Version:       1.7.3
 Release:       0
 Summary:       ROM Properties Page shell extension
 Group:         games
@@ -19,16 +19,9 @@ BuildRequires: zstd-devel
 BuildRequires: curl-devel
 BuildRequires: png-devel
 BuildRequires: jpeg-devel
-BuildRequires: caja-devel
-BuildRequires: lib64nemo-devel
-BuildRequires: thunarx-devel
 BuildRequires: pkgconfig(tinyxml2)
 BuildRequires: seccomp-devel
 BuildRequires: nettle
-BuildRequires: libcanberra-devel
-
-# problem finding nettle if build with test
-# rpmbuild -bb --without test ~/rpmbuild/SPECS/rom-properties.spec
 
 %description
 This shell extension provides thumbnailing and property page functionality
@@ -38,6 +31,8 @@ including Nintendo GameCube and Wii.
 ##%package -n rom-properties-kde4
 ##Summary:       ROM Properties Page shell extension kde4
 ##Requires:      rom-properties-utils
+##Requires:      rom-properties-xdg
+##Requires:      rom-properties-data
 ##
 ##%description -n rom-properties-kde4
 ##This shell extension provides thumbnailing and property page functionality
@@ -49,6 +44,8 @@ including Nintendo GameCube and Wii.
 %package -n rom-properties-kf5
 Summary:       ROM Properties Page shell extension KF5
 Requires:      rom-properties-utils
+Requires:      rom-properties-xdg
+Requires:      rom-properties-data
 Conflicts:     rom-properties-kde5
 BuildRequires: kio-devel
 BuildRequires: qtbase5-common-devel
@@ -65,6 +62,8 @@ This package contains the KDE Frameworks 5 version.
 ##Summary:       ROM Properties Page shell extension XFCE
 ##Requires:      rom-properties-thumbnailer-dbus
 ##Requires:      rom-properties-utils
+##Requires:      rom-properties-xdg
+##Requires:      rom-properties-data
 ##BuildRequires: libthunarx-devel
 ##BuildRequires: gtk2-devel
 ##
@@ -82,9 +81,16 @@ This package contains the KDE Frameworks 5 version.
 Summary:       ROM Properties Page shell extension GTK3
 Requires:      rom-properties-utils
 Requires:      rom-properties-thumbnailer-dbus
+Requires:      rom-properties-xdg
+Requires:      rom-properties-data
 Conflicts:     rom-properties-gnome, rom-properties-mate, rom-properties-cinnamon, rom-proprties-gtk3-common
 BuildRequires: gtk+3.0-devel
 BuildRequires: nautilus-devel
+BuildRequires: nemo-extension-devel
+BuildRequires: caja-devel
+BuildRequires: thunarx-devel
+BuildRequires: libcanberra-devel
+BuildRequires: libcanberra-gtk3-devel
 
 %description -n rom-properties-gtk3
 This shell extension provides thumbnailing and property page functionality
@@ -101,6 +107,7 @@ some XFCE versions.
 
 %package -n rom-properties-cli
 Summary:       ROM Properties Page shell extension CLI
+Requires:      rom-properties-data
 
 %description -n rom-properties-cli
 This shell extension provides thumbnailing and property page functionality
@@ -142,6 +149,17 @@ including Nintendo GameCube and Wii.
 .
 This package contains the MIME package for files supported by rom-properties
 that aren't currently listed in FreeDesktop.org's shared-mime-info database.
+
+%package -n rom-properties-data
+Summary:       ROM Properties Page shell extension
+
+%description -n rom-properties-data
+This shell extension provides thumbnailing and property page functionality
+for ROM images, disc images, and save files for various game consoles,
+including Nintendo GameCube and Wii.
+.
+This package contains data files used for various parsers, e.g. the
+Nintendo amiibo parser.
 
 %prep
 %setup -q -n %{name}-%{version}
@@ -246,7 +264,16 @@ rm -fr %{buildroot}/usr/src/debug/
 %files -n rom-properties-xdg
 /usr/share/mime/packages/rom-properties.xml
 
+%files -n rom-properties-data
+/usr/share/rom-properties/amiibo-data.bin
+
 %changelog
+
+* Sun Sep 27 2020 shad <shad> 1.7.3-0
+- update to 1.7.3
+
+* Fri Sep 25 2020 shad <shad> 1.7.2-0
+- update to 1.7.2
 
 * Tue Sep 22 2020 shad <shad> 1.7.1-0
 - update to 1.7.1
