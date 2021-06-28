@@ -2,7 +2,7 @@
  * ROM Properties Page shell extension. (Win32)                            *
  * AboutTab.cpp: About tab for rp-config.                                  *
  *                                                                         *
- * Copyright (c) 2016-2020 by David Korth.                                 *
+ * Copyright (c) 2016-2021 by David Korth.                                 *
  * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
@@ -185,11 +185,10 @@ class AboutTabPrivate
 		void setTabContents(int index);
 
 	public:
-
 		/**
 		 * Initialize the dialog.
 		 */
-		void init(void);
+		void initDialog(void);
 };
 
 /** AboutTabPrivate **/
@@ -255,7 +254,7 @@ INT_PTR CALLBACK AboutTabPrivate::dlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, L
 			SetWindowLongPtr(hDlg, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(d));
 
 			// Initialize the dialog.
-			d->init();
+			d->initDialog();
 			return TRUE;
 		}
 
@@ -535,7 +534,8 @@ void AboutTabPrivate::initProgramTitleText(void)
 	}
 
 	// Set the icon.
-	HICON hIcon = PropSheetIcon::get96Icon();
+	const PropSheetIcon *const psi = PropSheetIcon::instance();
+	HICON hIcon = psi->get96Icon();
 	if (hIcon) {
 		// Get the dialog margin.
 		// 7x7 DLU margin is recommended by the Windows UX guidelines.
@@ -600,7 +600,7 @@ void AboutTabPrivate::initCreditsTab(void)
 	// FIXME: Figure out how to get links to work without
 	// resorting to manually adding CFE_LINK data...
 	// NOTE: Copyright is NOT localized.
-	sCredits += "Copyright (c) 2016-2020 by David Korth." RTF_BR;
+	sCredits += "Copyright (c) 2016-2021 by David Korth." RTF_BR;
 	sCredits += RTF_BR;
 	sCredits += rp_sprintf(
 		// tr: %s is the name of the license.
@@ -708,9 +708,17 @@ void AboutTabPrivate::initLibrariesTab(void)
 
 	/** zlib **/
 #ifdef HAVE_ZLIB
-	sLibraries += rp_sprintf(sCompiledWith, "zlib " ZLIB_VERSION) + RTF_BR
-		"Copyright (C) 1995-2017 Jean-loup Gailly and Mark Adler." RTF_BR
+#  ifdef ZLIBNG_VERSION
+	sLibraries += rp_sprintf(sCompiledWith, "zlib-ng " ZLIBNG_VERSION) + RTF_BR;
+#  else /* !ZLIBNG_VERSION */
+	sLibraries += rp_sprintf(sCompiledWith, "zlib " ZLIB_VERSION) + RTF_BR;
+#  endif /* ZLIBNG_VERSION */
+	sLibraries += "Copyright (C) 1995-2017 Jean-loup Gailly and Mark Adler." RTF_BR
 		"https://zlib.net/" RTF_BR;
+#  ifdef ZLIBNG_VERSION
+	// TODO: Also if zlibVersion() contains "zlib-ng"?
+	sLibraries += "https://github.com/zlib-ng/zlib-ng" RTF_BR;
+#  endif /* ZLIBNG_VERSION */
 	sLibraries += rp_sprintf(sLicense, "zlib license");
 #endif /* HAVE_ZLIB */
 
@@ -871,7 +879,7 @@ void AboutTabPrivate::setTabContents(int index)
 /**
  * Initialize the dialog.
  */
-void AboutTabPrivate::init(void)
+void AboutTabPrivate::initDialog(void)
 {
 	// Initialize the program title text.
 	initProgramTitleText();
@@ -1038,5 +1046,5 @@ void AboutTab::loadDefaults(void)
  */
 void AboutTab::save(void)
 {
-	// Nothing to load here...
+	// Nothing to save here...
 }

@@ -48,6 +48,9 @@ SET(rom-properties-gtk_SRCS
 	RpFile_gio.cpp
 	MessageWidget.cpp
 	RpGtk.cpp
+	sort_funcs.c
+	LanguageComboBox.cpp
+	OptionsMenuButton.cpp
 	)
 SET(rom-properties-gtk_H
 	RomDataView.hpp
@@ -58,6 +61,10 @@ SET(rom-properties-gtk_H
 	RpFile_gio.hpp
 	MessageWidget.hpp
 	RpGtk.hpp
+	sort_funcs.h
+	gtk-compat.h
+	LanguageComboBox.hpp
+	OptionsMenuButton.hpp
 	)
 
 # GTK2 sources and headers.
@@ -67,6 +74,12 @@ SET(rom-properties-gtk2_H GdkImageConv.hpp)
 # GTK3 sources and headers.
 SET(rom-properties-gtk3_SRCS CairoImageConv.cpp)
 SET(rom-properties-gtk3_H CairoImageConv.hpp)
+
+IF(ENABLE_ACHIEVEMENTS)
+	# D-Bus notification for achievements
+	SET(rom-properties-gtk-notify_SRCS AchGDBus.cpp)
+	SET(rom-properties-gtk-notify_H    AchGDBus.hpp)
+ENDIF(ENABLE_ACHIEVEMENTS)
 
 # Common libraries required for both GTK+ 2.x and 3.x.
 FIND_PACKAGE(GLib2 2.26.0)

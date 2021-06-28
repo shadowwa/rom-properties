@@ -13,6 +13,7 @@
 #include "pvr_structs.h"
 
 // librpbase, librpfile
+#include "libi18n/i18n.h"
 using LibRpBase::RomFields;
 using LibRpFile::IRpFile;
 
@@ -615,20 +616,20 @@ const rp_image *SegaPVRPrivate::loadPvrImage(void)
 	bool is32bit = false;
 	switch (pvrHeader.pvr.px_format) {
 		case PVR_PX_ARGB1555:
-			px_format = ImageDecoder::PXF_ARGB1555;
+			px_format = ImageDecoder::PixelFormat::ARGB1555;
 			break;
 		case PVR_PX_RGB565:
-			px_format = ImageDecoder::PXF_RGB565;
+			px_format = ImageDecoder::PixelFormat::RGB565;
 			break;
 		case PVR_PX_ARGB4444:
-			px_format = ImageDecoder::PXF_ARGB4444;
+			px_format = ImageDecoder::PixelFormat::ARGB4444;
 			break;
 		case SVR_PX_BGR5A3:
 			// TODO: Verify that this works for SVR.
-			px_format = ImageDecoder::PXF_BGR5A3;
+			px_format = ImageDecoder::PixelFormat::BGR5A3;
 			break;
 		case SVR_PX_BGR888_ABGR7888:
-			px_format = ImageDecoder::PXF_BGR888_ABGR7888;
+			px_format = ImageDecoder::PixelFormat::BGR888_ABGR7888;
 			is32bit = true;
 			break;
 		default:
@@ -931,20 +932,23 @@ const rp_image *SegaPVRPrivate::loadGvrImage(void)
 
 		case GVR_IMG_IA8:
 			// FIXME: Untested.
-			img = ImageDecoder::fromGcn16(ImageDecoder::PXF_IA8,
+			img = ImageDecoder::fromGcn16(
+				ImageDecoder::PixelFormat::IA8,
 				pvrHeader.width, pvrHeader.height,
 				reinterpret_cast<uint16_t*>(buf), expected_size);
 			break;
 
 		case GVR_IMG_RGB565:
 			// FIXME: Untested.
-			img = ImageDecoder::fromGcn16(ImageDecoder::PXF_RGB565,
+			img = ImageDecoder::fromGcn16(
+				ImageDecoder::PixelFormat::RGB565,
 				pvrHeader.width, pvrHeader.height,
 				reinterpret_cast<uint16_t*>(buf), expected_size);
 			break;
 
 		case GVR_IMG_RGB5A3:
-			img = ImageDecoder::fromGcn16(ImageDecoder::PXF_RGB5A3,
+			img = ImageDecoder::fromGcn16(
+				ImageDecoder::PixelFormat::RGB5A3,
 				pvrHeader.width, pvrHeader.height,
 				reinterpret_cast<uint16_t*>(buf), expected_size);
 			break;
@@ -1523,10 +1527,6 @@ int SegaPVR::mipmapCount(void) const
  */
 int SegaPVR::getFields(LibRpBase::RomFields *fields) const
 {
-	// TODO: Localization.
-#define C_(ctx, str) str
-#define NOP_C_(ctx, str) str
-
 	assert(fields != nullptr);
 	if (!fields)
 		return 0;

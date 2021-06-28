@@ -2,7 +2,7 @@
  * ROM Properties Page shell extension. (libwin32common)                   *
  * WinUI.hpp: Windows UI common functions.                                 *
  *                                                                         *
- * Copyright (c) 2016-2019 by David Korth.                                 *
+ * Copyright (c) 2016-2021 by David Korth.                                 *
  * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
@@ -11,7 +11,6 @@
 #include "AutoGetDC.hpp"
 #include "MiniU82T.hpp"
 
-#include <commctrl.h>
 #include <commdlg.h>
 #include <shlwapi.h>
 
@@ -22,11 +21,9 @@
 #include <algorithm>
 #include <memory>
 #include <string>
-#include <unordered_set>
 #include <vector>
 using std::string;
 using std::unique_ptr;
-using std::unordered_set;
 using std::tstring;
 using std::vector;
 
@@ -167,6 +164,7 @@ int measureTextSizeLink(HWND hWnd, HFONT hFont, const TCHAR *tstr, LPSIZE lpSize
 			*p++ = *tstr;
 		}
 	}
+	assert(lbrackets == 0);
 
 	*p = 0;
 	return measureTextSize(hWnd, hFont, ntstr.get(), lpSize);
@@ -194,16 +192,13 @@ COLORREF getAltRowColor(void)
 	rgb.color = GetSysColor(COLOR_WINDOW);
 
 	// TODO: Better "convert to grayscale" and brighten/darken algorithms?
+	// TODO: Handle color component overflow.
 	if (((rgb.r + rgb.g + rgb.b) / 3) >= 128) {
 		// Subtract 16 from each color component.
-		rgb.r -= 16;
-		rgb.g -= 16;
-		rgb.b -= 16;
+		rgb.color -= 0x00101010U;
 	} else {
 		// Add 16 to each color component.
-		rgb.r += 16;
-		rgb.g += 16;
-		rgb.b += 16;
+		rgb.color += 0x00101010U;
 	}
 
 	return rgb.color;
@@ -218,13 +213,11 @@ bool isComCtl32_v610(void)
 	// Check the COMCTL32.DLL version.
 	HMODULE hComCtl32 = GetModuleHandle(_T("COMCTL32"));
 	assert(hComCtl32 != nullptr);
-
-	typedef HRESULT (CALLBACK *PFNDLLGETVERSION)(DLLVERSIONINFO *pdvi);
-	PFNDLLGETVERSION pfnDllGetVersion = nullptr;
 	if (!hComCtl32)
 		return false;
 
-	pfnDllGetVersion = (PFNDLLGETVERSION)GetProcAddress(hComCtl32, "DllGetVersion");
+	typedef HRESULT (CALLBACK *PFNDLLGETVERSION)(DLLVERSIONINFO *pdvi);
+	PFNDLLGETVERSION pfnDllGetVersion = (PFNDLLGETVERSION)GetProcAddress(hComCtl32, "DllGetVersion");
 	if (!pfnDllGetVersion)
 		return false;
 
@@ -239,114 +232,81 @@ bool isComCtl32_v610(void)
 	return ret;
 }
 
-/** Window procedure subclasses **/
-
 /**
- * Subclass procedure for multi-line EDIT and RICHEDIT controls.
- * This procedure does the following:
- * - ENTER and ESCAPE are forwarded to the parent window.
- * - DLGC_HASSETSEL is masked.
- *
- * @param hWnd		Control handle.
- * @param uMsg		Message.
- * @param wParam	WPARAM
- * @param lParam	LPARAM
- * @param uIdSubclass	Subclass ID. (usually the control ID)
- * @param dwRefData	HWND of parent dialog to forward WM_COMMAND messages to.
+ * Measure the width of a string for ListView.
+ * This function handles newlines.
+ * @param hDC          [in] HDC for text measurement.
+ * @param tstr         [in] String to measure.
+ * @param pNlCount     [out,opt] Newline count.
+ * @return Width. (May return LVSCW_AUTOSIZE_USEHEADER if it's a single line.)
  */
-LRESULT CALLBACK MultiLineEditProc(
-	HWND hWnd, UINT uMsg,
-	WPARAM wParam, LPARAM lParam,
-	UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
+int measureStringForListView(HDC hDC, const tstring &tstr, int *pNlCount)
 {
-	switch (uMsg) {
-		case WM_KEYDOWN: {
-			// Work around Enter/Escape issues.
-			// Reference: http://blogs.msdn.com/b/oldnewthing/archive/2007/08/20/4470527.aspx
-			if (!dwRefData) {
-				// No parent dialog...
-				break;
-			}
-			HWND hDlg = reinterpret_cast<HWND>(dwRefData);
+	// TODO: Actual padding value?
+	static const int COL_WIDTH_PADDING = 8*2;
 
-			switch (wParam) {
-				case VK_RETURN:
-					SendMessage(hDlg, WM_COMMAND, IDOK, 0);
-					return TRUE;
+	// Measured width.
+	int width = 0;
 
-				case VK_ESCAPE:
-					SendMessage(hDlg, WM_COMMAND, IDCANCEL, 0);
-					return TRUE;
+	// Count newlines.
+	size_t prev_nl_pos = 0;
+	size_t cur_nl_pos;
+	int nl = 0;
+	while ((cur_nl_pos = tstr.find(_T('\n'), prev_nl_pos)) != tstring::npos) {
+		// Measure the width, plus padding on both sides.
+		//
+		// LVSCW_AUTOSIZE_USEHEADER doesn't work for entries with newlines.
+		// This allows us to set a good initial size, but it won't help if
+		// someone double-clicks the column splitter, triggering an automatic
+		// resize.
+		//
+		// TODO: Use ownerdraw instead? (WM_MEASUREITEM / WM_DRAWITEM)
+		// NOTE: Not using LibWin32Common::measureTextSize()
+		// because that does its own newline checks.
+		// TODO: Verify the values here.
+		SIZE textSize;
+		GetTextExtentPoint32(hDC, &tstr[prev_nl_pos], (int)(cur_nl_pos - prev_nl_pos), &textSize);
+		width = std::max<int>(width, textSize.cx + COL_WIDTH_PADDING);
 
-				default:
-					break;
-			}
-			break;
-		}
-
-		case WM_GETDLGCODE: {
-			// Filter out DLGC_HASSETSEL.
-			// References:
-			// - https://stackoverflow.com/questions/20876045/cricheditctrl-selects-all-text-when-it-gets-focus
-			// - https://stackoverflow.com/a/20884852
-			const LRESULT code = DefSubclassProc(hWnd, uMsg, wParam, lParam);
-			return (code & ~(LRESULT)DLGC_HASSETSEL);
-		}
-
-		case WM_NCDESTROY:
-			// Remove the window subclass.
-			// Reference: https://blogs.msdn.microsoft.com/oldnewthing/20031111-00/?p=41883
-			RemoveWindowSubclass(hWnd, MultiLineEditProc, uIdSubclass);
-			break;
-
-		default:
-			break;
+		nl++;
+		prev_nl_pos = cur_nl_pos + 1;
 	}
 
-	return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+	// Measure the last line.
+	// TODO: Verify the values here.
+	SIZE textSize;
+	GetTextExtentPoint32(hDC, &tstr[prev_nl_pos], (int)(tstr.size() - prev_nl_pos), &textSize);
+	width = std::max<int>(width, textSize.cx + COL_WIDTH_PADDING);
+
+	if (pNlCount) {
+		*pNlCount = nl;
+	}
+
+	return width;
 }
 
 /**
- * Subclass procedure for single-line EDIT and RICHEDIT controls.
- * This procedure does the following:
- * - DLGC_HASSETSEL is masked.
- *
- * @param hWnd		Control handle.
- * @param uMsg		Message.
- * @param wParam	WPARAM
- * @param lParam	LPARAM
- * @param uIdSubclass	Subclass ID. (usually the control ID)
- * @param dwRefData	HWND of parent dialog to forward WM_COMMAND messages to.
+ * Is the system using an RTL language?
+ * @return WS_EX_LAYOUTRTL if the system is using RTL; 0 if not.
  */
-LRESULT CALLBACK SingleLineEditProc(
-	HWND hWnd, UINT uMsg,
-	WPARAM wParam, LPARAM lParam,
-	UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
+DWORD isSystemRTL(void)
 {
-	((void)dwRefData);
-
-	switch (uMsg) {
-		case WM_GETDLGCODE: {
-			// Filter out DLGC_HASSETSEL.
-			// References:
-			// - https://stackoverflow.com/questions/20876045/cricheditctrl-selects-all-text-when-it-gets-focus
-			// - https://stackoverflow.com/a/20884852
-			const LRESULT code = DefSubclassProc(hWnd, uMsg, wParam, lParam);
-			return (code & ~(LRESULT)DLGC_HASSETSEL);
-		}
-
-		case WM_NCDESTROY:
-			// Remove the window subclass.
-			// Reference: https://blogs.msdn.microsoft.com/oldnewthing/20031111-00/?p=41883
-			RemoveWindowSubclass(hWnd, MultiLineEditProc, uIdSubclass);
-			break;
-
-		default:
-			break;
+	// Check for RTL.
+	// NOTE: Windows Explorer on Windows 7 seems to return 0 from GetProcessDefaultLayout(),
+	// even if an RTL language is in use. We'll check the taskbar layout instead.
+	// TODO: What if Explorer isn't running?
+	// References:
+	// - https://stackoverflow.com/questions/10391669/how-to-detect-if-a-windows-installation-is-rtl
+	// - https://stackoverflow.com/a/10393376
+	DWORD dwRet = 0;
+	HWND hTaskBar = FindWindow(_T("Shell_TrayWnd"), nullptr);
+	if (hTaskBar) {
+		dwRet = static_cast<DWORD>(GetWindowLongPtr(hTaskBar, GWL_EXSTYLE)) & WS_EX_LAYOUTRTL;
 	}
-
-	return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+	return dwRet;
 }
+
+/** File dialogs **/
 
 #ifdef UNICODE
 /**
@@ -477,15 +437,6 @@ static inline HRESULT getFileName_int_IFileDialog(tstring &ts_ret, bool bSave, H
 		}
 	}
 
-	// TODO: Use SetDefaultFolder instead?
-	// FIXME: Need to convert tsKeyFileDir to IShellItem.
-	// SHCreateItemFromParsingName()?
-	// Alternatively, rely on Windows' built-in folder memory.
-	/*
-	hr = pFileDlg->SetFolder(pFolder);
-	if (FAILED(hr))
-		return hr;
-	*/
 	hr = pFileDlg->SetTitle(dlgTitle);
 	if (FAILED(hr))
 		return hr;
@@ -712,6 +663,151 @@ tstring getOpenFileName(HWND hWnd, const TCHAR *dlgTitle, const char *filterSpec
 tstring getSaveFileName(HWND hWnd, const TCHAR *dlgTitle, const char *filterSpec, const TCHAR *origFilename)
 {
 	return getFileName_int(true, hWnd, dlgTitle, filterSpec, origFilename);
+}
+
+/** Window procedure subclasses **/
+
+/**
+ * Subclass procedure for multi-line EDIT and RICHEDIT controls.
+ * This procedure does the following:
+ * - ENTER and ESCAPE are forwarded to the parent window.
+ * - DLGC_HASSETSEL is masked.
+ *
+ * @param hWnd		Control handle.
+ * @param uMsg		Message.
+ * @param wParam	WPARAM
+ * @param lParam	LPARAM
+ * @param uIdSubclass	Subclass ID. (usually the control ID)
+ * @param dwRefData	HWND of parent dialog to forward WM_COMMAND messages to.
+ */
+LRESULT CALLBACK MultiLineEditProc(
+	HWND hWnd, UINT uMsg,
+	WPARAM wParam, LPARAM lParam,
+	UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
+{
+	switch (uMsg) {
+		case WM_NCDESTROY:
+			// Remove the window subclass.
+			// Reference: https://blogs.msdn.microsoft.com/oldnewthing/20031111-00/?p=41883
+			RemoveWindowSubclass(hWnd, MultiLineEditProc, uIdSubclass);
+			break;
+
+		case WM_KEYDOWN: {
+			// Work around Enter/Escape issues.
+			// Reference: http://blogs.msdn.com/b/oldnewthing/archive/2007/08/20/4470527.aspx
+			if (!dwRefData) {
+				// No parent dialog...
+				break;
+			}
+			HWND hDlg = reinterpret_cast<HWND>(dwRefData);
+
+			switch (wParam) {
+				case VK_RETURN:
+					SendMessage(hDlg, WM_COMMAND, IDOK, 0);
+					return TRUE;
+				case VK_ESCAPE:
+					SendMessage(hDlg, WM_COMMAND, IDCANCEL, 0);
+					return TRUE;
+				default:
+					break;
+			}
+			break;
+		}
+
+		case WM_GETDLGCODE: {
+			// Filter out DLGC_HASSETSEL.
+			// References:
+			// - https://stackoverflow.com/questions/20876045/cricheditctrl-selects-all-text-when-it-gets-focus
+			// - https://stackoverflow.com/a/20884852
+			const LRESULT code = DefSubclassProc(hWnd, uMsg, wParam, lParam);
+			return (code & ~(LRESULT)DLGC_HASSETSEL);
+		}
+
+		default:
+			break;
+	}
+
+	return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+}
+
+/**
+ * Subclass procedure for single-line EDIT and RICHEDIT controls.
+ * This procedure does the following:
+ * - DLGC_HASSETSEL is masked.
+ *
+ * @param hWnd		Control handle.
+ * @param uMsg		Message.
+ * @param wParam	WPARAM
+ * @param lParam	LPARAM
+ * @param uIdSubclass	Subclass ID. (usually the control ID)
+ * @param dwRefData	HWND of parent dialog to forward WM_COMMAND messages to.
+ */
+LRESULT CALLBACK SingleLineEditProc(
+	HWND hWnd, UINT uMsg,
+	WPARAM wParam, LPARAM lParam,
+	UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
+{
+	((void)dwRefData);
+
+	switch (uMsg) {
+		case WM_NCDESTROY:
+			// Remove the window subclass.
+			// Reference: https://blogs.msdn.microsoft.com/oldnewthing/20031111-00/?p=41883
+			RemoveWindowSubclass(hWnd, SingleLineEditProc, uIdSubclass);
+			break;
+
+		case WM_GETDLGCODE: {
+			// Filter out DLGC_HASSETSEL.
+			// References:
+			// - https://stackoverflow.com/questions/20876045/cricheditctrl-selects-all-text-when-it-gets-focus
+			// - https://stackoverflow.com/a/20884852
+			const LRESULT code = DefSubclassProc(hWnd, uMsg, wParam, lParam);
+			return (code & ~(LRESULT)DLGC_HASSETSEL);
+		}
+
+		default:
+			break;
+	}
+
+	return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+}
+
+/**
+ * Subclass procedure for ListView controls to disable HDN_DIVIDERDBLCLICK handling.
+ * @param hWnd		Dialog handle
+ * @param uMsg		Message
+ * @param wParam	WPARAM
+ * @param lParam	LPARAM
+ * @param uIdSubclass	Subclass ID (usually the control ID)
+ * @param dwRefData	RP_ShellPropSheetExt_Private*
+ */
+LRESULT CALLBACK ListViewNoDividerDblClickSubclassProc(
+	HWND hWnd, UINT uMsg,
+	WPARAM wParam, LPARAM lParam,
+	UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
+{
+	switch (uMsg) {
+		case WM_NCDESTROY:
+			// Remove the window subclass.
+			// Reference: https://blogs.msdn.microsoft.com/oldnewthing/20031111-00/?p=41883
+			RemoveWindowSubclass(hWnd, ListViewNoDividerDblClickSubclassProc, uIdSubclass);
+			break;
+
+		case WM_NOTIFY: {
+			const NMHDR *const pHdr = reinterpret_cast<const NMHDR*>(lParam);
+			if (pHdr->code == HDN_DIVIDERDBLCLICK) {
+				// Send the notification to the parent control,
+				// and ignore it here.
+				return SendMessage(GetParent(hWnd), uMsg, wParam, lParam);
+			}
+			break;
+		}
+
+		default:
+			break;
+	}
+
+	return DefSubclassProc(hWnd, uMsg, wParam, lParam);
 }
 
 }

@@ -10,11 +10,11 @@
 #include "stdafx.h"
 #include "TextOut.hpp"
 
-// C includes. (C++ namespace)
+// C includes (C++ namespace)
 #include <cassert>
 #include "ctypex.h"
 
-// C++ includes.
+// C++ STL classes
 using std::flush;
 using std::left;
 using std::max;
@@ -23,6 +23,9 @@ using std::setw;
 using std::string;
 using std::unique_ptr;
 using std::vector;
+
+// libi18n
+#include "libi18n/i18n.h"
 
 // librpbase
 #include "RomData.hpp"
@@ -218,7 +221,9 @@ public:
 		}
 
 		// Print the bits.
-		os << ColonPad(field.width, romField.name.c_str());
+		// FIXME: Why do we need to subtract 1 here to correctly align
+		// the first-row boxes? Maybe it should be somewhere else...
+		os << ColonPad(field.width-1, romField.name.c_str());
 		StreamStateSaver state(os);
 		os << left;
 		col = 0;
@@ -235,9 +240,11 @@ public:
 			if (col == perRow) {
 				os << '\n' << Pad(field.width);
 				col = 0;
+			} else {
+				os << ' ';
 			}
 
-			os << " [" << ((bitfield & 1) ? '*' : ' ') << "] " <<
+			os << '[' << ((bitfield & 1) ? '*' : ' ') << "] " <<
 				setw(colSize[col]) << name;
 			col++;
 		}
@@ -367,7 +374,7 @@ public:
 		if (listDataDesc.names) {
 			// Print the column names.
 			unsigned int col = 0;
-			uint32_t align = listDataDesc.alignment.headers;
+			uint32_t align = listDataDesc.col_attrs.align_headers;
 			const auto names_cend = listDataDesc.names->cend();
 			for (auto it = listDataDesc.names->cbegin(); it != names_cend; ++it, ++col, align >>= 2) {
 				// FIXME: What was this used for?
@@ -453,7 +460,7 @@ public:
 					checkboxes >>= 1;
 				}
 				unsigned int col = 0;
-				uint32_t align = listDataDesc.alignment.data;
+				uint32_t align = listDataDesc.col_attrs.align_data;
 				const auto it_cend = it->cend();
 				for (auto jt = it->cbegin(); jt != it_cend; ++jt, ++col, align >>= 2) {
 					string str;
@@ -531,7 +538,7 @@ public:
 
 		if (romField.data.date_time == -1) {
 			// Invalid date/time.
-			os << "Unknown";
+			os << C_("RomData", "Unknown");
 			return os;
 		}
 
@@ -693,7 +700,7 @@ public:
 				if (name) {
 					os << name;
 				} else {
-					os << "(tab " << tabIdx << ')';
+					os << rp_sprintf(C_("TextOut", "(tab %d)"), tabIdx);
 				}
 				os << " -----" << '\n';
 			}
@@ -747,9 +754,16 @@ std::ostream& operator<<(std::ostream& os, const ROMOutput& fo) {
 	assert(systemName != nullptr);
 	assert(fileType != nullptr);
 
-	os << "-- " << (systemName ? systemName : "(unknown system)") <<
-	      ' ' << (fileType ? fileType : "(unknown filetype)") <<
-	      " detected" << '\n';
+	// NOTE: RomDataView context is used for the "unknown" strings.
+	{
+		// tr: "[System] [FileType] detected."
+		const string detectMsg = rp_sprintf_p(C_("TextOut", "%1$s %2$s detected"),
+			(systemName ? systemName : C_("RomDataView", "(unknown system)")),
+			(fileType ? fileType : C_("RomDataView", "(unknown filetype)")));
+
+		os << "-- " << detectMsg << '\n';
+	}
+
 	const RomFields *const fields = romdata->fields();
 	assert(fields != nullptr);
 	if (fields) {
@@ -764,11 +778,14 @@ std::ostream& operator<<(std::ostream& os, const ROMOutput& fo) {
 
 		auto image = romdata->image((RomData::ImageType)i);
 		if (image && image->isValid()) {
-			os << "-- " << RomData::getImageTypeName((RomData::ImageType)i) << " is present (use -x" << i << " to extract)" << '\n';
+			// tr: Image Type name, followed by Image Type ID
+			os << "-- " << rp_sprintf_p(C_("TextOut", "%1$s is present (use -x%2$d to extract)"),
+				RomData::getImageTypeName((RomData::ImageType)i), i) << '\n';
+			// TODO: After localizing, add enough spaces for alignment.
 			os << "   Format : " << rp_image::getFormatName(image->format()) << '\n';
 			os << "   Size   : " << image->width() << " x " << image->height() << '\n';
 			if (romdata->imgpf((RomData::ImageType) i)  & RomData::IMGPF_ICON_ANIMATED) {
-				os << "   Animated icon present (use -a to extract)" << '\n';
+				os << "   " << C_("TextOut", "Animated icon is present (use -a to extract)") << '\n';
 			}
 		}
 	}

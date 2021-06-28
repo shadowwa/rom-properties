@@ -2,17 +2,14 @@
  * ROM Properties Page shell extension. (librptexture)                     *
  * KhronosKTX2.cpp: Khronos KTX2 image reader.                             *
  *                                                                         *
- * Copyright (c) 2017-2020 by David Korth.                                 *
+ * Copyright (c) 2017-2021 by David Korth.                                 *
  * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 /**
  * References:
  * - https://github.khronos.org/KTX-Specification/
- *
- * WARNING: The specification is still in draft stages.
- * (2.0.rc4 as of 2020/06/17) It is subject to change
- * prior to finalization.
+ * - https://github.com/KhronosGroup/KTX-Specification
  */
 
 #include "stdafx.h"
@@ -26,6 +23,8 @@
 #include "data/VkEnumStrings.hpp"
 
 // librpbase, librpfile
+#include "libi18n/i18n.h"
+using LibRpBase::rp_sprintf;
 using LibRpBase::RomFields;
 using LibRpFile::IRpFile;
 
@@ -345,8 +344,8 @@ const rp_image *KhronosKTX2Private::loadImage(int mip)
 		case VK_FORMAT_R8G8B8_UINT:
 		case VK_FORMAT_R8G8B8_SRGB:
 			// 24-bit RGB.
-			img = ImageDecoder::fromLinear24(ImageDecoder::PXF_BGR888,
-				width, height,
+			img = ImageDecoder::fromLinear24(
+				ImageDecoder::PixelFormat::BGR888, width, height,
 				buf.get(), expected_size, stride);
 			break;
 
@@ -354,8 +353,8 @@ const rp_image *KhronosKTX2Private::loadImage(int mip)
 		case VK_FORMAT_B8G8R8_UINT:
 		case VK_FORMAT_B8G8R8_SRGB:
 			// 24-bit RGB. (R/B swapped)
-			img = ImageDecoder::fromLinear24(ImageDecoder::PXF_RGB888,
-				width, height,
+			img = ImageDecoder::fromLinear24(
+				ImageDecoder::PixelFormat::RGB888, width, height,
 				buf.get(), expected_size, stride);
 			break;
 
@@ -363,8 +362,8 @@ const rp_image *KhronosKTX2Private::loadImage(int mip)
 		case VK_FORMAT_R8G8B8A8_UINT:
 		case VK_FORMAT_R8G8B8A8_SRGB:
 			// 32-bit RGBA.
-			img = ImageDecoder::fromLinear32(ImageDecoder::PXF_ABGR8888,
-				width, height,
+			img = ImageDecoder::fromLinear32(
+				ImageDecoder::PixelFormat::ABGR8888, width, height,
 				reinterpret_cast<const uint32_t*>(buf.get()), expected_size, stride);
 			break;
 
@@ -372,8 +371,8 @@ const rp_image *KhronosKTX2Private::loadImage(int mip)
 		case VK_FORMAT_B8G8R8A8_UINT:
 		case VK_FORMAT_B8G8R8A8_SRGB:
 			// 32-bit RGBA. (R/B swapped)
-			img = ImageDecoder::fromLinear32(ImageDecoder::PXF_ARGB8888,
-				width, height,
+			img = ImageDecoder::fromLinear32(
+				ImageDecoder::PixelFormat::ARGB8888, width, height,
 				reinterpret_cast<const uint32_t*>(buf.get()), expected_size, stride);
 			break;
 
@@ -382,15 +381,15 @@ const rp_image *KhronosKTX2Private::loadImage(int mip)
 		case VK_FORMAT_R8_SRGB:
 			// 8-bit (red).
 			// FIXME: Decode as red, not as L8.
-			img = ImageDecoder::fromLinear8(ImageDecoder::PXF_L8,
-				width, height,
+			img = ImageDecoder::fromLinear8(
+				ImageDecoder::PixelFormat::L8, width, height,
 				buf.get(), expected_size, stride);
 			break;
 
 		case VK_FORMAT_E5B9G9R9_UFLOAT_PACK32:
 			// Uncompressed "special" 32bpp formats.
-			img = ImageDecoder::fromLinear32(ImageDecoder::PXF_RGB9_E5,
-				width, height,
+			img = ImageDecoder::fromLinear32(
+				ImageDecoder::PixelFormat::RGB9_E5, width, height,
 				reinterpret_cast<const uint32_t*>(buf.get()), expected_size, stride);
 			break;
 
@@ -511,7 +510,7 @@ const rp_image *KhronosKTX2Private::loadImage(int mip)
 	}
 
 	// Post-processing: Check if a flip is needed.
-	if (img && (flipOp != rp_image::FLIP_NONE) && height > 1) {
+	if (img && flipOp != rp_image::FLIP_NONE) {
 		// TODO: Assert that img dimensions match ktx2Header?
 		rp_image *const flipimg = img->flip(flipOp);
 		if (flipimg) {
@@ -873,10 +872,6 @@ int KhronosKTX2::mipmapCount(void) const
  */
 int KhronosKTX2::getFields(LibRpBase::RomFields *fields) const
 {
-	// TODO: Localization.
-#define C_(ctx, str) str
-#define NOP_C_(ctx, str) str
-
 	assert(fields != nullptr);
 	if (!fields)
 		return 0;
@@ -904,10 +899,8 @@ int KhronosKTX2::getFields(LibRpBase::RomFields *fields) const
 		fields->addField_string(C_("KhronosKTX2", "Supercompression"),
 			supercompression_tbl[ktx2Header->supercompressionScheme]);
 	} else {
-		// TODO: rp_sprintf()?
-		char buf[32];
-		snprintf(buf, sizeof(buf), C_("RomData", "Unknown (%d)"), ktx2Header->supercompressionScheme);
-		fields->addField_string(C_("KhronosKTX2", "Supercompression"), buf);
+		fields->addField_string(C_("KhronosKTX2", "Supercompression"),
+			rp_sprintf(C_("RomData", "Unknown (%d)"), ktx2Header->supercompressionScheme));
 	}
 
 	// NOTE: Vulkan field names should not be localized.

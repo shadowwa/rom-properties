@@ -31,11 +31,6 @@ audio/x-spc				# SPC
 audio/x-vgm				# VGM
 
 # Console
-application/x-genesis-rom		# MegaDrive
-application/x-sega-cd-rom		# MegaDrive
-application/x-genesis-32x-rom		# MegaDrive
-application/x-sega-cd-32x-rom		# MegaDrive
-application/x-sega-pico-rom		# MegaDrive
 application/x-n64-rom			# N64
 application/x-nes-rom			# NES
 application/x-fds-disk			# NES
@@ -46,8 +41,6 @@ application/x-saturn-rom		# SegaSaturn
 
 # Handheld
 application/x-atari-lynx-rom		# Lynx
-application/x-neo-geo-pocket-rom	# NGPC
-application/x-neo-geo-pocket-color-rom	# NGPC
 application/x-nintendo-3ds-emmc		# Nintendo3DS
 application/x-nintendo-3ds-firm		# Nintendo3DSFirm
 application/x-pokemon-mini-rom		# PokemonMini
@@ -66,3 +59,8 @@ application/x-mach-sharedlib		# MachO
 application/x-mach-core			# MachO
 application/x-mach-bundle		# MachO
 application/x-mach-fat-binary		# MachO
+
+# Texture
+# Formats listed here are widely supported by Linux desktop
+# environments, but not other systems.
+image/x-tga				# TGA

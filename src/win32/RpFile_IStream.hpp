@@ -12,6 +12,12 @@
 #include "librpfile/IRpFile.hpp"
 #include <objidl.h>
 
+// MinGW-w64's comdefsp.h only works properly with MSVC,
+// since it uses __uuidof().
+#ifndef _MSC_VER
+_COM_SMARTPTR_TYPEDEF(IStream, IID_IStream);
+#endif /* _MSC_VER */
+
 // zlib
 struct z_stream_s;
 
@@ -117,7 +123,7 @@ class RpFile_IStream final : public LibRpFile::IRpFile
 		}
 
 	protected:
-		IStream *m_pStream;
+		IStreamPtr m_pStream;
 		std::string m_filename;
 
 		// zlib

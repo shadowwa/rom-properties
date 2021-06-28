@@ -21,6 +21,7 @@ using std::vector;
 namespace LibRomData {
 
 ROMDATA_IMPL(NGPC)
+ROMDATA_IMPL_IMG(NGPC)
 
 class NGPCPrivate final : public RomDataPrivate
 {
@@ -248,6 +249,68 @@ const char *const *NGPC::supportedMimeTypes_static(void)
 }
 
 /**
+ * Get a bitfield of image types this class can retrieve.
+ * @return Bitfield of supported image types. (ImageTypesBF)
+ */
+uint32_t NGPC::supportedImageTypes_static(void)
+{
+	return IMGBF_EXT_TITLE_SCREEN;
+}
+
+/**
+ * Get a list of all available image sizes for the specified image type.
+ * @param imageType Image type.
+ * @return Vector of available image sizes, or empty vector if no images are available.
+ */
+vector<RomData::ImageSizeDef> NGPC::supportedImageSizes_static(ImageType imageType)
+{
+	ASSERT_supportedImageSizes(imageType);
+
+	switch (imageType) {
+		case IMG_EXT_TITLE_SCREEN: {
+			static const ImageSizeDef sz_EXT_TITLE_SCREEN[] = {
+				{nullptr, 160, 152, 0},
+			};
+			return vector<ImageSizeDef>(sz_EXT_TITLE_SCREEN,
+				sz_EXT_TITLE_SCREEN + ARRAY_SIZE(sz_EXT_TITLE_SCREEN));
+		}
+		default:
+			break;
+	}
+
+	// Unsupported image type.
+	return vector<ImageSizeDef>();
+}
+
+/**
+ * Get image processing flags.
+ *
+ * These specify post-processing operations for images,
+ * e.g. applying transparency masks.
+ *
+ * @param imageType Image type.
+ * @return Bitfield of ImageProcessingBF operations to perform.
+ */
+uint32_t NGPC::imgpf(ImageType imageType) const
+{
+	ASSERT_imgpf(imageType);
+
+	uint32_t ret = 0;
+	switch (imageType) {
+		case IMG_EXT_TITLE_SCREEN:
+			// Use nearest-neighbor scaling when resizing.
+			ret = IMGPF_RESCALE_NEAREST;
+			break;
+
+		default:
+			// GameTDB's Nintendo DS cover scans have alpha transparency.
+			// Hence, no image processing is required.
+			break;
+	}
+	return ret;
+}
+
+/**
  * Load field data.
  * Called by RomData::fields() if the field data hasn't been loaded yet.
  * @return Number of fields read on success; negative POSIX error code on error.
@@ -356,6 +419,107 @@ int NGPC::loadMetaData(void)
 
 	// Finished reading the metadata.
 	return static_cast<int>(d->metaData->count());
+}
+
+/**
+ * Get a list of URLs for an external image type.
+ *
+ * A thumbnail size may be requested from the shell.
+ * If the subclass supports multiple sizes, it should
+ * try to get the size that most closely matches the
+ * requested size.
+ *
+ * @param imageType	[in]     Image type.
+ * @param pExtURLs	[out]    Output vector.
+ * @param size		[in,opt] Requested image size. This may be a requested
+ *                               thumbnail size in pixels, or an ImageSizeType
+ *                               enum value.
+ * @return 0 on success; negative POSIX error code on error.
+ */
+int NGPC::extURLs(ImageType imageType, vector<ExtURL> *pExtURLs, int size) const
+{
+	ASSERT_extURLs(imageType, pExtURLs);
+	pExtURLs->clear();
+
+	RP_D(const NGPC);
+	if (!d->isValid || (int)d->romType < 0) {
+		// ROM image isn't valid.
+		return -EIO;
+	}
+
+	// NOTE: We only have one size for NGPC right now.
+	RP_UNUSED(size);
+	vector<ImageSizeDef> sizeDefs = supportedImageSizes(imageType);
+	assert(sizeDefs.size() == 1);
+	if (sizeDefs.empty()) {
+		// No image sizes.
+		return -ENOENT;
+	}
+
+	// NOTE: RPDB's title screen database only has one size.
+	// There's no need to check image sizes, but we need to
+	// get the image size for the extURLs struct.
+
+	// Determine the image type name.
+	const char *imageTypeName;
+	const char *ext;
+	switch (imageType) {
+		case IMG_EXT_TITLE_SCREEN:
+			imageTypeName = "title";
+			ext = ".png";
+			break;
+		default:
+			// Unsupported image type.
+			return -ENOENT;
+	}
+
+	// Game ID and subdirectory.
+	// For game ID, RPDB uses "NEOPxxxx" for NGPC.
+	// TODO: Special cases for duplicates?
+	const uint16_t id_code = (d->romHeader.id_code[1] << 8) | d->romHeader.id_code[0];
+	const char *p_extra_subdir = nullptr;
+	char extra_subdir[12];
+	char game_id[13];	// original size is 12
+
+	switch (id_code) {
+		default:
+			// No special handling for tihs game.
+			snprintf(game_id, sizeof(game_id), "NEOP%04X", id_code);
+			break;
+
+		case 0x0000:	// Homebrew
+		case 0x1234:	// Some samples
+			// Use the game ID as the extra subdirectory,
+			// and the ROM title as the game ID.
+			memcpy(game_id, d->romHeader.title, sizeof(d->romHeader.title));
+			game_id[sizeof(game_id)-1] = '\0';
+			// Trim spaces from the game ID.
+			for (int i = (int)sizeof(game_id)-2; i > 0; i--) {
+				if (game_id[i] != '\0' && game_id[i] != ' ')
+					break;
+				game_id[i] = '\0';
+			}
+			if (game_id[0] == '\0') {
+				// Title is empty.
+				return -ENOENT;
+			}
+
+			snprintf(extra_subdir, sizeof(extra_subdir), "NEOP%04X", id_code);
+			p_extra_subdir = extra_subdir;
+			break;
+	}
+
+	// Add the URLs.
+	pExtURLs->resize(1);
+	auto extURL_iter = pExtURLs->begin();
+	extURL_iter->url = d->getURL_RPDB("ngpc", imageTypeName, p_extra_subdir, game_id, ext);
+	extURL_iter->cache_key = d->getCacheKey_RPDB("ngpc", imageTypeName, p_extra_subdir, game_id, ext);
+	extURL_iter->width = sizeDefs[0].width;
+	extURL_iter->height = sizeDefs[0].height;
+	extURL_iter->high_res = (sizeDefs[0].index >= 2);
+
+	// All URLs added.
+	return 0;
 }
 
 }

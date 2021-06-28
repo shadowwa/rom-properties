@@ -2,7 +2,7 @@
  * ROM Properties Page shell extension. (librpfile)                        *
  * RpFile_win32.cpp: Standard file object. (Win32 implementation)          *
  *                                                                         *
- * Copyright (c) 2016-2020 by David Korth.                                 *
+ * Copyright (c) 2016-2021 by David Korth.                                 *
  * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
@@ -32,7 +32,7 @@ namespace LibRpFile {
 
 #ifdef _MSC_VER
 // DelayLoad test implementation.
-DELAYLOAD_TEST_FUNCTION_IMPL0(zlibVersion);
+DELAYLOAD_TEST_FUNCTION_IMPL0(get_crc_table);
 #endif /* _MSC_VER */
 
 /** RpFilePrivate **/
@@ -123,7 +123,6 @@ int RpFilePrivate::reOpenFile(void)
 	}
 
 	// Check if the path starts with a drive letter.
-	bool isDevice = false;
 	if (filename.size() >= 3 &&
 	    ISASCII(filename[0]) && ISALPHA(filename[0]) &&
 	    filename[1] == ':' && filename[2] == '\\')
@@ -156,7 +155,7 @@ int RpFilePrivate::reOpenFile(void)
 			// Reference: https://support.microsoft.com/en-us/help/138434/how-win32-based-applications-read-cd-rom-sectors-in-windows-nt
 			tfilename = _T("\\\\.\\X:");
 			tfilename[4] = filename[0];
-			isDevice = true;
+			q->m_fileType = DT_BLK;	// this is a device
 		} else {
 			// Absolute path.
 #ifdef UNICODE
@@ -174,29 +173,8 @@ int RpFilePrivate::reOpenFile(void)
 		tfilename = U82T_s(filename);
 	}
 
-	if (!isDevice) {
-		// Make sure this isn't a directory.
-		// TODO: Other checks?
-		DWORD dwAttr = GetFileAttributes(tfilename.c_str());
-		if (dwAttr == INVALID_FILE_ATTRIBUTES) {
-			// File cannot be opened.
-			// This is okay if creating a new file, but not if we're
-			// opening an existing file.
-			if (!(mode & RpFile::FM_CREATE)) {
-				RP_Q(RpFile);
-				q->m_lastError = EIO;
-				return -EIO;
-			}
-		} else if (dwAttr & FILE_ATTRIBUTE_DIRECTORY) {
-			// File is a directory.
-			RP_Q(RpFile);
-			q->m_lastError = EISDIR;
-			return -EISDIR;
-		}
-	}
-
-	if (isDevice) {
-		// Allocate devInfo.
+	if (q->m_fileType == DT_BLK) {
+		// This is a device. Allocate devInfo.
 		// NOTE: This is kept around until RpFile is deleted,
 		// even if the device can't be opeend for some reason.
 		devInfo = new DeviceInfo();
@@ -210,6 +188,27 @@ int RpFilePrivate::reOpenFile(void)
 		// DeviceIoControl() to function properly.
 		dwDesiredAccess = GENERIC_READ | GENERIC_WRITE;
 		dwShareMode = FILE_SHARE_READ | FILE_SHARE_WRITE;
+	} else {
+		// Not a device. Make sure this isn't a directory.
+		// TODO: Other checks?
+		DWORD dwAttr = GetFileAttributes(tfilename.c_str());
+		if (dwAttr == INVALID_FILE_ATTRIBUTES) {
+			// File cannot be opened.
+			// This is okay if creating a new file, but not if we're
+			// opening an existing file.
+			if (!(mode & RpFile::FM_CREATE)) {
+				RP_Q(RpFile);
+				q->m_fileType = DT_UNKNOWN;
+				q->m_lastError = EIO;
+				return -EIO;
+			}
+		} else if (dwAttr & FILE_ATTRIBUTE_DIRECTORY) {
+			// File is a directory.
+			RP_Q(RpFile);
+			q->m_fileType = DT_DIR;
+			q->m_lastError = EISDIR;
+			return -EISDIR;
+		}
 	}
 
 	// Open the file.
@@ -224,7 +223,7 @@ int RpFilePrivate::reOpenFile(void)
 		dwCreationDisposition,	// dwCreationDisposition
 		FILE_ATTRIBUTE_NORMAL,	// dwFlagsAndAttributes
 		nullptr);		// hTemplateFile
-	if (isDevice) {
+	if (q->m_fileType == DT_BLK) {
 		if (!file || file == INVALID_HANDLE_VALUE) {
 			// Try again without WRITE permission.
 			file = CreateFile(
@@ -243,7 +242,7 @@ int RpFilePrivate::reOpenFile(void)
 		return -q->m_lastError;
 	}
 
-	if (isDevice) {
+	if (q->m_fileType == DT_BLK) {
 		// Get the disk space.
 		int ret = q->rereadDeviceSizeOS();
 		if (ret != 0) {
@@ -320,11 +319,15 @@ void RpFile::init(void)
 #if defined(_MSC_VER) && defined(ZLIB_IS_DLL)
 		// Delay load verification.
 		// TODO: Only if linked with /DELAYLOAD?
-		if (DelayLoad_test_zlibVersion() != 0) {
+		if (DelayLoad_test_get_crc_table() != 0) {
 			// Delay load failed.
 			// Don't do any gzip checking.
 			return;
 		}
+#else /* !defined(_MSC_VER) || !defined(ZLIB_IS_DLL) */
+		// zlib isn't in a DLL, but we need to ensure that the
+		// CRC table is initialized anyway.
+		get_crc_table();
 #endif /* defined(_MSC_VER) && defined(ZLIB_IS_DLL) */
 
 		DWORD bytesRead;
@@ -371,9 +374,6 @@ void RpFile::init(void)
 							// underlying Windows handle.
 							int gzfd_dup = _open_osfhandle((intptr_t)hGzDup, _O_RDONLY);
 							if (gzfd_dup >= 0) {
-								// Make sure the CRC32 table is initialized.
-								get_crc_table();
-
 								d->gzfd = gzdopen(gzfd_dup, "r");
 								if (d->gzfd) {
 									m_isCompressed = true;
@@ -771,18 +771,6 @@ int RpFile::makeWritable(void)
 	// Restore the seek position.
 	this->seek(prev_pos);
 	return 0;
-}
-
-/** Device file functions **/
-
-/**
- * Is this a device file?
- * @return True if this is a device file; false if not.
- */
-bool RpFile::isDevice(void) const
-{
-	RP_D(const RpFile);
-	return d->devInfo;
 }
 
 }

@@ -23,32 +23,8 @@ IF(NOT WIN32)
 	ENDIF(NOT Iconv_IS_BUILT_IN)
 
 	IF(ENABLE_DECRYPTION)
-		FIND_PACKAGE(NETTLE REQUIRED)
-		SET(HAVE_NETTLE ${NETTLE_FOUND})
-		IF(HAVE_NETTLE)
-			# Check if this is Nettle 3.x.
-			# Nettle 3.1 added version.h, which isn't available
-			# in older verisons, so we can't simply check that.
-			INCLUDE(CheckSymbolExists)
-			SET(OLD_CMAKE_REQUIRED_INCLUDES "${CMAKE_REQUIRED_INCLUDES}")
-			SET(OLD_CMAKE_REQUIRED_LIBRARIES "${CMAKE_REQUIRED_LIBRARIES}")
-			SET(CMAKE_REQUIRED_INCLUDES "${CMAKE_REQUIRED_INCLUDES} ${NETTLE_INCLUDE_DIRS}")
-			SET(CMAKE_REQUIRED_LIBRARIES "${CMAKE_REQUIRED_LIBRARIES} ${NETTLE_LIBRARY}")
-			CHECK_SYMBOL_EXISTS(aes128_set_decrypt_key "nettle/aes.h" HAVE_NETTLE_3)
-			IF(HAVE_NETTLE_3)
-				# Check for Nettle versioning symbols.
-				# Nettle 3.1 added version.h.
-				CHECK_SYMBOL_EXISTS(NETTLE_VERSION_MAJOR "nettle/version.h" HAVE_NETTLE_VERSION_H)
-				CHECK_SYMBOL_EXISTS(nettle_version_major "nettle/version.h" HAVE_NETTLE_VERSION_FUNCTIONS)
-			ENDIF(HAVE_NETTLE_3)
-			SET(CMAKE_REQUIRED_INCLUDES "${OLD_CMAKE_REQUIRED_INCLUDES}")
-			SET(CMAKE_REQUIRED_LIBRARIES "${OLD_CMAKE_REQUIRED_LIBRARIES}")
-			UNSET(OLD_CMAKE_REQUIRED_INCLUDES)
-			UNSET(OLD_CMAKE_REQUIRED_LIBRARIES)
-		ELSE(HAVE_NETTLE)
-			# Disable decryption.
-			SET(ENABLE_DECRYPTION OFF CACHE INTERNAL "Enable decryption for newer ROM and disc images." FORCE)
-		ENDIF(HAVE_NETTLE)
+		INCLUDE(CheckNettle2or3)
+		CHECK_NETTLE_2_OR_3()
 	ENDIF(ENABLE_DECRYPTION)
 ENDIF(NOT WIN32)
 
@@ -63,36 +39,12 @@ CHECK_SYMBOL_EXISTS(memmem "string.h" HAVE_MEMMEM)
 IF(NOT WIN32)
 	CHECK_SYMBOL_EXISTS(nl_langinfo "langinfo.h" HAVE_NL_LANGINFO)
 ELSE(NOT WIN32)
-	# Win32: MinGW's `struct lconv` doesn't have wchar_t fields.
+	# Win32: MinGW's `struct lconv` does have wchar_t fields,
+	# but only if __MSVCRT_VERSION__ >= 0xA00 || _WIN32_WINNT >= 0x601.
 	CHECK_STRUCT_HAS_MEMBER("struct lconv" _W_decimal_point "locale.h"
 		HAVE_STRUCT_LCONV_WCHAR_T
 		LANGUAGE C)
 ENDIF(NOT WIN32)
-
-# Check for reentrant time functions.
-# NOTE: May be _gmtime32_s() or _gmtime64_s() on MSVC 2005+.
-# The "inline" part will detect that.
-INCLUDE(CheckSymbolExistsOrInline)
-CHECK_SYMBOL_EXISTS_OR_INLINE(gmtime_r "time.h" "time_t tm; gmtime_r(&tm, NULL);" HAVE_GMTIME_R)
-IF(NOT HAVE_GMTIME_R)
-	CHECK_SYMBOL_EXISTS_OR_INLINE(gmtime_s "time.h" "time_t tm; gmtime_s(NULL, &tm);" HAVE_GMTIME_S)
-ENDIF(NOT HAVE_GMTIME_R)
-CHECK_SYMBOL_EXISTS_OR_INLINE(localtime_r "time.h" "time_t tm; localtime_r(&tm, NULL);" HAVE_LOCALTIME_R)
-IF(NOT HAVE_LOCALTIME_R)
-	CHECK_SYMBOL_EXISTS_OR_INLINE(localtime_s "time.h" "time_t tm; localtime_s(NULL, &tm);" HAVE_LOCALTIME_S)
-ENDIF(NOT HAVE_LOCALTIME_R)
-
-# Other time functions.
-CHECK_SYMBOL_EXISTS_OR_INLINE(timegm "time.h" "struct tm tm; time_t x = timegm(&tm);" HAVE_TIMEGM)
-IF(NOT HAVE_TIMEGM)
-	# NOTE: MSVCRT's _mkgmtime64() has a range of [1970/01/01, 3000/12/31].
-	# glibc and boost both support arbitrary ranges.
-	CHECK_SYMBOL_EXISTS_OR_INLINE(_mkgmtime "time.h" "struct tm tm; time_t x = _mkgmtime(&tm);" HAVE__MKGMTIME)
-	CHECK_SYMBOL_EXISTS_OR_INLINE(_mkgmtime64 "time.h" "struct tm tm; time_t x = _mkgmtime64(&tm);" HAVE__MKGMTIME64)
-ENDIF(NOT HAVE_TIMEGM)
-IF(NOT HAVE_TIMEGM AND NOT HAVE__MKGMTIME AND NOT HAVE__MKGMTIME64)
-	SET(USE_BOOST_TIMEGM 1)
-ENDIF(NOT HAVE_TIMEGM AND NOT HAVE__MKGMTIME AND NOT HAVE__MKGMTIME64)
 
 # Check for unordered_map::reserve and unordered_set::reserve.
 SET(OLD_CMAKE_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES})
@@ -123,11 +75,11 @@ SET(librpbase_SRCS
 	TextOut_common.cpp
 	TextOut_text.cpp
 	TextOut_json.cpp
+	Achievements.cpp
 	img/RpImageLoader.cpp
 	img/RpPng.cpp
 	img/RpPngWriter.cpp
 	img/IconAnimHelper.cpp
-	img/pngcheck/pngcheck.cpp
 	disc/IDiscReader.cpp
 	disc/DiscReader.cpp
 	disc/PartitionFile.cpp
@@ -152,6 +104,7 @@ SET(librpbase_H
 	RomMetaData.hpp
 	SystemRegion.hpp
 	TextOut.hpp
+	Achievements.hpp
 	img/RpPng.hpp
 	img/RpPngWriter.hpp
 	img/APNG_dlopen.h
@@ -168,11 +121,6 @@ SET(librpbase_H
 	config/Config.hpp
 	config/AboutTabText.hpp
 	)
-
-# timegm.c for systems that don't have timegm() or 64-bit _mkgmtime().
-IF(USE_BOOST_TIMEGM)
-	SET(librpbase_SRCS ${librpbase_SRCS} timegm.c)
-ENDIF(USE_BOOST_TIMEGM)
 
 IF(NOT USE_INTERNAL_PNG OR (USE_INTERNAL_PNG AND USE_INTERNAL_PNG_DLL))
 	SET(librpbase_SRCS ${librpbase_SRCS} img/APNG_dlopen.c)
@@ -212,17 +160,6 @@ IF(ENABLE_DECRYPTION)
 		SET(librpbase_CRYPTO_OS_H    crypto/AesNettle.hpp)
 	ENDIF(WIN32)
 ENDIF(ENABLE_DECRYPTION)
-
-IF(HAVE_ZLIB)
-	# Enable zlib in pngcheck.
-	SET_SOURCE_FILES_PROPERTIES(img/pngcheck/pngcheck.cpp
-		PROPERTIES COMPILE_DEFINITIONS USE_ZLIB)
-ENDIF(HAVE_ZLIB)
-IF(CMAKE_COMPILER_IS_GNUCXX)
-	# Disable some warnings for pngcheck.
-	SET_SOURCE_FILES_PROPERTIES(img/pngcheck/pngcheck.cpp
-		PROPERTIES COMPILE_FLAGS "-Wno-unused")
-ENDIF(CMAKE_COMPILER_IS_GNUCXX)
 
 # CPU-specific and optimized sources.
 IF(CPU_i386 OR CPU_amd64)

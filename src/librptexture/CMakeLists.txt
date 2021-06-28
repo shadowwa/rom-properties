@@ -34,6 +34,7 @@ SET(librptexture_SRCS
 	fileformat/KhronosKTX2.cpp
 	fileformat/PowerVR3.cpp
 	fileformat/SegaPVR.cpp
+	fileformat/TGA.cpp
 	fileformat/ValveVTF.cpp
 	fileformat/ValveVTF3.cpp
 	fileformat/XboxXPR.cpp
@@ -63,6 +64,7 @@ SET(librptexture_H
 	fileformat/KhronosKTX2.hpp
 	fileformat/PowerVR3.hpp
 	fileformat/SegaPVR.hpp
+	fileformat/TGA.hpp
 	fileformat/ValveVTF.hpp
 	fileformat/ValveVTF3.hpp
 	fileformat/XboxXPR.hpp
@@ -217,6 +219,9 @@ TARGET_INCLUDE_DIRECTORIES(rptexture
 		$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>	# src
 		$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>			# build
 	)
+IF(ENABLE_NLS)
+	TARGET_LINK_LIBRARIES(rptexture PRIVATE i18n)
+ENDIF(ENABLE_NLS)
 IF(MSVC)
 	TARGET_LINK_LIBRARIES(rptexture PRIVATE delayimp)
 ENDIF(MSVC)

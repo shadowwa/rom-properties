@@ -2,7 +2,7 @@
  * ROM Properties Page shell extension. (librpbase)                        *
  * RpPng.cpp: PNG image handler.                                           *
  *                                                                         *
- * Copyright (c) 2016-2020 by David Korth.                                 *
+ * Copyright (c) 2016-2021 by David Korth.                                 *
  * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
@@ -27,6 +27,7 @@ using LibRpTexture::argb32_t;
 using std::unique_ptr;
 
 // Image format libraries.
+#include <zlib.h>	// get_crc_table()
 #include <png.h>
 
 #if PNG_LIBPNG_VER < 10209 || \
@@ -53,9 +54,6 @@ using std::unique_ptr;
 # endif
 #endif /* !PNGCAPI */
 
-// pngcheck()
-#include "pngcheck/pngcheck.hpp"
-
 #if defined(_MSC_VER) && (defined(ZLIB_IS_DLL) || defined(PNG_IS_DLL))
 // Need zlib for delay-load checks.
 #include <zlib.h>
@@ -73,7 +71,7 @@ static int DelayLoad_test_zlib_and_png(void)
 	static bool success = false;
 	if (!success) {
 		__try {
-			zlibVersion();
+			get_crc_table();
 			png_access_version_number();
 		} __except (DelayLoad_filter_zlib_and_png(GetExceptionCode())) {
 			return -ENOTSUP;
@@ -347,7 +345,7 @@ rp_image *RpPngPrivate::loadPng(png_structp png_ptr, png_infop info_ptr)
 	if (setjmp(png_jmpbuf(png_ptr))) {
 		// PNG read failed.
 		png_free(png_ptr, row_pointers);
-		img->unref();
+		UNREF(img);
 		return nullptr;
 	}
 #endif
@@ -559,14 +557,10 @@ rp_image *RpPngPrivate::loadPng(png_structp png_ptr, png_infop info_ptr)
 
 /**
  * Load a PNG image from an IRpFile.
- *
- * This image is NOT checked for issues; do not use
- * with untrusted images!
- *
  * @param file IRpFile to load from.
  * @return rp_image*, or nullptr on error.
  */
-rp_image *RpPng::loadUnchecked(IRpFile *file)
+rp_image *RpPng::load(IRpFile *file)
 {
 	if (!file)
 		return nullptr;
@@ -578,6 +572,10 @@ rp_image *RpPng::loadUnchecked(IRpFile *file)
 		// Delay load failed.
 		return nullptr;
 	}
+#else /* !defined(_MSC_VER) || (!defined(ZLIB_IS_DLL) && !defined(PNG_IS_DLL)) */
+	// zlib isn't in a DLL, but we need to ensure that the
+	// CRC table is initialized anyway.
+	get_crc_table();
 #endif /* defined(_MSC_VER) && (defined(ZLIB_IS_DLL) || defined(PNG_IS_DLL)) */
 
 	// Rewind the file.
@@ -611,35 +609,6 @@ rp_image *RpPng::loadUnchecked(IRpFile *file)
 	// Free the PNG structs.
 	png_destroy_read_struct(&png_ptr, &info_ptr, nullptr);
 	return img;
-}
-
-/**
- * Load a PNG image from an IRpFile.
- *
- * This image is verified with various tools to ensure
- * it doesn't have any errors.
- *
- * @param file IRpFile to load from.
- * @return rp_image*, or nullptr on error.
- */
-rp_image *RpPng::load(IRpFile *file)
-{
-	if (!file)
-		return nullptr;
-
-	// Check the image with pngcheck() first.
-	file->rewind();
-	int ret = pngcheck(file);
-	// NOTE: BK Pocket Bike Racer's icon is missing the IEND chunk.
-	// pngcheck returns kMinorError in that case.
-	// TODO: Make it a special exception?
-	if (ret != kOK && ret != kMinorError) {
-		// PNG image has major errors.
-		return nullptr;
-	}
-
-	// PNG image has been validated.
-	return loadUnchecked(file);
 }
 
 /**

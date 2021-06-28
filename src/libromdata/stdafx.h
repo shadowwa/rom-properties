@@ -2,12 +2,15 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * stdafx.h: Common definitions and includes.                              *
  *                                                                         *
- * Copyright (c) 2016-2020 by David Korth.                                 *
+ * Copyright (c) 2016-2021 by David Korth.                                 *
  * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #ifndef __ROMPROPERTIES_LIBROMDATA_STDAFX_H__
 #define __ROMPROPERTIES_LIBROMDATA_STDAFX_H__
+
+// time_r.h needs to be here due to *_r() issues on MinGW-w64.
+#include "time_r.h"
 
 #ifdef __cplusplus
 /** C++ **/
@@ -54,10 +57,9 @@
 #include "common.h"
 #include "ctypex.h"
 #include "librpbase/aligned_malloc.h"
-#include "librpbase/time_r.h"
 
 // librpcpu
-#include "librpcpu/byteswap.h"
+#include "librpcpu/byteswap_rp.h"
 #include "librpcpu/bitstuff.h"
 
 #ifdef __cplusplus
@@ -83,6 +85,7 @@
 #include "librpfile/FileSystem.hpp"
 #include "librpfile/IRpFile.hpp"
 #include "librpfile/RpFile.hpp"
+#include "librpfile/SubFile.hpp"
 
 // librptexture C++ headers
 #include "librptexture/img/rp_image.hpp"

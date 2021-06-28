@@ -1,6 +1,119 @@
 # Changes
 
-## v1.8 (released 2020/??/??)
+## v1.8 (released 2021/??/??)
+
+* New features:
+  * An achievements system has been added. By viewing certain types of files
+    or performing certain actions, achievements can be unlocked. Achievements
+    can be viewed in rp-config.
+  * Enabled sorting on all RFT_LISTDATA fields.
+  * Improved automatic column sizing in RFT_LISTDATA fields on all platforms.
+    * Windows: Significantly improved column sizing by overriding ListView's
+      default sizing function, which doesn't work properly for strings that
+      have multiple lines.
+    * GTK+: Combined the icon/checkbox column with column 0.
+  * CD-ROM: Added support for 2448-byte sector images. Currently supported by
+    the generic ISO parser and PlayStationDisc. Support for other systems may
+    be added later on, but subchannels generally aren't used on Sega Mega CD,
+    Sega Saturn, Sega Dreamcast, or PlayStation Portable.
+  * New Spanish translation (es_ES), contributed by @Amnesia1000.
+  * KDE: rp-config now has a Thumbnail Cache tab, similar to the Windows
+    version.
+  * rp-config: The default language for images for PAL titles downloaded from
+    GameTDB can now be set.
+
+* New parsers:
+  * WonderSwan: Bandai WonderSwan (Color) ROM images. Supports external title
+    screens using RPDB.
+  * TGA: TrueVision TARGA image format. Most encodings are supported; some
+    have alpha channel issues. Thumbnailing is enabled on Windows but not
+    Linux, since most Linux desktop environments support TGA.
+
+* New parser features:
+  * NGPC: Added external title screens using RPDB.
+  * Xbox360_XDBF:
+    * Added metadata extraction.
+    * Added (partial) support for GPD files. Avatar Awards aren't parsed
+      in GPD files at the moment.
+  * Xbox360_XEX: System firmware XEXes use the XEX1 key. This is indicated
+    using the "Cardea Key" flag.
+    * Fixes #273, reported by @Masamune3210.
+  * GameCom: Added support for RLE-compressed icons. "Game.com Internet"
+    and "Tiger Web Link" are the only two titles known to use them.
+    * Fixes #278, reported by @simontime.
+  * MegaDrive:
+    * Detect Teradrive ROMs. Some extensions are also detected, but are
+      not displayed at the moment.
+    * Handle the 'W' region code as used by EverDrive OS ROMs.
+    * Significantly improved Sega Pico detection, including handling
+      non-standard system names and region codes.
+    * Added more I/O devices. The I/O device field is now a string instead
+      of a bitfield, since most games only support one or two devices.
+    * Handle some more unusual ROM headers, including "early" headers
+      that have 32 bytes for titles instead of 48, and some incorrect
+      region code offsets.
+    * Support for external title screens has been added using RPDB.
+    * Added metadata properties. Currently supports publisher and title.
+      Domestic title is used if available; otherwise, export title is used.
+  * Amiibo: Split the database out of the C++ code and into a database file.
+  * Xbox360_STFS: Add two more file extensions for some Bethesda games:
+    * Fallout: `.fxs`
+    * Skyrim: `.exs`
+    * Fixes #303, reported by @60fpshacksrock.
+  * KhronosKTX, KhronosKTX2: Fix thumbnailing registration on Windows.
+  * ISO:
+    * Basic support for CD-i images. (PVD only)
+    * Basic support for El Torito boot image detection. Currently only
+      displays if x86 and/or EFI boot images are present, but not any
+      specifics.
+  * MegaDrive:
+    * Detect Teradrive ROMs. Some extensions are also detected, but are
+      not displayed at the moment.
+    * Added external title screen images.
+    * Added more I/O devices. The I/O device field is now a string instead
+      of a bitfield, since most games only support one or two devices.
+    * Handle some more unusual ROM headers, including "early" headers
+      that have 32 bytes for titles instead of 48, and some incorrect
+      region code offsets.
+    * Improved detection of Sega Pico ROM images.
+
+* Bug fixes:
+  * GameCube: Detect incrementing values partitions in encrypted images.
+    * Fixes #269, reported by @Masamune3210.
+  * KDE:
+    * Ensure the "Thumb::URI" value is urlencoded.
+    * Fixed a massive file handle leak. Affects v1.5 and later.
+  * Fixed a potential crash when loading an invalid PNG image.
+  * Windows: Fixed a column sizing issue that caused XDBF Gamerscore columns
+    to be too wide.
+  * Xbox360_STFS: Fixed a crash that happened in some cases.
+  * XboxDisc: Fix an edge case where XGD3 discs that have a video partition
+    whose timestamp matches an XGD2 timestamp are not handled correctly.
+    * Affects: "Kinect Rush a Disney Pixar Adventure" (4D5309B6)
+    * Fixes #291, reported by @Masamune3210.
+  * EXE: Don't show the "dangerous permission" overlay for Win32 executables
+    that don't have a manifest.
+  * NintendoDS: Add "EN" fallback for external artwork from GameTDB.
+  * Re-enabled localization for texture parsers. This was broken with the
+    conversion to librptexture in v1.5.
+  * rpcli: Fix a segfault with JSON output on MD ROMs that have empty
+    string fields.
+  * NES: Improved internal footer detection.
+
+* Security Notes:
+  * pngcheck-2.3.0 was previously used to validate PNG images before loading
+    them with libpng. New security fixes for pngcheck were released in December
+    2020 with the caveat that because the code was crufty and unmaintained,
+    there may still be security issues. Because of this, pngcheck has been
+    removed entirely. Other security hardening methods, such as running image
+    decoders in a separate low-privilege process, may be implemented in the
+    future.
+
+## v1.7.3 (released 2020/09/25)
+
+* Bug fixes:
+  * GameCube: Fix incorrect GCZ data size checks.
+    * This *really* fixes #262, reported by @Amnesia1000.
 
 ## v1.7.2 (released 2020/09/24)
 
@@ -10,6 +123,11 @@
     * Fixes #258, reported by @TwilightSlick.
   * GameCube: Register the ".gcz" and ".rvz" file extensions on Windows.
     * Fixes #262, reported by @Amnesia1000.
+
+* Other changes:
+  * Xbox360_XEX: Removed the "Savegame ID" field. This seems to be 0 in all
+    tested games.
+    * Fixes #272, reported by @Masamune3210.
 
 ## v1.7.1 (released 2020/09/21)
 

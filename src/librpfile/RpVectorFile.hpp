@@ -2,7 +2,7 @@
  * ROM Properties Page shell extension. (librpfile)                        *
  * RpVectorFile.hpp: IRpFile implementation using an std::vector.          *
  *                                                                         *
- * Copyright (c) 2016-2020 by David Korth.                                 *
+ * Copyright (c) 2016-2021 by David Korth.                                 *
  * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
@@ -86,17 +86,6 @@ class RpVectorFile final : public IRpFile
 		}
 
 		/**
-		 * Truncate the file.
-		 * @param size New size. (default is 0)
-		 * @return 0 on success; -1 on error.
-		 */
-		int truncate(off64_t size = 0) final
-		{
-			m_vector.resize(size);
-			return 0;
-		}
-
-		/**
 		 * Flush buffers.
 		 * This operation only makes sense on writable files.
 		 * @return 0 on success; negative POSIX error code on error.
@@ -123,7 +112,11 @@ class RpVectorFile final : public IRpFile
 		 * Get the filename.
 		 * @return Filename. (May be empty if the filename is not available.)
 		 */
-		std::string filename(void) const final;
+		std::string filename(void) const final
+		{
+			// TODO: Implement this?
+			return std::string();
+		}
 
 	public:
 		/** Extra functions **/

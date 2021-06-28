@@ -23,11 +23,12 @@ using LibWin32Common::WTSSessionNotification;
 #include <devguid.h>
 
 // COM smart pointer typedefs.
+_COM_SMARTPTR_TYPEDEF(IImageList, IID_IImageList);
 _COM_SMARTPTR_TYPEDEF(IEmptyVolumeCache, IID_IEmptyVolumeCache);
 
 #ifdef __CRT_UUID_DECL
 // FIXME: MSYS2/MinGW-w64 (gcc-9.2.0-2, MinGW-w64 7.0.0.5524.2346384e-1)
-// doesn't declare the UUID for IEmptyVolumeCacheCallBack for __uuidof() emulation.
+// doesn't declare the UUID for IEmptyVolumeCache for __uuidof() emulation.
 __CRT_UUID_DECL(IEmptyVolumeCache, __MSABI_LONG(0x8fce5227), 0x04da, 0x11d1, 0xa0,0x04, 0x00, 0x80, 0x5f, 0x8a, 0xbe, 0x06)
 #endif
 
@@ -44,7 +45,6 @@ class CacheTabPrivate
 {
 	public:
 		CacheTabPrivate();
-		~CacheTabPrivate();
 
 	private:
 		RP_DISABLE_COPY(CacheTabPrivate)
@@ -114,7 +114,7 @@ class CacheTabPrivate
 		typedef HRESULT (STDAPICALLTYPE *PFNSHGETIMAGELIST)(_In_ int iImageList, _In_ REFIID riid, _Outptr_result_nullonfailure_ void **ppvObj);
 
 		// Image list for the XP drive list.
-		IImageList *pImageList;
+		IImageListPtr pImageList;
 
 		// XP drive update mask.
 		DWORD dwUnitmaskXP;
@@ -131,7 +131,6 @@ class CacheTabPrivate
 CacheTabPrivate::CacheTabPrivate()
 	: hPropSheetPage(nullptr)
 	, hWndPropSheet(nullptr)
-	, pImageList(nullptr)
 	, dwUnitmaskXP(0)
 	, isVista(false)
 {
@@ -149,13 +148,6 @@ CacheTabPrivate::CacheTabPrivate()
 		// "There is no disk in the drive." message when
 		// a CD-ROM is removed and we call SHGetFileInfo().
 		SetErrorMode(SEM_FAILCRITICALERRORS);
-	}
-}
-
-CacheTabPrivate::~CacheTabPrivate()
-{
-	if (pImageList) {
-		pImageList->Release();
 	}
 }
 
@@ -202,7 +194,7 @@ void CacheTabPrivate::initDialog(void)
 			// release/destroy it when we're done using it.
 			HRESULT hr = pfnSHGetImageList(SHIL_SMALL, IID_PPV_ARGS(&pImageList));
 			if (SUCCEEDED(hr)) {
-				ListView_SetImageList(hListView, reinterpret_cast<HIMAGELIST>(pImageList), LVSIL_SMALL);
+				ListView_SetImageList(hListView, reinterpret_cast<HIMAGELIST>(pImageList.GetInterfacePtr()), LVSIL_SMALL);
 			}
 		}
 	}
@@ -457,7 +449,7 @@ int CacheTabPrivate::clearThumbnailCacheVista(void)
 	SendMessage(hProgressBar, PBM_SETPOS, 0, 0);
 
 	// Thumbnail cache callback.
-	RP_EmptyVolumeCacheCallback *pCallback = new RP_EmptyVolumeCacheCallback(hWndPropSheet);
+	RP_EmptyVolumeCacheCallback *const pCallback = new RP_EmptyVolumeCacheCallback(hWndPropSheet);
 
 	// NOTE: IEmptyVolumeCache only supports Unicode strings.
 #ifdef UNICODE
@@ -580,22 +572,19 @@ int CacheTabPrivate::recursiveScan(const TCHAR *path, list<pair<tstring, DWORD> 
 
 		// Make sure we should delete this file.
 		if (!(findFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-			size_t len;
-			TCHAR *pExt;
-
 			// Thumbs.db files can be deleted.
 			if (!_tcsicmp(findFileData.cFileName, _T("Thumbs.db")))
 				goto isok;
 
 			// Check the extension.
-			len = _tcslen(findFileData.cFileName);
+			size_t len = _tcslen(findFileData.cFileName);
 			if (len <= 4) {
 				// Filename is too short. This is bad.
 				FindClose(hFindFile);
 				return -EIO;
 			}
 
-			pExt = &findFileData.cFileName[len-4];
+			const TCHAR *pExt = &findFileData.cFileName[len-4];
 			if (_tcsicmp(pExt, _T(".png")) != 0 &&
 			    _tcsicmp(pExt, _T(".jpg")) != 0)
 			{
@@ -654,7 +643,9 @@ int CacheTabPrivate::clearRomPropertiesCache(void)
 			bscount++;
 	}
 	if (cacheDir.size() < 8 || bscount < 6) {
-		SetWindowText(hStatusLabel, U82T_c(C_("CacheTab", "ERROR: Unable to get the cache directory path.")));
+		const string s_err = rp_sprintf(C_("CacheTab", "ERROR: %s"),
+			C_("CacheCleaner", "Unable to get the rom-properties cache directory."));
+		SetWindowText(hStatusLabel, U82T_s(s_err));
 		SendMessage(hProgressBar, PBM_SETRANGE, 0, MAKELONG(0, 1));
 		SendMessage(hProgressBar, PBM_SETPOS, 1, 0);
 		// FIXME: Not working...
@@ -693,7 +684,9 @@ int CacheTabPrivate::clearRomPropertiesCache(void)
 	int ret = recursiveScan(cacheDirT.c_str(), rlist);
 	if (ret != 0) {
 		// Non-image file found.
-		SetWindowText(hStatusLabel, U82T_c(C_("CacheTab", "ERROR: rom-properties cache has unexpected files. Not clearing it.")));
+		const string s_err = rp_sprintf(C_("CacheTab", "ERROR: %s"),
+			C_("CacheCleaner", "rom-properties cache has unexpected files. Not clearing it."));
+		SetWindowText(hStatusLabel, U82T_s(s_err));
 		SendMessage(hProgressBar, PBM_SETRANGE, 0, MAKELONG(0, 1));
 		SendMessage(hProgressBar, PBM_SETPOS, 1, 0);
 		EnableWindow(hClearSysThumbs, TRUE);
@@ -756,10 +749,11 @@ int CacheTabPrivate::clearRomPropertiesCache(void)
 	}
 
 	if (dirErrs > 0 || fileErrs > 0) {
-		// TODO: Localize this string.
-		SetWindowText(hStatusLabel, U82T_s(
-			rp_sprintf("Error: Unable to delete %u file(s) and/or %u dir(s).",
-				fileErrs, dirErrs)));
+		char buf[256];
+		snprintf(buf, sizeof(buf), C_("CacheTab", "Error: Unable to delete %u file(s) and/or %u dir(s)."),
+			fileErrs, dirErrs);
+		const string s_err = rp_sprintf(C_("CacheTab", "ERROR: %s"), buf);
+		SetWindowText(hStatusLabel, U82T_s(s_err));
 		MessageBeep(MB_ICONWARNING);
 	} else {
 		SetWindowText(hStatusLabel, U82T_c(C_("CacheTab", "rom-properties cache cleared successfully.")));

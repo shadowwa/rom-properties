@@ -52,6 +52,9 @@ SET(rom-properties-win32_SRCS
 	DragImageLabel.cpp
 	FontHandler.cpp
 	MessageWidget.cpp
+	LvData.cpp
+	LanguageComboBox.cpp
+	OptionsMenuButton.cpp
 	config/ConfigDialog.cpp
 	config/PropSheetIcon.cpp
 	config/RP_EmptyVolumeCacheCallback.cpp
@@ -60,6 +63,7 @@ SET(rom-properties-win32_SRCS
 	config/SystemsTab.cpp
 	config/OptionsTab.cpp
 	config/CacheTab.cpp
+	config/AchievementsTab.cpp
 	config/AboutTab.cpp
 	)
 SET(rom-properties-win32_H
@@ -80,6 +84,9 @@ SET(rom-properties-win32_H
 	DragImageLabel.hpp
 	FontHandler.hpp
 	MessageWidget.hpp
+	LvData.hpp
+	LanguageComboBox.hpp
+	OptionsMenuButton.hpp
 	config/ConfigDialog.hpp
 	config/PropSheetIcon.hpp
 	config/RP_EmptyVolumeCacheCallback.hpp
@@ -88,11 +95,13 @@ SET(rom-properties-win32_H
 	config/SystemsTab.hpp
 	config/OptionsTab.hpp
 	config/CacheTab.hpp
+	config/AchievementsTab.hpp
 	config/AboutTab.hpp
 	res/resource.h
 	)
 SET(rom-properties-win32_RC
 	res/resource.rc
+	res/rp-es_ES.rc
 	res/rp-en_US.rc
 	res/rp-pt_BR.rc
 	)
@@ -125,6 +134,11 @@ IF(ENABLE_DECRYPTION)
 		SET(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -D ENABLE_DECRYPTION")
 	ENDIF(MSVC)
 ENDIF(ENABLE_DECRYPTION)
+
+IF(ENABLE_ACHIEVEMENTS)
+	SET(rom-properties-win32_ACH_SRC AchWin32.cpp)
+	SET(rom-properties-win32_ACH_H AchWin32.hpp)
+ENDIF(ENABLE_ACHIEVEMENTS)
 
 IF(ENABLE_PCH)
 	# Precompiled headers.
@@ -162,6 +176,7 @@ ADD_LIBRARY(rom-properties SHARED
 	${rom-properties-win32_SRCS} ${rom-properties-win32_H}
 	${rom-properties-win32-PropKey_SRCS} ${rom-properties-win32-PropKey_H}
 	${rom-properties-win32_CRYPTO_SRCS} ${rom-properties-win32_CRYPTO_H}
+	${rom-properties-win32_ACH_SRC} ${rom-properties-win32_ACH_H}
 	${rom-properties-win32_RC}
 	)
 IF(ENABLE_PCH)

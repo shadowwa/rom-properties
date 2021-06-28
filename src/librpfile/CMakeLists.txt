@@ -39,6 +39,7 @@ SET(librpfile_H
 	FileSystem.hpp
 	RelatedFile.hpp
 	DualFile.hpp
+	SubFile.hpp
 	scsi/ata_protocol.h
 	scsi/scsi_protocol.h
 	scsi/scsi_ata_cmds.h
@@ -84,11 +85,11 @@ IF(WIN32)
 		win32/FileSystem_win32.cpp
 		win32/RpFile_win32.cpp
 		win32/IStreamWrapper.cpp
-		Win32/RpFile_windres.cpp
+		win32/RpFile_windres.cpp
 		)
 	SET(librpfile_OS_H
 		win32/IStreamWrapper.hpp
-		Win32/RpFile_windres.hpp
+		win32/RpFile_windres.hpp
 		)
 ELSE(WIN32)
 	SET(librpfile_OS_SRCS

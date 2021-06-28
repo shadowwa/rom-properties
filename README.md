@@ -46,11 +46,15 @@ following platforms:
 
 The following platforms are still compatible, but may not receive as much support:
 * KDE 4.x
-* Windows XP, Windows Vista
+* Windows XP, Windows Server 2003, Windows Vista
 
-On Windows, you will need the MSVC 2015-2019 runtime:
+On Windows Vista and later, you will need the MSVC 2015-2019 runtime:
 * 32-bit: https://aka.ms/vs/16/release/vc_redist.x86.exe
 * 64-bit: https://aka.ms/vs/16/release/vc_redist.x64.exe
+
+On Windows XP/2003 and earlier, you will need the MSVC 2015-2017 runtime:
+* 32-bit: https://aka.ms/vs/15/release/vc_redist.x86.exe
+* 64-bit: https://aka.ms/vs/15/release/vc_redist.x64.exe
 
 For instructions on compiling from source, see doc/COMPILING.md .
 
@@ -87,50 +91,52 @@ button.
 
 ### Game Consoles
 
-|           System          | Properties Tab | Metadata | Internal Images | External Scans |
-|:-------------------------:|:--------------:|:--------:|:---------------:|:--------------:|
-| NES                       |       Yes      |    No    |       N/A       |       No       |
+|           System          | Properties Tab | Metadata | Internal Images | External Images |
+|:-------------------------:|:--------------:|:--------:|:---------------:|:---------------:|
+| NES                       |       Yes      |    No    |       N/A       |        No       |
 | Super NES                 |       Yes      |    Yes   |       N/A       |      Title     |
-| Microsoft Xbox (XBE)      |       Yes      |    Yes   |       Icon      |       No       |
-| Microsoft Xbox 360 (XEX)  |       Yes      |    Yes   |       Icon      |       No       |
-| Microsoft Xbox 360 (STFS) |       Yes      |    Yes   |       Icon      |       No       |
-| Microsoft Xbox Game Discs |       Yes      |    Yes   |       Icon      |       No       |
-| Nintendo 64               |       Yes      |    Yes   |       N/A       |       No       |
-| iQue Player ticket files  |       Yes      |    Yes   |   Icon, Banner  |       No       |
-| Nintendo GameCube Discs   |       Yes      |    Yes   |      Banner     |  Disc, Covers  |
-| Nintendo GameCube Banners |       Yes      |    Yes   |      Banner     |       No       |
-| Nintendo GameCube Saves   |       Yes      |    Yes   |       Icon      |       N/A      |
-| Nintendo Wii Discs        |       Yes      |    Yes   |        No       |  Disc, Covers  |
-| Nintendo Wii WADs         |       Yes      |    Yes   |       Yes*      |  Title, Covers |
-| Nintendo Wii Saves        |       Yes      |    No    |       Yes       |       N/A      |
-| Nintendo Wii U            |       Yes      |    No    |        No       |  Disc, Covers  |
-| Sega 8-bit (SMS, GG)      |       Yes      |    Yes   |       N/A       |       No       |
-| Sega Mega Drive           |       Yes      |    No    |       N/A       |       No       |
-| Sega Dreamcast            |       Yes      |    Yes   |      Media      |       No       |
-| Sega Dreamcast Saves      |       Yes      |    Yes   |   Icon, Banner  |       No       |
-| Sega Saturn               |       Yes      |    Yes   |       N/A       |       No       |
-| Sony PlayStation Discs    |       Yes      |    No    |       N/A       |       No       |
-| Sony PlayStation EXEs     |       Yes      |    No    |       N/A       |       N/A      |
-| Sony PlayStation Saves    |       Yes      |    Yes   |       Icon      |       N/A      |
-| Sony PlayStation 2 Discs  |       Yes      |    Yes   |       N/A       |       No       |
+| Microsoft Xbox (XBE)      |       Yes      |    Yes   |       Icon      |        No       |
+| Microsoft Xbox 360 (XEX)  |       Yes      |    Yes   |       Icon      |        No       |
+| Microsoft Xbox 360 (STFS) |       Yes      |    Yes   |       Icon      |        No       |
+| Microsoft Xbox Game Discs |       Yes      |    Yes   |       Icon      |        No       |
+| Nintendo 64               |       Yes      |    Yes   |       N/A       |        No       |
+| iQue Player ticket files  |       Yes      |    Yes   |   Icon, Banner  |        No       |
+| Nintendo GameCube Discs   |       Yes      |    Yes   |      Banner     |   Disc, Covers  |
+| Nintendo GameCube Banners |       Yes      |    Yes   |      Banner     |        No       |
+| Nintendo GameCube Saves   |       Yes      |    Yes   |       Icon      |       N/A       |
+| Nintendo Wii Discs        |       Yes      |    Yes   |        No       |   Disc, Covers  |
+| Nintendo Wii WADs         |       Yes      |    Yes   |       Yes*      |  Title, Covers  |
+| Nintendo Wii Saves        |       Yes      |    No    |       Yes       |       N/A       |
+| Nintendo Wii U            |       Yes      |    No    |        No       |   Disc, Covers  |
+| Sega 8-bit (SMS, GG)      |       Yes      |    Yes   |       N/A       |        No       |
+| Sega Mega Drive           |       Yes      |    Yes   |       N/A       |      Title      |
+| Sega Dreamcast            |       Yes      |    Yes   |      Media      |        No       |
+| Sega Dreamcast Saves      |       Yes      |    Yes   |   Icon, Banner  |        No       |
+| Sega Saturn               |       Yes      |    Yes   |       N/A       |        No       |
+| Sony PlayStation Discs    |       Yes      |    No    |       N/A       |        No       |
+| Sony PlayStation EXEs     |       Yes      |    No    |       N/A       |       N/A       |
+| Sony PlayStation Saves    |       Yes      |    Yes   |       Icon      |       N/A       |
+| Sony PlayStation 2 Discs  |       Yes      |    Yes   |       N/A       |        No       |
 
 \* Internal images are only present in Wii DLC WADs.
+\* Sega Mega Drive includes Sega CD, 32X, and Pico.
 
 ### Handhelds
 
-|             System            | Properties Tab | Metadata | Internal Images | External Scans |
-|:-----------------------------:|:--------------:|:--------:|:---------------:|:--------------:|
-| Atari Lynx                    |       Yes      |    No    |       N/A       |       No       |
-| Neo Geo Pocket (Color)        |       Yes      |    Yes   |       N/A       |       No       |
-| Nintendo Game Boy (Color)     |       Yes      |    Yes   |       N/A       |      Title     |
-| Nintendo Virtual Boy          |       Yes      |    No    |       N/A       |       No       |
-| Nintendo Game Boy Advance     |       Yes      |    Yes   |       N/A       |      Title     |
-| Nintendo DS(i)                |       Yes      |    Yes   |       Icon      |  Covers, Box   |
-| Nintendo DSi TADs*            |     Partial    |    No    |        No       |       No       |
-| Nintendo 3DS                  |       Yes      |    Yes   |       Icon      |  Covers, Box   |
-| Pokémon Mini                  |       Yes      |    Yes   |       N/A       |       No       |
-| Sony PlayStation Portable     |       Yes      |    Yes   |       Icon      |       No       |
-| Tiger game.com                |       Yes      |    Yes   |       Icon      |       No       |
+|             System            | Properties Tab | Metadata | Internal Images | External Images |
+|:-----------------------------:|:--------------:|:--------:|:---------------:|:---------------:|
+| Atari Lynx                    |       Yes      |    No    |       N/A       |        No       |
+| Bandai WonderSwan (Color)     |       Yes      |    Yes   |       N/A       |      Title      |
+| Neo Geo Pocket (Color)        |       Yes      |    Yes   |       N/A       |      Title      |
+| Nintendo Game Boy (Color)     |       Yes      |    Yes   |       N/A       |      Title      |
+| Nintendo Virtual Boy          |       Yes      |    No    |       N/A       |        No       |
+| Nintendo Game Boy Advance     |       Yes      |    Yes   |       N/A       |      Title      |
+| Nintendo DS(i)                |       Yes      |    Yes   |       Icon      |   Covers, Box   |
+| Nintendo DSi TADs*            |     Partial    |    No    |        No       |        No       |
+| Nintendo 3DS                  |       Yes      |    Yes   |       Icon      |   Covers, Box   |
+| Pokémon Mini                  |       Yes      |    Yes   |       N/A       |        No       |
+| Sony PlayStation Portable     |       Yes      |    Yes   |       Icon      |        No       |
+| Tiger game.com                |       Yes      |    Yes   |       Icon      |        No       |
 
 \* The Nintendo DSi TAD parser supports development TADs that are normally
    imported using DSi Nmenu. It does not currently support DSi exports from
@@ -140,19 +146,21 @@ button.
 
 ### Texture Formats
 
-|             System            | Properties Tab | Metadata | Internal Images | External Scans |
-|:-----------------------------:|:--------------:|:--------:|:---------------:|:--------------:|
-| Leapster Didj .tex textures   |       Yes      |    Yes   |      Image      |       N/A      |
-| Khronos KTX Textures          |       Yes      |    Yes   |      Image      |       N/A      |
-| Khronos KTX2 Textures         |       Yes      |    Yes   |      Image      |       N/A      |
-| Microsoft DirectDraw Surface  |       Yes      |    Yes   |      Image      |       N/A      |
-| Microsoft Xbox XPR Textures   |       Yes      |    Yes   |      Image      |       N/A      |
-| PowerVR 3.0.0 Textures        |       Yes      |    Yes   |      Image      |       N/A      |
-| Sega PVR/GVR/SVR Textures     |       Yes      |    Yes   |      Image      |       N/A      |
-| Valve VTF Textures            |       Yes      |    Yes   |      Image      |       N/A      |
-| Valve VTF3 (PS3) Textures     |       Yes      |    Yes   |      Image      |       N/A      |
+|          System          | Properties Tab | Metadata | Internal Images | External Scans |
+|:------------------------:|:--------------:|:--------:|:---------------:|:--------------:|
+| Leapster Didj .tex       |       Yes      |    Yes   |      Image      |       N/A      |
+| Khronos KTX              |       Yes      |    Yes   |      Image      |       N/A      |
+| Khronos KTX2             |       Yes      |    Yes   |      Image      |       N/A      |
+| Microsoft DirectDraw DDS |       Yes      |    Yes   |      Image      |       N/A      |
+| Microsoft Xbox XPR       |       Yes      |    Yes   |      Image      |       N/A      |
+| PowerVR 3.0.0            |       Yes      |    Yes   |      Image      |       N/A      |
+| Sega PVR/GVR/SVR         |       Yes      |    Yes   |      Image      |       N/A      |
+| TrueVision TGA           |       Yes      |    Yes   |      Image      |       N/A      |
+| Valve VTF                |       Yes      |    Yes   |      Image      |       N/A      |
+| Valve VTF3 (PS3)         |       Yes      |    Yes   |      Image      |       N/A      |
 
 #### Texture Codecs
+
 * Assorted linear RGB formats, including 15-bit, 16-bit, 24-bit and 32-bit per pixel.
   * Most of these formats have SSE2 and/or SSSE3-optimized decoders.
   * RGB9_E5 is supported, though it is currently converted to ARGB32 for

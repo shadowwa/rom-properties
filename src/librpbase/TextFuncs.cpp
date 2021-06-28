@@ -9,7 +9,6 @@
 #include "stdafx.h"
 #include "config.librpbase.h"
 #include "TextFuncs.hpp"
-#include "byteswap.h"
 
 // libi18n
 #include "libi18n/i18n.h"
@@ -169,6 +168,22 @@ int u16_strcasecmp(const char16_t *wcs1, const char16_t *wcs2)
 	}
 
 	return ((int)towupper(*wcs1) - (int)towupper(*wcs2));
+}
+
+/**
+ * char16_t memchr().
+ * @param wcs 16-bit string.
+ * @param c Character to search for.
+ * @param n Size of wcs.
+ * @return Pointer to c within wcs, or nullptr if not found.
+ */
+const char16_t *u16_memchr(const char16_t *wcs, char16_t c, size_t n)
+{
+	for (; n > 0; wcs++, n--) {
+		if (*wcs == c)
+			return wcs;
+	}
+	return nullptr;
 }
 #endif /* !RP_WIS16 */
 
@@ -356,15 +371,15 @@ string formatFileSize(off64_t size)
 		// Get the localized decimal point.
 #if defined(_WIN32)
 		// Use localeconv(). (Windows: Convert from UTF-16 to UTF-8.)
-# if defined(HAVE_STRUCT_LCONV_WCHAR_T)
+#  if defined(HAVE_STRUCT_LCONV_WCHAR_T)
 		// MSVCRT: `struct lconv` has wchar_t fields.
 		s_value << utf16_to_utf8(
 			reinterpret_cast<const char16_t*>(localeconv()->_W_decimal_point), -1);
-# else /* !HAVE_STRUCT_LCONV_WCHAR_T */
+#  else /* !HAVE_STRUCT_LCONV_WCHAR_T */
 		// MinGW v5,v6: `struct lconv` does not have wchar_t fields.
 		// NOTE: The `char` fields are ANSI.
 		s_value << ansi_to_utf8(localeconv()->decimal_point, -1);
-# endif /* HAVE_STRUCT_LCONV_WCHAR_T */
+#  endif /* HAVE_STRUCT_LCONV_WCHAR_T */
 #elif defined(HAVE_NL_LANGINFO)
 		// Use nl_langinfo().
 		// Reference: https://www.gnu.org/software/libc/manual/html_node/The-Elegant-and-Fast-Way.html

@@ -2,7 +2,7 @@
  * ROM Properties Page shell extension. (librptexture)                     *
  * DidjTex.hpp: Leapster Didj .tex reader.                                 *
  *                                                                         *
- * Copyright (c) 2019-2020 by David Korth.                                 *
+ * Copyright (c) 2019-2021 by David Korth.                                 *
  * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
@@ -13,6 +13,7 @@
 #include "didj_tex_structs.h"
 
 // librpbase, librpfile
+#include "libi18n/i18n.h"
 using LibRpBase::rp_sprintf;
 using LibRpBase::RomFields;
 using LibRpFile::IRpFile;
@@ -38,7 +39,7 @@ FILEFORMAT_IMPL(DidjTex)
 
 #ifdef _MSC_VER
 // DelayLoad test implementation.
-DELAYLOAD_TEST_FUNCTION_IMPL0(zlibVersion);
+DELAYLOAD_TEST_FUNCTION_IMPL0(get_crc_table);
 #endif /* _MSC_VER */
 
 class DidjTexPrivate final : public FileFormatPrivate
@@ -123,11 +124,15 @@ const rp_image *DidjTexPrivate::loadDidjTexImage(void)
 #if defined(_MSC_VER) && defined(ZLIB_IS_DLL)
 	// Delay load verification.
 	// TODO: Only if linked with /DELAYLOAD?
-	if (DelayLoad_test_zlibVersion() != 0) {
+	if (DelayLoad_test_get_crc_table() != 0) {
 		// Delay load failed.
 		// Can't decompress the thumbnail image.
 		return nullptr;
 	}
+#else /* !defined(_MSC_VER) || !defined(ZLIB_IS_DLL) */
+	// zlib isn't in a DLL, but we need to ensure that the
+	// CRC table is initialized anyway.
+	get_crc_table();
 #endif /* defined(_MSC_VER) && defined(ZLIB_IS_DLL) */
 
 	// Load the compressed data.
@@ -198,8 +203,8 @@ const rp_image *DidjTexPrivate::loadDidjTexImage(void)
 				return nullptr;
 			}
 
-			imgtmp = ImageDecoder::fromLinear16(ImageDecoder::PXF_RGB565,
-				width, height,
+			imgtmp = ImageDecoder::fromLinear16(
+				ImageDecoder::PixelFormat::RGB565, width, height,
 				reinterpret_cast<const uint16_t*>(uncompr_data.get()), img_siz);
 			break;
 		}
@@ -213,8 +218,8 @@ const rp_image *DidjTexPrivate::loadDidjTexImage(void)
 				return nullptr;
 			}
 
-			imgtmp = ImageDecoder::fromLinear16(ImageDecoder::PXF_RGBA4444,
-				width, height,
+			imgtmp = ImageDecoder::fromLinear16(
+				ImageDecoder::PixelFormat::RGBA4444, width, height,
 				reinterpret_cast<const uint16_t*>(uncompr_data.get()), img_siz);
 			break;
 		}
@@ -231,8 +236,8 @@ const rp_image *DidjTexPrivate::loadDidjTexImage(void)
 
 			const uint16_t *const pal_buf = reinterpret_cast<const uint16_t*>(uncompr_data.get());
 			const uint8_t *const img_buf = &uncompr_data.get()[pal_siz];
-			imgtmp = ImageDecoder::fromLinearCI8(ImageDecoder::PXF_RGB565,
-				width, height,
+			imgtmp = ImageDecoder::fromLinearCI8(
+				ImageDecoder::PixelFormat::RGB565, width, height,
 				img_buf, img_siz, pal_buf, pal_siz);
 			break;
 		}
@@ -249,8 +254,8 @@ const rp_image *DidjTexPrivate::loadDidjTexImage(void)
 
 			const uint16_t *const pal_buf = reinterpret_cast<const uint16_t*>(uncompr_data.get());
 			const uint8_t *const img_buf = &uncompr_data.get()[pal_siz];
-			imgtmp = ImageDecoder::fromLinearCI8(ImageDecoder::PXF_RGBA4444,
-				width, height,
+			imgtmp = ImageDecoder::fromLinearCI8(
+				ImageDecoder::PixelFormat::RGBA4444, width, height,
 				img_buf, img_siz, pal_buf, pal_siz);
 			break;
 		}
@@ -267,8 +272,8 @@ const rp_image *DidjTexPrivate::loadDidjTexImage(void)
 
 			const uint16_t *const pal_buf = reinterpret_cast<const uint16_t*>(uncompr_data.get());
 			const uint8_t *const img_buf = &uncompr_data.get()[pal_siz];
-			imgtmp = ImageDecoder::fromLinearCI4(ImageDecoder::PXF_RGB565, true,
-				width, height,
+			imgtmp = ImageDecoder::fromLinearCI4(
+				ImageDecoder::PixelFormat::RGB565, true, width, height,
 				img_buf, img_siz, pal_buf, pal_siz);
 			break;
 		}
@@ -285,8 +290,8 @@ const rp_image *DidjTexPrivate::loadDidjTexImage(void)
 
 			const uint16_t *const pal_buf = reinterpret_cast<const uint16_t*>(uncompr_data.get());
 			const uint8_t *const img_buf = &uncompr_data.get()[pal_siz];
-			imgtmp = ImageDecoder::fromLinearCI4(ImageDecoder::PXF_RGBA4444, true,
-				width, height,
+			imgtmp = ImageDecoder::fromLinearCI4(
+				ImageDecoder::PixelFormat::RGBA4444, true, width, height,
 				img_buf, img_siz, pal_buf, pal_siz);
 			break;
 		}
@@ -505,10 +510,6 @@ int DidjTex::mipmapCount(void) const
  */
 int DidjTex::getFields(RomFields *fields) const
 {
-	// TODO: Localization.
-#define C_(ctx, str) str
-#define NOP_C_(ctx, str) str
-
 	assert(fields != nullptr);
 	if (!fields)
 		return 0;

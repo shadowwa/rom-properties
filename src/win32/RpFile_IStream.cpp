@@ -2,7 +2,7 @@
  * ROM Properties Page shell extension. (Win32)                            *
  * RpFile_IStream.hpp: IRpFile using an IStream*.                          *
  *                                                                         *
- * Copyright (c) 2016-2020 by David Korth.                                 *
+ * Copyright (c) 2016-2021 by David Korth.                                 *
  * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
@@ -12,7 +12,7 @@
 #include "RpFile_IStream.hpp"
 
 // librpbase, librpcpu
-#include "librpcpu/byteswap.h"
+#include "librpcpu/byteswap_rp.h"
 using namespace LibRpBase;
 
 // C++ STL classes.
@@ -32,7 +32,7 @@ using std::unique_ptr;
 
 #ifdef _MSC_VER
 // DelayLoad test implementation.
-DELAYLOAD_TEST_FUNCTION_IMPL0(zlibVersion);
+DELAYLOAD_TEST_FUNCTION_IMPL0(get_crc_table);
 #endif /* _MSC_VER */
 
 /**
@@ -42,7 +42,7 @@ DELAYLOAD_TEST_FUNCTION_IMPL0(zlibVersion);
  */
 RpFile_IStream::RpFile_IStream(IStream *pStream, bool gzip)
 	: super()
-	, m_pStream(pStream)
+	, m_pStream(pStream, true)	// true == call AddRef()
 	, m_z_uncomp_sz(0)
 	, m_z_filepos(0)
 	, m_z_realpos(0)
@@ -52,8 +52,6 @@ RpFile_IStream::RpFile_IStream(IStream *pStream, bool gzip)
 	, m_zbufLen(0)
 	, m_zcurPos(0)
 {
-	pStream->AddRef();
-
 	// TODO: Proper writable check.
 	m_isWritable = true;
 
@@ -61,11 +59,15 @@ RpFile_IStream::RpFile_IStream(IStream *pStream, bool gzip)
 #if defined(_MSC_VER) && defined(ZLIB_IS_DLL)
 		// Delay load verification.
 		// TODO: Only if linked with /DELAYLOAD?
-		if (DelayLoad_test_zlibVersion() != 0) {
+		if (DelayLoad_test_get_crc_table() != 0) {
 			// Delay load failed.
 			// Don't do any gzip checking.
 			return;
 		}
+#else /* !defined(_MSC_VER) || !defined(ZLIB_IS_DLL) */
+		// zlib isn't in a DLL, but we need to ensure that the
+		// CRC table is initialized anyway.
+		get_crc_table();
 #endif /* defined(_MSC_VER) && defined(ZLIB_IS_DLL) */
 
 		// for IStream::Seek()
@@ -142,10 +144,6 @@ RpFile_IStream::~RpFile_IStream()
 		// Close zlib.
 		inflateEnd(m_pZstm);
 		free(m_pZstm);
-	}
-
-	if (m_pStream) {
-		m_pStream->Release();
 	}
 }
 
@@ -237,8 +235,7 @@ bool RpFile_IStream::isOpen(void) const
 void RpFile_IStream::close(void)
 {
 	if (m_pStream) {
-		m_pStream->Release();
-		m_pStream = nullptr;
+		m_pStream.Release();
 	}
 }
 
@@ -452,8 +449,7 @@ int RpFile_IStream::seek(off64_t pos)
 				m_pZbuf = nullptr;
 				m_z_uncomp_sz = 0;
 
-				m_pStream->Release();
-				m_pStream = nullptr;
+				m_pStream.Release();
 				return -1;
 			}
 
@@ -512,8 +508,7 @@ int RpFile_IStream::seek(off64_t pos)
 			m_pZbuf = nullptr;
 			m_z_uncomp_sz = 0;
 
-			m_pStream->Release();
-			m_pStream = nullptr;
+			m_pStream.Release();
 			return -1;
 		}
 	}

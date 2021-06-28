@@ -18,6 +18,7 @@ namespace LibRomData {
 
 class Xbox360_XDBF_Private;
 ROMDATA_DECL_BEGIN(Xbox360_XDBF)
+ROMDATA_DECL_METADATA()
 ROMDATA_DECL_IMGSUPPORT()
 ROMDATA_DECL_IMGPF()
 ROMDATA_DECL_IMGINT()
@@ -60,7 +61,7 @@ ROMDATA_DECL_IMGINT()
 		 * @param property Property
 		 * @return String, or empty string if not found.
 		 */
-		std::string getString(LibRpBase::Property::Property property) const;
+		std::string getString(LibRpBase::Property property) const;
 
 ROMDATA_DECL_END()
 

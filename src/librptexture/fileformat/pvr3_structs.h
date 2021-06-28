@@ -2,7 +2,7 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * pvr3_structs.h: PowerVR 3.0.0 texture format data structures.           *
  *                                                                         *
- * Copyright (c) 2019-2020 by David Korth.                                 *
+ * Copyright (c) 2019-2021 by David Korth.                                 *
  * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 

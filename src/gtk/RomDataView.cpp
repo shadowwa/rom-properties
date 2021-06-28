@@ -2,14 +2,16 @@
  * ROM Properties Page shell extension. (GTK+ common)                      *
  * RomDataView.cpp: RomData viewer widget.                                 *
  *                                                                         *
- * Copyright (c) 2017-2020 by David Korth.                                 *
+ * Copyright (c) 2017-2021 by David Korth.                                 *
  * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #include "stdafx.h"
 #include "RomDataView.hpp"
+
 #include "rp-gtk-enums.h"
 #include "RpGtk.hpp"
+#include "sort_funcs.h"
 
 // ENABLE_MESSAGESOUND is set by CMakeLists.txt.
 #ifdef ENABLE_MESSAGESOUND
@@ -19,6 +21,8 @@
 // Custom widgets
 #include "DragImage.hpp"
 #include "MessageWidget.hpp"
+#include "LanguageComboBox.hpp"
+#include "OptionsMenuButton.hpp"
 
 // librpbase, librpfile, librptexture
 #include "librpbase/TextOut.hpp"
@@ -41,28 +45,6 @@ using std::string;
 using std::unordered_map;
 using std::vector;
 
-// GTK+ 2.x compatibility macros.
-// Reference: https://github.com/kynesim/wireshark/blob/master/ui/gtk/old-gtk-compat.h
-#if !GTK_CHECK_VERSION(3,0,0)
-static inline GtkWidget *gtk_tree_view_column_get_button(GtkTreeViewColumn *tree_column)
-{
-	/* This is too late, see https://bugzilla.gnome.org/show_bug.cgi?id=641089
-	 * According to
-	 * http://ftp.acc.umu.se/pub/GNOME/sources/gtk+/2.13/gtk+-2.13.4.changes
-	 * access to the button element was sealed during 2.13. They also admit that
-	 * they missed a use case and thus failed to provide an accessor function:
-	 * http://mail.gnome.org/archives/commits-list/2010-December/msg00578.html
-	 * An accessor function was finally added in 3.0.
-	 */
-# if (GTK_CHECK_VERSION(2,14,0) && defined(GSEAL_ENABLE))
-	return tree_column->_g_sealed__button;
-# else
-	return tree_column->button;
-# endif
-}
-#endif /* !GTK_CHECK_VERSION(3,0,0) */
-
-
 // References:
 // - audio-tags plugin
 // - http://api.xfce.m8t.in/xfce-4.10/thunarx-1.4.0/ThunarxPropertyPage.html
@@ -70,17 +52,13 @@ static inline GtkWidget *gtk_tree_view_column_get_button(GtkTreeViewColumn *tree
 /* Property identifiers */
 typedef enum {
 	PROP_0,
+
 	PROP_URI,
 	PROP_DESC_FORMAT_TYPE,
 	PROP_SHOWING_DATA,
+
 	PROP_LAST
 } RomDataViewPropID;
-static GParamSpec *properties[PROP_LAST];
-
-// Use GtkButton or GtkMenuButton?
-#if GTK_CHECK_VERSION(3,6,0)
-#  define USE_GTK_MENU_BUTTON 1
-#endif
 
 // Uncomment to enable the automatic timeout for the ROM Operations MessageWidget.
 //#define AUTO_TIMEOUT_MESSAGEWIDGET 1
@@ -113,13 +91,11 @@ static void	rom_data_view_unmap_signal_handler  (RomDataView	*page,
 						     gpointer		 user_data);
 static void	tree_view_realize_signal_handler    (GtkTreeView	*treeView,
 						     RomDataView	*page);
-static void	cboLanguage_changed_signal_handler  (GtkComboBox	*widget,
+static void	cboLanguage_lc_changed_signal_handler(GtkComboBox	*widget,
+						     uint32_t		 lc,
 						     gpointer		 user_data);
-#ifndef USE_GTK_MENU_BUTTON
-static gboolean	btnOptions_clicked_signal_handler   (GtkButton		*button,
-						     GdkEvent	 	*event);
-#endif /* !USE_GTK_MENU_BUTTON */
-static void	menuOptions_triggered_signal_handler(GtkMenuItem	*menuItem,
+static void	btnOptions_triggered_signal_handler (OptionsMenuButton	*menuButton,
+						     gint		 id,
 						     gpointer		 user_data);
 
 #if GTK_CHECK_VERSION(3,0,0)
@@ -136,18 +112,12 @@ typedef GtkVBox super;
 // GTK+ property page class.
 struct _RomDataViewClass {
 	superclass __parent__;
+
+	GParamSpec *properties[PROP_LAST];
 };
 
 // Multi-language stuff.
-typedef enum _StringMultiColumns { SM_COL_ICON, SM_COL_TEXT, SM_COL_LC } StringMultiColumns;
 typedef std::pair<GtkWidget*, const RomFields::Field*> Data_StringMulti_t;
-
-enum StandardOptionID {
-	OPTION_EXPORT_TEXT = -1,
-	OPTION_EXPORT_JSON = -2,
-	OPTION_COPY_TEXT = -3,
-	OPTION_COPY_JSON = -4,
-};
 
 struct Data_ListDataMulti_t {
 	GtkListStore *listStore;
@@ -169,10 +139,10 @@ struct _RomDataView {
 
 	RomData		*romData;	// ROM data
 	gchar		*uri;		// URI (GVfs)
+	bool		hasCheckedAchievements;
 
-	// "Options" button.
+	// "Options" button. (OptionsMenuButton)
 	GtkWidget	*btnOptions;
-	GtkWidget	*menuOptions;
 	gchar		*prevExportDir;
 
 	// Header row.
@@ -212,7 +182,6 @@ struct _RomDataView {
 	uint32_t	def_lc;
 	set<uint32_t>	*set_lc;	// Set of supported language codes.
 	GtkWidget	*cboLanguage;
-	GtkListStore	*lstoreLanguage;
 
 	// RFT_STRING_MULTI value labels.
 	vector<Data_StringMulti_t> *vecStringMulti;
@@ -237,23 +206,23 @@ rom_data_view_class_init(RomDataViewClass *klass)
 
 	/** Properties **/
 
-	properties[PROP_URI] = g_param_spec_string(
+	klass->properties[PROP_URI] = g_param_spec_string(
 		"uri", "URI", "URI of the ROM image being displayed.",
 		nullptr,
 		(GParamFlags)(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
-	properties[PROP_DESC_FORMAT_TYPE] = g_param_spec_enum(
+	klass->properties[PROP_DESC_FORMAT_TYPE] = g_param_spec_enum(
 		"desc-format-type", "desc-format-type", "Description format type.",
 		RP_TYPE_DESC_FORMAT_TYPE, RP_DFT_XFCE,
 		(GParamFlags)(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
-	properties[PROP_SHOWING_DATA] = g_param_spec_boolean(
+	klass->properties[PROP_SHOWING_DATA] = g_param_spec_boolean(
 		"showing-data", "showing-data", "Is a valid RomData object being displayed?",
 		false,
 		(GParamFlags)(G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
 
 	// Install the properties.
-	g_object_class_install_properties(gobject_class, PROP_LAST, properties);
+	g_object_class_install_properties(gobject_class, PROP_LAST, klass->properties);
 }
 
 /**
@@ -430,14 +399,6 @@ rom_data_view_dispose(GObject *object)
 		page->changed_idle = 0;
 	}
 
-#ifndef USE_GTK_MENU_BUTTON
-	// Delete the "Options" button menu.
-	if (page->menuOptions) {
-		gtk_widget_destroy(page->menuOptions);
-		page->menuOptions = nullptr;
-	}
-#endif /* !USE_GTK_MENU_BUTTON */
-
 	// Delete the icon frames and tabs.
 	rom_data_view_delete_tabs(page);
 
@@ -582,6 +543,7 @@ rom_data_view_set_uri(RomDataView	*page,
 
 		// Unreference the existing RomData object.
 		UNREF_AND_NULL(page->romData);
+		page->hasCheckedAchievements = false;
 
 		// Delete the icon frames and tabs.
 		rom_data_view_delete_tabs(page);
@@ -603,7 +565,10 @@ rom_data_view_set_uri(RomDataView	*page,
 	}
 
 	// URI has been changed.
-	g_object_notify_by_pspec(G_OBJECT(page), properties[PROP_URI]);
+	// FIXME: If called from rom_data_view_set_property(), this might
+	// result in *two* notifications.
+	RomDataViewClass *const klass = ROM_DATA_VIEW_GET_CLASS(page);
+	g_object_notify_by_pspec(G_OBJECT(page), klass->properties[PROP_URI]);
 }
 
 RpDescFormatType
@@ -625,9 +590,12 @@ rom_data_view_set_desc_format_type(RomDataView *page, RpDescFormatType desc_form
 		return;
 	}
 
+	// FIXME: If called from rom_data_view_set_property(), this might
+	// result in *two* notifications.
 	page->desc_format_type = desc_format_type;
 	rom_data_view_desc_format_type_changed(page, desc_format_type);
-	g_object_notify_by_pspec(G_OBJECT(page), properties[PROP_DESC_FORMAT_TYPE]);
+	RomDataViewClass *const klass = ROM_DATA_VIEW_GET_CLASS(page);
+	g_object_notify_by_pspec(G_OBJECT(page), klass->properties[PROP_DESC_FORMAT_TYPE]);
 }
 
 static void
@@ -977,9 +945,14 @@ rom_data_view_init_listdata(RomDataView *page,
 		// Use the first row.
 		colCount = static_cast<int>(list_data->at(0).size());
 	}
+	assert(colCount > 0);
+	if (colCount <= 0) {
+		// No columns...
+		return nullptr;
+	}
 
 	GtkListStore *listStore;
-	int col_start = 0;
+	int listStore_col_start;
 	if (hasCheckboxes) {
 		// Prepend an extra column for checkboxes.
 		GType *types = new GType[colCount+1];
@@ -989,7 +962,7 @@ rom_data_view_init_listdata(RomDataView *page,
 		}
 		listStore = gtk_list_store_newv(colCount+1, types);
 		delete[] types;
-		col_start = 1;	// Skip the checkbox column for strings.
+		listStore_col_start = 1;	// Skip the checkbox column for strings.
 	} else if (hasIcons) {
 		// Prepend an extra column for icons.
 		GType *types = new GType[colCount+1];
@@ -999,7 +972,7 @@ rom_data_view_init_listdata(RomDataView *page,
 		}
 		listStore = gtk_list_store_newv(colCount+1, types);
 		delete[] types;
-		col_start = 1;	// Skip the icon column for strings.
+		listStore_col_start = 1;	// Skip the icon column for strings.
 	} else {
 		// All strings.
 		GType *types = new GType[colCount];
@@ -1008,6 +981,7 @@ rom_data_view_init_listdata(RomDataView *page,
 		}
 		listStore = gtk_list_store_newv(colCount, types);
 		delete[] types;
+		listStore_col_start = 0;
 	}
 
 	// Add the row data.
@@ -1037,7 +1011,6 @@ rom_data_view_init_listdata(RomDataView *page,
 		} else if (hasIcons) {
 			// Icon column.
 			const rp_image *const icon = field.data.list_data.mxd.icons->at(row);
-			assert(icon != nullptr);
 			if (icon) {
 				PIMGTYPE pixbuf = rp_image_to_PIMGTYPE(icon);
 				if (pixbuf) {
@@ -1063,7 +1036,7 @@ rom_data_view_init_listdata(RomDataView *page,
 		}
 
 		if (!isMulti) {
-			int col = col_start;
+			int col = listStore_col_start;
 			const auto data_row_cend = data_row.cend();
 			for (auto iter = data_row.cbegin(); iter != data_row_cend; ++iter, col++) {
 				gtk_list_store_set(listStore, &treeIter, col, iter->c_str(), -1);
@@ -1078,8 +1051,11 @@ rom_data_view_init_listdata(RomDataView *page,
 	gtk_scrolled_window_set_shadow_type(GTK_SCROLLED_WINDOW(widget), GTK_SHADOW_IN);
 	gtk_widget_show(widget);
 
+	// Sort proxy model for the GtkListStore.
+	GtkTreeModel *sortProxy = gtk_tree_model_sort_new_with_model(GTK_TREE_MODEL(listStore));
+
 	// Create the GtkTreeView.
-	GtkWidget *treeView = gtk_tree_view_new_with_model(GTK_TREE_MODEL(listStore));
+	GtkWidget *treeView = gtk_tree_view_new_with_model(GTK_TREE_MODEL(sortProxy));
 	gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(treeView),
 		(listDataDesc.names != nullptr));
 	gtk_widget_show(treeView);
@@ -1096,20 +1072,16 @@ rom_data_view_init_listdata(RomDataView *page,
 	gtk_tree_view_set_rules_hint(GTK_TREE_VIEW(treeView), true);
 #endif
 
+	// Extra GtkCellRenderer for icon and/or checkbox.
+	// This is prepended to column 0.
+	GtkCellRenderer *col0_renderer = nullptr;
+	const char *col0_attr_name = nullptr;
 	if (hasCheckboxes) {
-		// Prepend an extra column for checkboxes.
-		GtkCellRenderer *const renderer = gtk_cell_renderer_toggle_new();
-		GtkTreeViewColumn *const column = gtk_tree_view_column_new_with_attributes(
-			"", renderer, "active", 0, nullptr);
-		gtk_tree_view_column_set_resizable(column, true);
-		gtk_tree_view_append_column(GTK_TREE_VIEW(treeView), column);
+		col0_renderer = gtk_cell_renderer_toggle_new();
+		col0_attr_name = "active";
 	} else if (hasIcons) {
-		// Prepend an extra column for icons.
-		GtkCellRenderer *const renderer = gtk_cell_renderer_pixbuf_new();
-		GtkTreeViewColumn *const column = gtk_tree_view_column_new_with_attributes(
-			"", renderer, GTK_CELL_RENDERER_PIXBUF_PROPERTY, 0, nullptr);
-		gtk_tree_view_column_set_resizable(column, true);
-		gtk_tree_view_append_column(GTK_TREE_VIEW(treeView), column);
+		col0_renderer = gtk_cell_renderer_pixbuf_new();
+		col0_attr_name = GTK_CELL_RENDERER_PIXBUF_PROPERTY;
 	}
 
 	// Format tables.
@@ -1125,29 +1097,112 @@ rom_data_view_init_listdata(RomDataView *page,
 	};
 
 	// Set up the column names.
-	uint32_t align_headers = listDataDesc.alignment.headers;
-	uint32_t align_data = listDataDesc.alignment.data;
-	for (int i = 0; i < colCount; i++, align_headers >>= 2, align_data >>= 2) {
+	uint32_t align_headers = listDataDesc.col_attrs.align_headers;
+	uint32_t align_data = listDataDesc.col_attrs.align_data;
+	uint32_t sizing = listDataDesc.col_attrs.sizing;
+	uint32_t sorting = listDataDesc.col_attrs.sorting;
+	for (int i = 0; i < colCount; i++, align_headers >>= RomFields::TXA_BITS,
+	     align_data >>= RomFields::TXA_BITS,
+	     sizing >>= RomFields::COLSZ_BITS, sorting >>= RomFields::COLSORT_BITS)
+	{
+		const int listStore_col_idx = i + listStore_col_start;
+
 		// NOTE: Not skipping empty column names.
 		// TODO: Hide them.
 		GtkCellRenderer *const renderer = gtk_cell_renderer_text_new();
-		GtkTreeViewColumn *const column = gtk_tree_view_column_new_with_attributes(
-			(listDataDesc.names ? listDataDesc.names->at(i).c_str() : ""),
-			renderer, "text", i+col_start, nullptr);
-		gtk_tree_view_column_set_resizable(column, true);
+		GtkTreeViewColumn *const column = gtk_tree_view_column_new();
+		gtk_tree_view_column_set_title(column,
+			(listDataDesc.names ? listDataDesc.names->at(i).c_str() : ""));
+		if (col0_renderer != nullptr) {
+			// Prepend the icon/checkbox renderer.
+			gtk_tree_view_column_pack_start(column, col0_renderer, FALSE);
+			gtk_tree_view_column_add_attribute(column, col0_renderer, col0_attr_name, 0);
+			col0_renderer = nullptr;
+		}
+		gtk_tree_view_column_pack_start(column, renderer, TRUE);
+		gtk_tree_view_column_add_attribute(column, renderer, "text", listStore_col_idx);
 		gtk_tree_view_append_column(GTK_TREE_VIEW(treeView), column);
 
 		// Header alignment
-		const float header_xalign = align_tbl_xalign[align_headers & 3];
+		const float header_xalign = align_tbl_xalign[align_headers & RomFields::TXA_MASK];
 		// Data alignment
-		const float data_xalign = align_tbl_xalign[align_data & 3];
+		const float data_xalign = align_tbl_xalign[align_data & RomFields::TXA_MASK];
 		const PangoAlignment data_alignment =
-			static_cast<PangoAlignment>(align_tbl_pango[align_data & 3]);
+			static_cast<PangoAlignment>(align_tbl_pango[align_data & RomFields::TXA_MASK]);
 
 		g_object_set(column, "alignment", header_xalign, nullptr);
 		g_object_set(renderer,
 			"xalign", data_xalign,
 			"alignment", data_alignment, nullptr);
+
+		// Column sizing
+		// NOTE: We don't have direct equivalents to QHeaderView::ResizeMode.
+		switch (sizing & RomFields::COLSZ_MASK) {
+			case RomFields::ColSizing::COLSZ_INTERACTIVE:
+				gtk_tree_view_column_set_resizable(column, true);
+				gtk_tree_view_column_set_sizing(column, GTK_TREE_VIEW_COLUMN_GROW_ONLY);
+				break;
+			/*case RomFields::ColSizing::COLSZ_FIXED:
+				gtk_tree_view_column_set_resizable(column, true);
+				gtk_tree_view_column_set_sizing(column, FIXED);
+				break;*/
+			case RomFields::ColSizing::COLSZ_STRETCH:
+				// TODO: Wordwrapping and/or text elision?
+				// NOTE: Allowing the user to resize the column because
+				// unlike Qt, we can't shrink it by shrinking the window.
+				gtk_tree_view_column_set_resizable(column, true);
+				gtk_tree_view_column_set_expand(column, true);
+				gtk_tree_view_column_set_sizing(column, GTK_TREE_VIEW_COLUMN_GROW_ONLY);
+				break;
+			case RomFields::ColSizing::COLSZ_RESIZETOCONTENTS:
+				gtk_tree_view_column_set_resizable(column, false);
+				gtk_tree_view_column_set_sizing(column, GTK_TREE_VIEW_COLUMN_AUTOSIZE);
+				break;
+		}
+
+		// Enable sorting.
+		gtk_tree_view_column_set_sort_column_id(column, listStore_col_idx);
+		gtk_tree_view_column_set_clickable(column, TRUE);
+
+		// Check what we should use for sorting.
+		// NOTE: We're setting the sorting functions on the proxy model.
+		// That way, it won't affect the underlying data, which ensures
+		// that RFT_LISTDATA_MULTI is still handled correctly.
+		switch (sorting & RomFields::COLSORT_MASK) {
+			default:
+				// Unsupported. We'll use standard sorting.
+				assert(!"Unsupported sorting method.");
+				// fall-through
+			case RomFields::COLSORT_STANDARD:
+				// Standard sorting.
+				break;
+			case RomFields::COLSORT_NOCASE:
+				// Case-insensitive sorting.
+				gtk_tree_sortable_set_sort_func(GTK_TREE_SORTABLE(sortProxy),
+					listStore_col_idx, sort_RFT_LISTDATA_nocase,
+					GINT_TO_POINTER(listStore_col_idx), nullptr);
+				break;
+			case RomFields::COLSORT_NUMERIC:
+				// Numeric sorting. (case-insensitive)
+				gtk_tree_sortable_set_sort_func(GTK_TREE_SORTABLE(sortProxy),
+					listStore_col_idx, sort_RFT_LISTDATA_numeric,
+					GINT_TO_POINTER(listStore_col_idx), nullptr);
+				break;
+		}
+	}
+
+	assert(col0_renderer == nullptr);
+	if (col0_renderer) {
+		// This should've been assigned to a GtkTreeViewColumn...
+		g_object_unref(col0_renderer);
+	}
+
+	// Set the default sorting column.
+	// NOTE: sort_dir maps directly to GtkSortType.
+	if (listDataDesc.col_attrs.sort_col >= 0) {
+		gtk_tree_sortable_set_sort_column_id(GTK_TREE_SORTABLE(sortProxy),
+			listDataDesc.col_attrs.sort_col + listStore_col_start,
+			static_cast<GtkSortType>(listDataDesc.col_attrs.sort_dir));
 	}
 
 	// Set a minimum height for the scroll area.
@@ -1308,69 +1363,6 @@ rom_data_view_init_string_multi(RomDataView *page,
 }
 
 /**
- * Update the cboLanguage images.
- * @param page		[in] RomDataView object.
- */
-static void
-rom_data_view_update_cboLanguage_images(RomDataView *page)
-{
-	// TODO:
-	// - High-DPI scaling on GTK+ earlier than 3.10
-	// - Fractional scaling
-	// - Runtime adjustment via "configure" event
-	// Reference: https://developer.gnome.org/gdk3/stable/gdk3-Windows.html#gdk-window-get-scale-factor
-	unsigned int iconSize = 16;
-#if GTK_CHECK_VERSION(3,10,0)
-# if 0
-	// FIXME: gtk_widget_get_window() doesn't work unless the window is realized.
-	// We might need to initialize the dropdown in the "realize" signal handler.
-	GdkWindow *const gdk_window = gtk_widget_get_window(GTK_WIDGET(page));
-	assert(gdk_window != nullptr);
-	if (gdk_window) {
-		const gint scale_factor = gdk_window_get_scale_factor(gdk_window);
-		if (scale_factor >= 2) {
-			// 2x scaling or higher.
-			// TODO: Larger icon sizes?
-			iconSize = 32;
-		}
-	}
-# endif /* 0 */
-#endif /* GTK_CHECK_VERSION(3,10,0) */
-	char flags_filename[64];
-	snprintf(flags_filename, sizeof(flags_filename),
-		"/com/gerbilsoft/rom-properties/flags/flags-%ux%u.png",
-		iconSize, iconSize);
-	PIMGTYPE flags_spriteSheet = PIMGTYPE_load_png_from_gresource(flags_filename);
-	assert(flags_spriteSheet != nullptr);
-	if (!flags_spriteSheet) {
-		// Unable to load the flags sprite sheet.
-		return;
-	}
-
-	GtkTreeIter treeIter;
-	gboolean ok = gtk_tree_model_get_iter_first(GTK_TREE_MODEL(page->lstoreLanguage), &treeIter);
-	while (ok) {
-		uint32_t lc = 0;
-		int col, row;
-
-		gtk_tree_model_get(GTK_TREE_MODEL(page->lstoreLanguage), &treeIter, SM_COL_LC, &lc, -1);
-		if (!SystemRegion::getFlagPosition(lc, &col, &row)) {
-			// Found a matching icon.
-			PIMGTYPE icon = PIMGTYPE_get_subsurface(flags_spriteSheet,
-				col*iconSize, row*iconSize, iconSize, iconSize);
-			gtk_list_store_set(page->lstoreLanguage, &treeIter, SM_COL_ICON, icon, -1);
-			PIMGTYPE_destroy(icon);
-		}
-
-		ok = gtk_tree_model_iter_next(GTK_TREE_MODEL(page->lstoreLanguage), &treeIter);
-	};
-
-	// We're done using the flags sprite sheets,
-	// so unreference them to prevent memory leaks.
-	PIMGTYPE_destroy(flags_spriteSheet);
-}
-
-/**
  * Update all multi-language fields.
  * @param page		[in] RomDataView object.
  * @param user_lc	[in] User-specified language code.
@@ -1444,12 +1436,12 @@ rom_data_view_update_multi(RomDataView *page, uint32_t user_lc)
 
 			// If we have checkboxes or icons, start at column 1.
 			// Otherwise, start at column 0.
-			int col_start;
+			int listStore_col_start;
 			if (listDataDesc.flags & (RomFields::RFT_LISTDATA_CHECKBOXES | RomFields::RFT_LISTDATA_ICONS)) {
 				// Checkboxes and/or icons are present.
-				col_start = 1;
+				listStore_col_start = 1;
 			} else {
-				col_start = 0;
+				listStore_col_start = 0;
 			}
 
 			// Update the list.
@@ -1459,7 +1451,7 @@ rom_data_view_update_multi(RomDataView *page, uint32_t user_lc)
 			const auto pListData_cend = pListData->cend();
 			while (ok && iter_listData != pListData_cend) {
 				// TODO: Verify GtkListStore column count?
-				int col = col_start;
+				int col = listStore_col_start;
 				const auto iter_listData_cend = iter_listData->cend();
 				for (auto iter_row = iter_listData->cbegin();
 				     iter_row != iter_listData_cend; ++iter_row, col++)
@@ -1481,54 +1473,6 @@ rom_data_view_update_multi(RomDataView *page, uint32_t user_lc)
 	}
 
 	if (!page->cboLanguage && page->set_lc->size() > 1) {
-		// Create the language combobox.
-		// Columns:
-		// - 0: Icon
-		// - 1: Display text
-		// - 2: Language code
-		page->lstoreLanguage = gtk_list_store_new(3, PIMGTYPE_GOBJECT_TYPE, G_TYPE_STRING, G_TYPE_UINT);
-
-		int sel_idx = -1;
-		const auto set_lc_cend = page->set_lc->cend();
-		for (auto iter = page->set_lc->cbegin(); iter != set_lc_cend; ++iter) {
-			const uint32_t lc = *iter;
-			const char *const name = SystemRegion::getLocalizedLanguageName(lc);
-
-			GtkTreeIter treeIter;
-			gtk_list_store_append(page->lstoreLanguage, &treeIter);
-			gtk_list_store_set(page->lstoreLanguage, &treeIter, SM_COL_ICON, nullptr, SM_COL_LC, lc, -1);
-			if (name) {
-				gtk_list_store_set(page->lstoreLanguage, &treeIter, SM_COL_TEXT, name, -1);
-			} else {
-				string s_lc;
-				s_lc.reserve(4);
-				for (uint32_t tmp_lc = lc; tmp_lc != 0; tmp_lc <<= 8) {
-					char chr = (char)(tmp_lc >> 24);
-					if (chr != 0) {
-						s_lc += chr;
-					}
-				}
-				gtk_list_store_set(page->lstoreLanguage, &treeIter, SM_COL_TEXT, s_lc.c_str(), -1);
-			}
-			int cur_idx = gtk_tree_model_iter_n_children(GTK_TREE_MODEL(page->lstoreLanguage), nullptr)-1;
-
-			// Save the default index:
-			// - ROM-default language code.
-			// - English if it's not available.
-			if (lc == page->def_lc) {
-				// Select this item.
-				sel_idx = cur_idx;
-			} else if (lc == 'en') {
-				// English. Select this item if def_lc hasn't been found yet.
-				if (sel_idx < 0) {
-					sel_idx = cur_idx;
-				}
-			}
-		}
-
-		// Initialize the images.
-		rom_data_view_update_cboLanguage_images(page);
-
 		// Create a VBox for the combobox to reduce its vertical height.
 #if GTK_CHECK_VERSION(3,0,0)
 		GtkWidget *const vboxCboLanguage = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -1545,27 +1489,43 @@ rom_data_view_update_multi(RomDataView *page, uint32_t user_lc)
 		gtk_widget_show(vboxCboLanguage);
 #endif /* GTK_CHECK_VERSION(3,0,0) */
 
-		// Create the combobox and set the list store.
-		page->cboLanguage = gtk_combo_box_new_with_model(GTK_TREE_MODEL(page->lstoreLanguage));
-		g_object_unref(page->lstoreLanguage);	// remove our reference
+		// Create the language combobox.
+		page->cboLanguage = language_combo_box_new();
 		gtk_box_pack_end(GTK_BOX(vboxCboLanguage), page->cboLanguage, false, false, 0);
-		gtk_combo_box_set_active(GTK_COMBO_BOX(page->cboLanguage), sel_idx);
 		gtk_widget_show(page->cboLanguage);
 
-		// cboLanguage: Icon renderer
-		GtkCellRenderer *renderer = gtk_cell_renderer_pixbuf_new();
-		gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(page->cboLanguage), renderer, false);
-		gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(page->cboLanguage),
-			renderer, GTK_CELL_RENDERER_PIXBUF_PROPERTY, SM_COL_ICON, NULL);
+		// Set the languages.
+		// NOTE: LanguageComboBox uses a 0-terminated array, so we'll
+		// need to convert the std::set<> to an std::vector<>.
+		vector<uint32_t> vec_lc;
+		vec_lc.reserve(page->set_lc->size() + 1);
+		std::for_each(page->set_lc->cbegin(), page->set_lc->cend(),
+			[&vec_lc](uint32_t lc) {
+				vec_lc.emplace_back(lc);
+			}
+		);
+		vec_lc.emplace_back(0);
+		language_combo_box_set_lcs(LANGUAGE_COMBO_BOX(page->cboLanguage), vec_lc.data());
 
-		// cboLanguage: Text renderer
-		renderer = gtk_cell_renderer_text_new();
-		gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(page->cboLanguage), renderer, true);
-		gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(page->cboLanguage),
-			renderer, "text", SM_COL_TEXT, NULL);
+		// Select the default language.
+		uint32_t lc_to_set = 0;
+		const auto set_lc_end = page->set_lc->end();
+		if (page->set_lc->find(page->def_lc) != set_lc_end) {
+			// def_lc was found.
+			lc_to_set = page->def_lc;
+		} else if (page->set_lc->find('en') != set_lc_end) {
+			// 'en' was found.
+			lc_to_set = 'en';
+		} else {
+			// Unknown. Select the first language.
+			if (!page->set_lc->empty()) {
+				lc_to_set = *(page->set_lc->cbegin());
+			}
+		}
+		language_combo_box_set_selected_lc(LANGUAGE_COMBO_BOX(page->cboLanguage), lc_to_set);
 
-		// Connect the "changed" signal.
-		g_signal_connect(page->cboLanguage, "changed", G_CALLBACK(cboLanguage_changed_signal_handler), page);
+		// Connect the "lc-changed" signal.
+		g_signal_connect(page->cboLanguage, "lc-changed", G_CALLBACK(cboLanguage_lc_changed_signal_handler), page);
 	}
 }
 
@@ -1697,18 +1657,6 @@ rom_data_view_update_field(RomDataView *page, int fieldIdx)
 	return ret;
 }
 
-static string
-convert_accel_to_gtk(const char *str)
-{
-	// GTK+ uses '_' for accelerators, not '&'.
-	string s_ret = str;
-	size_t accel_pos = s_ret.find('&');
-	if (accel_pos != string::npos) {
-		s_ret[accel_pos] = '_';
-	}
-	return s_ret;
-}
-
 static void
 rom_data_view_create_options_button(RomDataView *page)
 {
@@ -1723,12 +1671,25 @@ rom_data_view_create_options_button(RomDataView *page)
 		parent = gtk_widget_get_parent(parent);
 	}
 
-	// On GNOME, the first parent is GtkNotebook.
-	assert(GTK_IS_NOTEBOOK(parent));
-	if (!GTK_IS_NOTEBOOK(parent))
+	// The parent widget can be one of two types:
+	// - nautilus-3.x: GtkNotebook
+	// - caja-3.x: GtkNotebook
+	// - nemo-3.x: GtkStack
+#ifndef GTK_IS_STACK
+#  define GTK_IS_STACK(x) 1
+#endif
+	assert(GTK_IS_NOTEBOOK(parent) || GTK_IS_STACK(parent));
+	if (!GTK_IS_NOTEBOOK(parent) && !GTK_IS_STACK(parent))
 		return;
 
-	// Next: GtkBox (or GtkVBox for GTK+ 2.x).
+	// Nemo only: We might have a GtkFrame between the GtkStack and GtkBox.
+	GtkWidget *fparent = gtk_widget_get_parent(parent);
+	if (GTK_IS_FRAME(fparent))
+		parent = fparent;
+
+	// Next: Container widget.
+	// - GTK+ 2.x: GtkVBox
+	// - GTK+ 3.x: GtkBox
 	parent = gtk_widget_get_parent(parent);
 #if GTK_CHECK_VERSION(3,0,0)
 	assert(GTK_IS_BOX(parent));
@@ -1750,34 +1711,9 @@ rom_data_view_create_options_button(RomDataView *page)
 	if (!GTK_IS_DIALOG(parent))
 		return;
 
-	string s_title = convert_accel_to_gtk(C_("RomDataView", "Op&tions"));
-
-	// Add an "Options" button.
-	GtkWidget *const lblOptions = gtk_label_new(nullptr);
-	gtk_label_set_markup_with_mnemonic(GTK_LABEL(lblOptions), s_title.c_str());
-	gtk_widget_show(lblOptions);
-	GtkWidget *const imgOptions = gtk_image_new_from_icon_name("pan-up-symbolic", GTK_ICON_SIZE_BUTTON);
-	gtk_widget_show(imgOptions);
-#if GTK_CHECK_VERSION(3,0,0)
-	GtkWidget *const hboxOptions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
-#else /* !GTK_CHECK_VERSION(3,0,0) */
-	GtkWidget *const hboxOptions = gtk_hbox_new(false, 4);
-#endif /* GTK_CHECK_VERSION(3,0,0) */
-	gtk_widget_show(hboxOptions);
-	gtk_box_pack_start(GTK_BOX(hboxOptions), lblOptions, false, false, 0);
-	gtk_box_pack_start(GTK_BOX(hboxOptions), imgOptions, false, false, 0);
-#ifdef USE_GTK_MENU_BUTTON
-	// GTK+ 3.6 has GtkMenuButton.
-	// NOTE: GTK+ 4.x's GtkMenuButton supports both label and image.
-	// GTK+ 3.x's only supports image by default, so we'll have to
-	// build a GtkBox with both label and image.
-	page->btnOptions = gtk_menu_button_new();
-	gtk_menu_button_set_direction(GTK_MENU_BUTTON(page->btnOptions), GTK_ARROW_UP);
-#else /* !USE_GTK_MENU_BUTTON */
-	// Use plain old GtkButton.
-	page->btnOptions = gtk_button_new();
-#endif /* USE_GTK_MENU_BUTTON */
-	gtk_container_add(GTK_CONTAINER(page->btnOptions), hboxOptions);
+	// Create the OptionsMenuButton.
+	page->btnOptions = options_menu_button_new();
+	options_menu_button_set_direction(OPTIONS_MENU_BUTTON(page->btnOptions), GTK_ARROW_UP);
 
 	gtk_dialog_add_action_widget(GTK_DIALOG(parent), page->btnOptions, GTK_RESPONSE_NONE);
 	gtk_widget_hide(page->btnOptions);
@@ -1791,15 +1727,6 @@ rom_data_view_create_options_button(RomDataView *page)
 		signal_id, 0, nullptr, 0, 0);
 	g_signal_handler_disconnect(page->btnOptions, handler_id);
 
-#ifndef USE_GTK_MENU_BUTTON
-	// Connect the "event" signal for the GtkButton.
-	// NOTE: We need to pass the event details. Otherwise, we'll
-	// end up with the menu getting "stuck" to the mouse.
-	// Reference: https://developer.gnome.org/gtk-tutorial/stable/x1577.html
-	g_object_set_data(G_OBJECT(page->btnOptions), "RomDataView", page);
-	g_signal_connect(page->btnOptions, "event", G_CALLBACK(btnOptions_clicked_signal_handler), page);
-#endif /* !USE_GTK_MENU_BUTTON */
-
 #if GTK_CHECK_VERSION(3,12,0)
 	GtkWidget *const headerBar = gtk_dialog_get_header_bar(GTK_DIALOG(parent));
 	if (headerBar) {
@@ -1807,8 +1734,7 @@ rom_data_view_create_options_button(RomDataView *page)
 		// No reordering is necessary.
 
 		// Change the arrow to point down instead of up.
-		gtk_image_set_from_icon_name(GTK_IMAGE(imgOptions), "pan-down-symbolic", GTK_ICON_SIZE_BUTTON);
-		gtk_menu_button_set_direction(GTK_MENU_BUTTON(page->btnOptions), GTK_ARROW_DOWN);
+		options_menu_button_set_direction(OPTIONS_MENU_BUTTON(page->btnOptions), GTK_ARROW_DOWN);
 	} else
 #endif /* GTK_CHECK_VERSION(3,12,0) */
 	{
@@ -1824,56 +1750,11 @@ rom_data_view_create_options_button(RomDataView *page)
 		}
 	}
 
-	// Create the menu.
-	// TODO: Switch to GMenu? (glib-2.32)
-	page->menuOptions = gtk_menu_new();
-#ifdef USE_GTK_MENU_BUTTON
-	// NOTE: GtkMenuButton takes ownership of the menu.
-	gtk_menu_button_set_popup(GTK_MENU_BUTTON(page->btnOptions), page->menuOptions);
-#endif /* USE_GTK_MENU_BUTTON */
+	// Connect the OptionsMenuButton's triggered(int) signal.
+	g_signal_connect(page->btnOptions, "triggered", G_CALLBACK(btnOptions_triggered_signal_handler), page);
 
-	/** Standard actions. **/
-	static const struct {
-		const char *desc;
-		int id;
-	} stdacts[] = {
-		{NOP_C_("RomDataView|Options", "Export to Text..."),	OPTION_EXPORT_TEXT},
-		{NOP_C_("RomDataView|Options", "Export to JSON..."),	OPTION_EXPORT_JSON},
-		{NOP_C_("RomDataView|Options", "Copy as Text"),		OPTION_COPY_TEXT},
-		{NOP_C_("RomDataView|Options", "Copy as JSON"),		OPTION_COPY_JSON},
-		{nullptr, 0}
-	};
-
-	for (const auto *p = stdacts; p->desc != nullptr; p++) {
-		GtkWidget *const menuItem = gtk_menu_item_new_with_label(
-			dpgettext_expr(RP_I18N_DOMAIN, "RomDataView|Options", p->desc));
-		g_object_set_data(G_OBJECT(menuItem), "menuOptions_id", GINT_TO_POINTER(p->id));
-		g_signal_connect(menuItem, "activate", G_CALLBACK(menuOptions_triggered_signal_handler), page);
-		gtk_widget_show(menuItem);
-		gtk_menu_shell_append(GTK_MENU_SHELL(page->menuOptions), menuItem);
-	}
-
-	/** ROM operations. **/
-	const vector<RomData::RomOp> ops = page->romData->romOps();
-	if (!ops.empty()) {
-		// FIXME: Not showing up properly with the KDE Breeze theme,
-		// though other separators *do* show up...
-		GtkWidget *menuItem = gtk_separator_menu_item_new();
-		gtk_widget_show(menuItem);
-		gtk_menu_shell_append(GTK_MENU_SHELL(page->menuOptions), menuItem);
-
-		int i = 0;
-		const auto ops_end = ops.cend();
-		for (auto iter = ops.cbegin(); iter != ops_end; ++iter, i++) {
-			const string desc = convert_accel_to_gtk(iter->desc);
-			menuItem = gtk_menu_item_new_with_mnemonic(desc.c_str());
-			gtk_widget_set_sensitive(menuItem, !!(iter->flags & RomData::RomOp::ROF_ENABLED));
-			g_object_set_data(G_OBJECT(menuItem), "menuOptions_id", GINT_TO_POINTER(i));
-			g_signal_connect(menuItem, "activate", G_CALLBACK(menuOptions_triggered_signal_handler), page);
-			gtk_widget_show(menuItem);
-			gtk_menu_shell_append(GTK_MENU_SHELL(page->menuOptions), menuItem);
-		}
-	}
+	// Initialize the menu options.
+	options_menu_button_reinit_menu(OPTIONS_MENU_BUTTON(page->btnOptions), page->romData);
 }
 
 static void
@@ -2207,11 +2088,16 @@ rom_data_view_load_rom_data(gpointer data)
 		// file is ref()'d by RomData.
 		RomData *const romData = RomDataFactory::create(file);
 		if (romData != page->romData) {
+			// FIXME: If called from rom_data_view_set_property(), this might
+			// result in *two* notifications.
 			page->romData = romData;
-			g_object_notify_by_pspec(G_OBJECT(page), properties[PROP_SHOWING_DATA]);
+			page->hasCheckedAchievements = false;
+			RomDataViewClass *const klass = ROM_DATA_VIEW_GET_CLASS(page);
+			g_object_notify_by_pspec(G_OBJECT(page), klass->properties[PROP_SHOWING_DATA]);
 		}
 
 		// Update the display widgets.
+		// TODO: If already mapped, check achievements again.
 		rom_data_view_update_display(page);
 
 		// Make sure the underlying file handle is closed,
@@ -2268,13 +2154,10 @@ rom_data_view_delete_tabs(RomDataView *page)
 		page->tabWidget = nullptr;
 	}
 
-	// Delete the language dropdown and related.
-	// NOTE: We released our reference to lstoreLanguage,
-	// so destroying cboLanguage will destroy lstoreLanguage.
+	// Delete the language combobox.
 	if (page->cboLanguage) {
 		gtk_widget_destroy(page->cboLanguage);
 		page->cboLanguage = nullptr;
-		page->lstoreLanguage = nullptr;
 	}
 
 	// Clear the various widget references.
@@ -2322,6 +2205,12 @@ rom_data_view_map_signal_handler(RomDataView	*page,
 	drag_image_start_anim_timer(DRAG_IMAGE(page->imgIcon));
 	if (page->btnOptions) {
 		gtk_widget_show(page->btnOptions);
+	}
+
+	// Check for "viewed" achievements.
+	if (!page->hasCheckedAchievements) {
+		page->romData->checkViewedAchievements();
+		page->hasCheckedAchievements = true;
 	}
 }
 
@@ -2425,143 +2314,33 @@ tree_view_realize_signal_handler(GtkTreeView	*treeView,
 }
 
 /**
- * Get the selected language code.
- * @param page RomDataView
- * @return Selected language code, or 0 for none (default).
- */
-static uint32_t
-rom_data_view_get_sel_lc(RomDataView *page)
-{
-	if (!page->cboLanguage) {
-		// No language dropdown...
-		return 0;
-	}
-
-	const gint index = gtk_combo_box_get_active(GTK_COMBO_BOX(page->cboLanguage));
-	if (index < 0) {
-		// Invalid index...
-		return 0;
-	}
-
-	// Get the language code from the GtkListStore.
-	GtkTreeIter iter;
-	GtkTreePath *const path = gtk_tree_path_new_from_indices(index, -1);
-	gboolean success = gtk_tree_model_get_iter(
-		GTK_TREE_MODEL(page->lstoreLanguage), &iter, path);
-	gtk_tree_path_free(path);
-	assert(success);
-	if (!success) {
-		// Shouldn't happen...
-		return 0;
-	}
-
-	uint32_t lc = 0;
-	gtk_tree_model_get(GTK_TREE_MODEL(page->lstoreLanguage), &iter, SM_COL_LC, &lc, -1);
-	return lc;
-}
-
-/**
  * The RFT_MULTI_STRING language was changed.
  * @param widget	GtkComboBox
+ * @param lc		Language code
  * @param user_data	RomDataView
  */
 static void
-cboLanguage_changed_signal_handler(GtkComboBox *widget,
-				   gpointer     user_data)
+cboLanguage_lc_changed_signal_handler(GtkComboBox *widget,
+				      uint32_t     lc,
+				      gpointer     user_data)
 {
 	RP_UNUSED(widget);
-	RomDataView *const page = ROM_DATA_VIEW(user_data);
-	const uint32_t lc = rom_data_view_get_sel_lc(page);
-	rom_data_view_update_multi(page, lc);
+	rom_data_view_update_multi(ROM_DATA_VIEW(user_data), lc);
 }
-
-#ifndef USE_GTK_MENU_BUTTON
-/**
- * Menu positioning function.
- * @param menu		[in] GtkMenu*
- * @param x		[out] X position
- * @param y		[out] Y position
- * @param push_in
- * @param user_data	[in] GtkButton* the menu is attached to.
- */
-static void
-btnOptions_menu_pos_func(GtkMenu *menu, gint *x, gint *y, gboolean *push_in, gpointer user_data)
-{
-	GtkWidget *const button = (GtkWidget*)GTK_BUTTON(user_data);
-#if GTK_CHECK_VERSION(2,14,0)
-	GdkWindow *const window = gtk_widget_get_window(button);
-#else /* !GTK_CHECK_VERSION(2,14,0) */
-	GdkWindow *const window = button->window;
-#endif /* GTK_CHECK_VERSION(2,14,0) */
-
-	GtkAllocation button_alloc, menu_alloc;
-	gtk_widget_get_allocation(GTK_WIDGET(button), &button_alloc);
-	gtk_widget_get_allocation(GTK_WIDGET(menu), &menu_alloc);
-	gdk_window_get_origin(window, x, y);
-	*x += button_alloc.x;
-	*y += button_alloc.y - menu_alloc.height;
-
-	*push_in = false;
-}
-
-/**
- * The "Options" button was pressed. (Non-GtkMenuButton version)
- * @param button	GtkButton
- * @param event		GdkEvent
- */
-static gboolean
-btnOptions_clicked_signal_handler(GtkButton *button,
-				  GdkEvent  *event)
-{
-	if (event->type == GDK_BUTTON_PRESS) {
-		// Reference: https://developer.gnome.org/gtk-tutorial/stable/x1577.html
-		RomDataView *const page = ROM_DATA_VIEW(g_object_get_data(G_OBJECT(button), "RomDataView"));
-		assert(page->menuOptions != nullptr);
-		if (!page->menuOptions) {
-			// No menu...
-			return FALSE;
-		}
-
-		GtkMenuPositionFunc menuPositionFunc;
-#if GTK_CHECK_VERSION(3,12,0)
-		// If we're using a GtkHeaderBar, don't use a custom menu positioning function.
-		if (gtk_dialog_get_header_bar(GTK_DIALOG(gtk_widget_get_toplevel(GTK_WIDGET(page)))) != nullptr) {
-			menuPositionFunc = nullptr;
-		} else
-#endif /* GTK_CHECK_VERSION(3,12,0) */
-		{
-			menuPositionFunc = btnOptions_menu_pos_func;
-		}
-
-		// Pop up the menu.
-		// FIXME: Improve button appearance so it's more pushed-in.
-		GdkEventButton *const bevent = reinterpret_cast<GdkEventButton*>(event);
-		gtk_menu_popup(GTK_MENU(page->menuOptions),
-			nullptr, nullptr,
-			menuPositionFunc, button,
-			bevent->button, bevent->time);
-
-		// Tell the caller that we handled the event.
-		return TRUE;
-	}
-
-	// Tell the caller that we did NOT handle the event.
-	return FALSE;
-}
-#endif /* !USE_GTK_MENU_BUTTON */
 
 /**
  * An "Options" menu action was triggered.
- * @param menuItem	Menu item (Get the "menuOptions_id" data.)
+ * @param menuButton	OptionsMenuButton
+ * @param id		Menu options ID
  * @param user_data	RomDataView
  */
 static void
-menuOptions_triggered_signal_handler(GtkMenuItem *menuItem,
-				     gpointer	  user_data)
+btnOptions_triggered_signal_handler(OptionsMenuButton *menuButton,
+				    gint id,
+				    gpointer user_data)
 {
+	RP_UNUSED(menuButton);
 	RomDataView *const page = ROM_DATA_VIEW(user_data);
-	const gint id = (gboolean)GPOINTER_TO_INT(
-		g_object_get_data(G_OBJECT(menuItem), "menuOptions_id"));
 
 	if (id < 0) {
 		// Export/copy to text or JSON.
@@ -2665,8 +2444,11 @@ menuOptions_triggered_signal_handler(GtkMenuItem *menuItem,
 
 		switch (id) {
 			case OPTION_EXPORT_TEXT: {
+				const uint32_t lc = page->cboLanguage
+					? language_combo_box_get_selected_lc(LANGUAGE_COMBO_BOX(page->cboLanguage))
+					: 0;
 				ofs << "== " << rp_sprintf(C_("RomDataView", "File: '%s'"), rom_filename) << std::endl;
-				ROMOutput ro(page->romData, rom_data_view_get_sel_lc(page));
+				ROMOutput ro(page->romData, lc);
 				ofs << ro;
 				break;
 			}
@@ -2676,9 +2458,12 @@ menuOptions_triggered_signal_handler(GtkMenuItem *menuItem,
 				break;
 			}
 			case OPTION_COPY_TEXT: {
+				const uint32_t lc = page->cboLanguage
+					? language_combo_box_get_selected_lc(LANGUAGE_COMBO_BOX(page->cboLanguage))
+					: 0;
 				ostringstream oss;
 				oss << "== " << rp_sprintf(C_("RomDataView", "File: '%s'"), rom_filename) << std::endl;
-				ROMOutput ro(page->romData, rom_data_view_get_sel_lc(page));
+				ROMOutput ro(page->romData, lc);
 				oss << ro;
 
 				const string str = oss.str();
@@ -2783,10 +2568,7 @@ menuOptions_triggered_signal_handler(GtkMenuItem *menuItem,
 		ops = page->romData->romOps();
 		assert(id < (int)ops.size());
 		if (id < (int)ops.size()) {
-			const RomData::RomOp &op = ops[id];
-			const string desc = convert_accel_to_gtk(op.desc);
-			gtk_menu_item_set_label(menuItem, desc.c_str());
-			gtk_widget_set_sensitive(GTK_WIDGET(menuItem), !!(op.flags & RomData::RomOp::ROF_ENABLED));
+			options_menu_button_update_op(OPTIONS_MENU_BUTTON(page->btnOptions), id, &ops[id]);
 		}
 
 		messageType = GTK_MESSAGE_INFO;

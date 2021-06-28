@@ -2,7 +2,7 @@
  * ROM Properties Page shell extension. (librptexture)                     *
  * KhronosKTX.cpp: Khronos KTX image reader.                               *
  *                                                                         *
- * Copyright (c) 2017-2020 by David Korth.                                 *
+ * Copyright (c) 2017-2021 by David Korth.                                 *
  * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
@@ -22,6 +22,7 @@
 #include "data/GLenumStrings.hpp"
 
 // librpbase, librpfile
+#include "libi18n/i18n.h"
 using LibRpBase::RomFields;
 using LibRpFile::IRpFile;
 
@@ -324,21 +325,24 @@ const rp_image *KhronosKTXPrivate::loadImage(void)
 	switch (ktxHeader.glFormat) {
 		case GL_RGB:
 			// 24-bit RGB.
-			img = ImageDecoder::fromLinear24(ImageDecoder::PXF_BGR888,
+			img = ImageDecoder::fromLinear24(
+				ImageDecoder::PixelFormat::BGR888,
 				ktxHeader.pixelWidth, height,
 				buf.get(), expected_size, stride);
 			break;
 
 		case GL_RGBA:
 			// 32-bit RGBA.
-			img = ImageDecoder::fromLinear32(ImageDecoder::PXF_ABGR8888,
+			img = ImageDecoder::fromLinear32(
+				ImageDecoder::PixelFormat::ABGR8888,
 				ktxHeader.pixelWidth, height,
 				reinterpret_cast<const uint32_t*>(buf.get()), expected_size, stride);
 			break;
 
 		case GL_LUMINANCE:
 			// 8-bit Luminance.
-			img = ImageDecoder::fromLinear8(ImageDecoder::PXF_L8,
+			img = ImageDecoder::fromLinear8(
+				ImageDecoder::PixelFormat::L8,
 				ktxHeader.pixelWidth, height,
 				buf.get(), expected_size, stride);
 			break;
@@ -346,7 +350,8 @@ const rp_image *KhronosKTXPrivate::loadImage(void)
 		case GL_RGB9_E5:
 			// Uncompressed "special" 32bpp formats.
 			// TODO: Does KTX handle GL_RGB9_E5 as compressed?
-			img = ImageDecoder::fromLinear32(ImageDecoder::PXF_RGB9_E5,
+			img = ImageDecoder::fromLinear32(
+				ImageDecoder::PixelFormat::RGB9_E5,
 				ktxHeader.pixelWidth, height,
 				reinterpret_cast<const uint32_t*>(buf.get()), expected_size, stride);
 			break;
@@ -521,7 +526,8 @@ const rp_image *KhronosKTXPrivate::loadImage(void)
 				case GL_RGB9_E5:
 					// Uncompressed "special" 32bpp formats.
 					// TODO: Does KTX handle GL_RGB9_E5 as compressed?
-					img = ImageDecoder::fromLinear32(ImageDecoder::PXF_RGB9_E5,
+					img = ImageDecoder::fromLinear32(
+						ImageDecoder::PixelFormat::RGB9_E5,
 						ktxHeader.pixelWidth, height,
 						reinterpret_cast<const uint32_t*>(buf.get()), expected_size);
 					break;
@@ -534,8 +540,7 @@ const rp_image *KhronosKTXPrivate::loadImage(void)
 	}
 
 	// Post-processing: Check if a flip is needed.
-	if (img && (flipOp != rp_image::FLIP_NONE) && height > 1) {
-		// TODO: Assert that img dimensions match ktxHeader?
+	if (img && flipOp != rp_image::FLIP_NONE) {
 		rp_image *const flipimg = img->flip(flipOp);
 		if (flipimg) {
 			img->unref();
@@ -896,10 +901,6 @@ int KhronosKTX::mipmapCount(void) const
  */
 int KhronosKTX::getFields(LibRpBase::RomFields *fields) const
 {
-	// TODO: Localization.
-#define C_(ctx, str) str
-#define NOP_C_(ctx, str) str
-
 	assert(fields != nullptr);
 	if (!fields)
 		return 0;

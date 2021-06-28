@@ -63,7 +63,6 @@ class XboxDiscPrivate final : public RomDataPrivate
 		off64_t xdvdfs_addr;
 
 		// XDVDFSPartition
-		DiscReader *discReader;
 		XDVDFSPartition *xdvdfsPartition;
 
 		// default.xbe / default.xex
@@ -126,7 +125,6 @@ XboxDiscPrivate::XboxDiscPrivate(XboxDisc *q, IRpFile *file)
 	, discType(DiscType::Unknown)
 	, wave(0)
 	, xdvdfs_addr(0)
-	, discReader(nullptr)
 	, xdvdfsPartition(nullptr)
 	, defaultExeData(nullptr)
 	, exeType(ExeType::Unknown)
@@ -142,7 +140,6 @@ XboxDiscPrivate::~XboxDiscPrivate()
 
 	UNREF(defaultExeData);
 	UNREF(xdvdfsPartition);
-	UNREF(discReader);
 }
 
 /**
@@ -319,6 +316,8 @@ XboxDisc::XboxDisc(IRpFile *file)
 			d->xdvdfs_addr = XDVDFS_LBA_OFFSET_XGD1 * XDVDFS_BLOCK_SIZE;
 			break;
 		case XboxDiscPrivate::DiscType::XGD2:
+			// NOTE: May be XGD3.
+			// If XDVDFS is not present at the XGD2 offset, try XGD3.
 			d->xdvdfs_addr = XDVDFS_LBA_OFFSET_XGD2 * XDVDFS_BLOCK_SIZE;
 			break;
 		case XboxDiscPrivate::DiscType::XGD3:
@@ -364,28 +363,52 @@ XboxDisc::XboxDisc(IRpFile *file)
 		}
 	}
 
-	// Create the DiscReader and XDVDFSPartition.
-	d->discReader = new DiscReader(d->file);
-	if (!d->discReader->isOpen()) {
+	// Open the XDVDFSPartition.
+	DiscReader *const discReader = new DiscReader(d->file);
+	if (!discReader->isOpen()) {
 		// Unable to open the discReader.
-		UNREF_AND_NULL_NOCHK(d->discReader);
+		discReader->unref();
 		UNREF_AND_NULL_NOCHK(d->file);
 		d->lockKreonDrive();
 		d->isKreon = false;
 		return;
 	}
-	d->xdvdfsPartition = new XDVDFSPartition(d->discReader, d->xdvdfs_addr, d->file->size() - d->xdvdfs_addr);
+	d->xdvdfsPartition = new XDVDFSPartition(discReader, d->xdvdfs_addr, d->file->size() - d->xdvdfs_addr);
 	if (!d->xdvdfsPartition->isOpen()) {
 		// Unable to open the XDVDFSPartition.
 		UNREF_AND_NULL_NOCHK(d->xdvdfsPartition);
-		UNREF_AND_NULL_NOCHK(d->discReader);
-		UNREF_AND_NULL_NOCHK(d->file);
-		d->lockKreonDrive();
-		d->isKreon = false;
-		return;
+
+		// If this is XGD2, try the XGD3 offset in case this happens
+		// to be an edge case where it's an XGD3 disc that has a video
+		// partition that matches an XGD2 timestamp.
+		if (d->discType == XboxDiscPrivate::DiscType::XGD2) {
+			static const off_t xgd3_offset = XDVDFS_LBA_OFFSET_XGD3 * XDVDFS_BLOCK_SIZE;
+			d->xdvdfs_addr = XDVDFS_LBA_OFFSET_XGD3 * XDVDFS_BLOCK_SIZE;
+			d->xdvdfsPartition = new XDVDFSPartition(discReader,
+				xgd3_offset, d->file->size() - xgd3_offset);
+			if (d->xdvdfsPartition->isOpen()) {
+				// It's an XGD3.
+				d->discType = XboxDiscPrivate::DiscType::XGD3;
+				d->wave = 0;
+				d->xdvdfs_addr = xgd3_offset;
+			} else {
+				// It's not an XGD3.
+				UNREF_AND_NULL_NOCHK(d->xdvdfsPartition);
+			}
+		}
+
+		if (!d->xdvdfsPartition) {
+			// Unable to open the XDVDFSPartition.
+			discReader->unref();
+			UNREF_AND_NULL_NOCHK(d->file);
+			d->lockKreonDrive();
+			d->isKreon = false;
+			return;
+		}
 	}
 
 	// XDVDFS partition is open.
+	discReader->unref();	// XDVDFSPartition has this referenced.
 	if (d->discType <= XboxDiscPrivate::DiscType::Unknown) {
 		// This is an extracted XDVDFS.
 		d->discType = XboxDiscPrivate::DiscType::Extracted;
@@ -410,7 +433,6 @@ void XboxDisc::close(void)
 	}
 
 	UNREF_AND_NULL(d->xdvdfsPartition);
-	UNREF_AND_NULL(d->discReader);
 
 	// Call the superclass function.
 	super::close();
@@ -884,6 +906,29 @@ int XboxDisc::loadInternalImage(ImageType imageType, const rp_image **pImage)
 	}
 
 	return -ENOENT;
+}
+
+/**
+ * Check for "viewed" achievements.
+ *
+ * @return Number of achievements unlocked.
+ */
+int XboxDisc::checkViewedAchievements(void) const
+{
+	RP_D(const XboxDisc);
+	if (!d->isValid) {
+		// Disc is not valid.
+		return 0;
+	}
+
+	RomData *const exe = const_cast<XboxDiscPrivate*>(d)->openDefaultExe();
+	if (!exe) {
+		// Unable to open the EXE.
+		return 0;
+	}
+
+	// Check the EXE for the viewed achievements.
+	return exe->checkViewedAchievements();
 }
 
 }

@@ -263,7 +263,7 @@
   </mime-type>
 
   <!-- MegaDrive -->
-  <mime-type type="application/x-sega-cd-rom">
+  <mime-type type="application/x-sega-cd-32x-rom">
     <!-- Translate this to Mega-CD if the console was known as such in your locale
          Should be Mega-CD in all but en_US, Mexico, Canada and Brazil: https://en.wikipedia.org/wiki/Sega_CD -->
     <comment>Sega CD 32X disc image</comment>
@@ -280,6 +280,19 @@
       </match>
     </magic>
     <glob pattern="*.iso"/>
+  </mime-type>
+  <mime-type type="application/x-sega-pico-rom">
+    <!-- Translate this to Kids Computer Pico if the console was known as such in your locale
+         Should be Sega Pico in all but Japan: https://en.wikipedia.org/wiki/Sega_Pico -->
+    <comment>Sega Pico ROM</comment>
+    <generic-icon name="application-x-executable"/>
+    <magic priority="50">
+      <match type="string" value="SEGA PICO" offset="256"/>
+      <match type="string" value="SAMSUNG PICO" offset="256"/>
+      <match type="string" value="SEGATOYS PICO" offset="256"/>
+      <match type="string" value="IMA IKUNOUJYUKU" offset="256"/>
+    </magic>
+    <glob pattern="*.pco"/>
   </mime-type>
 
   <!-- NES -->
@@ -338,6 +351,14 @@
     <magic priority="50">
       <match value="\0VSP\0\0\0\0" type="string" offset="0"/>
     </magic>
+  </mime-type>
+
+  <!-- SNES (SatellaView from no-intro) -->
+  <mime-type type="application/x-satellaview-rom">
+    <comment>Satellaview ROM</comment>
+    <sub-class-of type="application/vnd.nintendo.snes.rom"/>
+    <generic-icon name="application-x-executable"/>
+    <glob pattern="*.bs"/>
   </mime-type>
 
   <!-- SufamiTurbo (handled as SNES, sort of) -->
@@ -420,6 +441,8 @@
     <comment>Xbox 360 package</comment>
     <sub-class-of type="application/x-archive"/>
     <generic-icon name="package-x-generic"/>
+    <glob pattern="*.fxs"/>	<!-- Fallout -->
+    <glob pattern="*.exs"/>	<!-- Skyrim -->
     <magic priority="50">
       <match value="CON " type="string" offset="0"/>
       <match value="LIVE" type="string" offset="0"/>
@@ -433,6 +456,7 @@
     <sub-class-of type="application/octet-stream"/>
     <generic-icon name="application-octet-stream"/>
     <glob pattern="*.xdbf"/>
+    <glob pattern="*.gpd"/>
     <magic priority="50">
       <match value="XDBF" type="string" offset="0"/>
     </magic>

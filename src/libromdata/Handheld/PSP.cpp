@@ -22,7 +22,6 @@ using namespace LibRpTexture;
 // DiscReader
 #include "cdrom_structs.h"
 #include "iso_structs.h"
-#include "disc/Cdrom2352Reader.hpp"
 #include "disc/IsoPartition.hpp"
 #include "disc/CisoPspReader.hpp"
 #include "disc/PartitionFile.hpp"
@@ -484,8 +483,8 @@ vector<RomData::ImageSizeDef> PSP::supportedImageSizes(ImageType imageType) cons
 	ASSERT_supportedImageSizes(imageType);
 
 	RP_D(const PSP);
-	if (!d->isValid || imageType != IMG_INT_MEDIA) {
-		// Only IMG_INT_MEDIA is supported.
+	if (!d->isValid || imageType != IMG_INT_ICON) {
+		// Only IMG_INT_ICON is supported.
 		return vector<ImageSizeDef>();
 	}
 

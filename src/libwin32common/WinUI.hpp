@@ -121,6 +121,24 @@ static inline uint32_t GetSysColor_ARGB32(int nIndex)
 bool isComCtl32_v610(void);
 
 /**
+ * Measure the width of a string for ListView.
+ * This function handles newlines.
+ * @param hDC          [in] HDC for text measurement.
+ * @param tstr         [in] String to measure.
+ * @param pNlCount     [out,opt] Newline count.
+ * @return Width. (May return LVSCW_AUTOSIZE_USEHEADER if it's a single line.)
+ */
+int measureStringForListView(HDC hDC, const std::tstring &tstr, int *pNlCount = nullptr);
+
+/**
+ * Is the system using an RTL language?
+ * @return WS_EX_LAYOUTRTL if the system is using RTL; 0 if not.
+ */
+DWORD isSystemRTL(void);
+
+/** File dialogs **/
+
+/**
  * Get a filename using the Open File Name dialog.
  *
  * Depending on OS, this may use:
@@ -184,6 +202,20 @@ LRESULT CALLBACK MultiLineEditProc(
  * @param dwRefData	HWND of parent dialog to forward WM_COMMAND messages to.
  */
 LRESULT CALLBACK SingleLineEditProc(
+	HWND hWnd, UINT uMsg,
+	WPARAM wParam, LPARAM lParam,
+	UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
+
+/**
+ * Subclass procedure for ListView controls to disable HDN_DIVIDERDBLCLICK handling.
+ * @param hWnd		Dialog handle
+ * @param uMsg		Message
+ * @param wParam	WPARAM
+ * @param lParam	LPARAM
+ * @param uIdSubclass	Subclass ID (usually the control ID)
+ * @param dwRefData	RP_ShellPropSheetExt_Private*
+ */
+LRESULT CALLBACK ListViewNoDividerDblClickSubclassProc(
 	HWND hWnd, UINT uMsg,
 	WPARAM wParam, LPARAM lParam,
 	UINT_PTR uIdSubclass, DWORD_PTR dwRefData);

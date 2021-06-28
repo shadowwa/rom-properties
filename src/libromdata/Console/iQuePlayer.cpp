@@ -2,7 +2,7 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * iQuePlayer.cpp: iQue Player .cmd reader.                                *
  *                                                                         *
- * Copyright (c) 2019-2020 by David Korth.                                 *
+ * Copyright (c) 2019-2021 by David Korth.                                 *
  * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
@@ -38,7 +38,7 @@ ROMDATA_IMPL_IMG(iQuePlayer)
 
 #ifdef _MSC_VER
 // DelayLoad test implementation.
-DELAYLOAD_TEST_FUNCTION_IMPL0(zlibVersion);
+DELAYLOAD_TEST_FUNCTION_IMPL0(get_crc_table);
 #endif /* _MSC_VER */
 
 class iQuePlayerPrivate final : public RomDataPrivate
@@ -232,11 +232,15 @@ rp_image *iQuePlayerPrivate::loadImage(off64_t address, size_t z_size, size_t un
 #if defined(_MSC_VER) && defined(ZLIB_IS_DLL)
 	// Delay load verification.
 	// TODO: Only if linked with /DELAYLOAD?
-	if (DelayLoad_test_zlibVersion() != 0) {
+	if (DelayLoad_test_get_crc_table() != 0) {
 		// Delay load failed.
 		// Can't decompress the thumbnail image.
 		return nullptr;
 	}
+#else /* !defined(_MSC_VER) || !defined(ZLIB_IS_DLL) */
+	// zlib isn't in a DLL, but we need to ensure that the
+	// CRC table is initialized anyway.
+	get_crc_table();
 #endif /* defined(_MSC_VER) && defined(ZLIB_IS_DLL) */
 
 	// Read the compressed thumbnail image.
@@ -316,7 +320,8 @@ const rp_image *iQuePlayerPrivate::loadThumbnailImage(void)
 
 	// Load the image.
 	img_thumbnail = loadImage(thumb_addr, z_thumb_size, IQUE_PLAYER_THUMB_SIZE,
-		ImageDecoder::PXF_RGBA5551, IQUE_PLAYER_THUMB_W, IQUE_PLAYER_THUMB_H, true);
+		ImageDecoder::PixelFormat::RGBA5551,
+		IQUE_PLAYER_THUMB_W, IQUE_PLAYER_THUMB_H, true);
 	return img_thumbnail;
 }
 
@@ -346,12 +351,14 @@ const rp_image *iQuePlayerPrivate::loadTitleImage(void)
 	// Load the image.
 	// NOTE: Using A8L8 format, not IA8, which is GameCube-specific.
 	// TODO: Add ImageDecoder::fromLinear16() support for IA8 later.
-#if SYS_BYTEORDER == SYS_BIG_ENDIAN
+#if SYS_BYTEORDER == SYS_LIL_ENDIAN
 	img_title = loadImage(title_addr, z_title_size, IQUE_PLAYER_TITLE_SIZE,
-		ImageDecoder::PXF_L8A8, IQUE_PLAYER_TITLE_W, IQUE_PLAYER_TITLE_H, false);
-#else
+		ImageDecoder::PixelFormat::A8L8,
+		IQUE_PLAYER_TITLE_W, IQUE_PLAYER_TITLE_H, false);
+#else /* SYS_BYTEORDER == SYS_BIG_ENDIAN */
 	img_title = loadImage(title_addr, z_title_size, IQUE_PLAYER_TITLE_SIZE,
-		ImageDecoder::PXF_A8L8, IQUE_PLAYER_TITLE_W, IQUE_PLAYER_TITLE_H, false);
+		ImageDecoder::PixelFormat::L8A8,
+		IQUE_PLAYER_TITLE_W, IQUE_PLAYER_TITLE_H, false);
 #endif
 	return img_title;
 }

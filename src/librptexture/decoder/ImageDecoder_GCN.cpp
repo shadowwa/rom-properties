@@ -13,6 +13,9 @@
 #include "PixelConversion.hpp"
 using namespace LibRpTexture::PixelConversion;
 
+// C++ STL classes.
+using std::array;
+
 namespace LibRpTexture { namespace ImageDecoder {
 
 /**
@@ -58,10 +61,10 @@ rp_image *fromGcn16(PixelFormat px_format,
 	const unsigned int tilesY = static_cast<unsigned int>(height / 4);
 
 	// Temporary tile buffer.
-	uint32_t tileBuf[4*4];
+	array<uint32_t, 4*4> tileBuf;
 
 	switch (px_format) {
-		case PXF_RGB5A3: {
+		case PixelFormat::RGB5A3: {
 			for (unsigned int y = 0; y < tilesY; y++) {
 				for (unsigned int x = 0; x < tilesX; x++) {
 					// Convert each tile to ARGB32 manually.
@@ -84,7 +87,7 @@ rp_image *fromGcn16(PixelFormat px_format,
 			break;
 		}
 
-		case PXF_RGB565: {
+		case PixelFormat::RGB565: {
 			for (unsigned int y = 0; y < tilesY; y++) {
 				for (unsigned int x = 0; x < tilesX; x++) {
 					// Convert each tile to ARGB32 manually.
@@ -104,7 +107,7 @@ rp_image *fromGcn16(PixelFormat px_format,
 			break;
 		}
 
-		case PXF_IA8: {
+		case PixelFormat::IA8: {
 			for (unsigned int y = 0; y < tilesY; y++) {
 				for (unsigned int x = 0; x < tilesX; x++) {
 					// Convert each tile to ARGB32 manually.
@@ -208,13 +211,13 @@ rp_image *fromGcnCI8(int width, int height,
 	const unsigned int tilesY = static_cast<unsigned int>(height / 4);
 
 	// Tile pointer.
-	const uint8_t *tileBuf = img_buf;
+	const array<uint8_t, 8*4> *pTileBuf = reinterpret_cast<const array<uint8_t, 8*4>*>(img_buf);
 
 	for (unsigned int y = 0; y < tilesY; y++) {
 		for (unsigned int x = 0; x < tilesX; x++) {
 			// Decode the current tile.
-			ImageDecoderPrivate::BlitTile<uint8_t, 8, 4>(img, tileBuf, x, y);
-			tileBuf += (8 * 4);
+			ImageDecoderPrivate::BlitTile<uint8_t, 8, 4>(img, *pTileBuf, x, y);
+			pTileBuf++;
 		}
 	}
 
@@ -285,13 +288,13 @@ rp_image *fromGcnI8(int width, int height,
 	img->set_tr_idx(-1);
 
 	// Tile pointer.
-	const uint8_t *tileBuf = img_buf;
+	const array<uint8_t, 8*4> *pTileBuf = reinterpret_cast<const array<uint8_t, 8*4>*>(img_buf);
 
 	for (unsigned int y = 0; y < tilesY; y++) {
 		for (unsigned int x = 0; x < tilesX; x++) {
 			// Decode the current tile.
-			ImageDecoderPrivate::BlitTile<uint8_t, 8, 4>(img, tileBuf, x, y);
-			tileBuf += (8 * 4);
+			ImageDecoderPrivate::BlitTile<uint8_t, 8, 4>(img, *pTileBuf, x, y);
+			pTileBuf++;
 		}
 	}
 

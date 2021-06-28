@@ -17,6 +17,7 @@
 #include "data/XboxPublishers.hpp"
 
 // librpbase, librpfile, librptexture
+#include "librpbase/Achievements.hpp"
 #include "librpbase/disc/CBCReader.hpp"
 #include "librpfile/RpMemFile.hpp"
 using namespace LibRpBase;
@@ -107,7 +108,7 @@ class Xbox360_XEX_Private final : public RomDataPrivate
 		// Encryption key in use.
 		// If fileFormatInfo indicates the PE is encrypted:
 		// - -1: Unknown
-		// -  0: Retail
+		// -  0: Retail (may be either XEX1 or XEX2)
 		// -  1: Debug
 		// NOTE: We can't use EncryptionKeys because the debug key
 		// is all zeroes, so we're not handling it here.
@@ -336,6 +337,9 @@ size_t Xbox360_XEX_Private::getOptHdrData(uint32_t header_id, uint32_t *pOut32)
 	if ((int)xexType < 0) {
 		// Invalid XEX type.
 		return 0;
+	} else if (!file) {
+		// File is closed. Can't read the optional header.
+		return 0;
 	}
 
 	// Get the entry.
@@ -537,6 +541,10 @@ CBCReader *Xbox360_XEX_Private::initPeReader(void)
 		return peReader;
 	}
 #endif /* ENABLE_LIBMSPACK */
+	if (!file) {
+		// File is closed. Can't initialize PE Reader.
+		return nullptr;
+	}
 
 	if (xexType <= XexType::Unknown || xexType >= XexType::Max) {
 		// Invalid XEX type.
@@ -599,11 +607,23 @@ CBCReader *Xbox360_XEX_Private::initPeReader(void)
 		keyData[1].key = zero16;
 		keyData[1].length = 16;
 
+		// Determine which retail key to use.
+		const uint32_t image_flags = (xexType != Xbox360_XEX_Private::XexType::XEX1)
+			? be32_to_cpu(secInfo.xex2.image_flags)
+			: be32_to_cpu(secInfo.xex1.image_flags);
+		// TODO: Xeika key?
+		int xex_keyIdx;
+		if (unlikely(image_flags & XEX2_IMAGE_FLAG_CARDEA_KEY)) {
+			xex_keyIdx = 0;	// XEX1
+		} else {
+			xex_keyIdx = 1;	// XEX2
+		}
+
 		// Try to load the XEX key.
 		// TODO: Show a warning if it didn't work.
 		KeyManager::VerifyResult verifyResult = keyManager->getAndVerify(
-			EncryptionKeyNames[(int)this->xexType], &keyData[0],
-			EncryptionKeyVerifyData[(int)this->xexType], 16);
+			EncryptionKeyNames[xex_keyIdx], &keyData[0],
+			EncryptionKeyVerifyData[xex_keyIdx], 16);
 		if (verifyResult != KeyManager::VerifyResult::OK) {
 			// An error occurred while loading the XEX key.
 			// Start with the all-zero key used on devkits.
@@ -1019,21 +1039,21 @@ void Xbox360_XEX_Private::convertGameRatings(
 	// Region conversion table:
 	// - Index: Xbox 360 region (-1 if not supported)
 	// - Value: RomFields::age_ratings_t region
-	static const int8_t region_conv[14] = {
-		RomFields::AGE_USA,
-		RomFields::AGE_EUROPE,
-		RomFields::AGE_FINLAND,
-		RomFields::AGE_PORTUGAL,
-		RomFields::AGE_ENGLAND,
-		RomFields::AGE_JAPAN,
-		RomFields::AGE_GERMANY,
-		RomFields::AGE_AUSTRALIA,
-		-1,	// TODO: NZ (usually the same as AU)
-		RomFields::AGE_SOUTH_KOREA,
-		-1,	// TODO: Brazil
-		-1,	// TODO: FPB?
-		RomFields::AGE_TAIWAN,
-		-1,	// TODO: Singapore
+	static const RomFields::AgeRatingsCountry region_conv[14] = {
+		RomFields::AgeRatingsCountry::USA,
+		RomFields::AgeRatingsCountry::Europe,
+		RomFields::AgeRatingsCountry::Finland,
+		RomFields::AgeRatingsCountry::Portugal,
+		RomFields::AgeRatingsCountry::England,
+		RomFields::AgeRatingsCountry::Japan,
+		RomFields::AgeRatingsCountry::Germany,
+		RomFields::AgeRatingsCountry::Australia,
+		RomFields::AgeRatingsCountry::Invalid,		// TODO: NZ (usually the same as AU)
+		RomFields::AgeRatingsCountry::SouthKorea,
+		RomFields::AgeRatingsCountry::Invalid,		// TODO: Brazil
+		RomFields::AgeRatingsCountry::Invalid,		// TODO: FPB?
+		RomFields::AgeRatingsCountry::Taiwan,
+		RomFields::AgeRatingsCountry::Invalid,		// TODO: Singapore
 	};
 
 	// Rating conversion table:
@@ -1048,27 +1068,27 @@ void Xbox360_XEX_Private::convertGameRatings(
 	//   - The value for "A" gets slot 0.
 	//   - The value for "B" gets slots 1 and 2.
 	static const int8_t region_values[14][16] = {
-		// AGE_USA (ESRB)
+		// USA (ESRB)
 		{3, 6, 6, 10, 10, 13, 13, 17, 17, 18, 18, 18, 18, 18, 18, -1},
-		// AGE_EUROPE (PEGI)
+		// Europe (PEGI)
 		{3, 4, 4, 4, 4, 12, 12, 12, 12, 12, 16, 16, 16, 16, 18, -1},
-		// AGE_FINLAND (PEGI-FI/MEKU)
+		// Finland (PEGI-FI/MEKU)
 		{3, 7, 7, 7, 7, 11, 11, 11, 11, 15, 15, 15, 15, 18, 18, -1},
-		// AGE_PORTUGAL (PEGI-PT)
+		// Portugal (PEGI-PT)
 		{4, 4, 6, 6, 12, 12, 12, 12, 12, 12, 16, 16, 16, 16, 18, -1},
-		// AGE_ENGLAND (BBFC)
+		// England (BBFC)
 		// TODO: How are Universal and PG handled for Nintendo?
 		{3, 3, 7, 7, 7, 7, 12, 12, 12, 12, 15, 15, 15, 16, 18, -1},
-		// AGE_JAPAN (CERO)
+		// Japan (CERO)
 		{0, 12, 12, 15, 15, 17, 17, 18, 18,    -1,-1,-1,-1,-1,-1,-1},
-		// AGE_GERMANY (USK)
+		// Germany (USK)
 		{0, 6, 6, 12, 12, 16, 16, 18, 18,      -1,-1,-1,-1,-1,-1,-1},
-		// AGE_AUSTRALIA (OFLC_AU)
+		// Australia (OFLC_AU)
 		// TODO: Is R18+ available on Xbox 360?
 		{0, 7, 7, 14, 14, 15, 15, -1,       -1,-1,-1,-1,-1,-1,-1,-1},
 		// TODO: NZ
 		{-1,-1,-1,-1,-1,-1,-1,-1,           -1,-1,-1,-1,-1,-1,-1,-1},
-		// AGE_SOUTH_KOREA (KMRB/GRB)
+		// South Korea (KMRB/GRB)
 		{0, 12, 12, 15, 15, 18, 18, -1,     -1,-1,-1,-1,-1,-1,-1,-1},
 
 		// TODO: Brazil
@@ -1083,8 +1103,8 @@ void Xbox360_XEX_Private::convertGameRatings(
 
 	// 14 ratings for Xbox 360 games.
 	for (unsigned int ridx = 0; ridx < 14; ridx++) {
-		const int8_t ar_idx = region_conv[ridx];
-		if (ar_idx < 0) {
+		const RomFields::AgeRatingsCountry ar_idx = region_conv[ridx];
+		if ((int)ar_idx < 0) {
 			// Not supported.
 			continue;
 		}
@@ -1101,7 +1121,7 @@ void Xbox360_XEX_Private::convertGameRatings(
 			continue;
 		}
 
-		age_ratings[ar_idx] = static_cast<uint8_t>(rf_val) | RomFields::AGEBF_ACTIVE;
+		age_ratings[(int)ar_idx] = static_cast<uint8_t>(rf_val) | RomFields::AGEBF_ACTIVE;
 	}
 }
 
@@ -1625,10 +1645,17 @@ int Xbox360_XEX::loadFieldData(void)
 	// NOTE: The magic number is NOT byteswapped in the constructor.
 	const XEX2_Header *const xex2Header = &d->xex2Header;
 
-	// Maximum of 15 fields, not including RomData subclasses.
+	// Maximum of 14 fields, not including RomData subclasses.
 	const char *const s_xexType = (d->xexType != Xbox360_XEX_Private::XexType::XEX1 ? "XEX2" : "XEX1");
-	d->fields->reserve(15);
+	d->fields->reserve(14);
 	d->fields->setTabName(0, s_xexType);
+
+	// Image flags.
+	// NOTE: Same for both XEX1 and XEX2 according to Xenia.
+	// TODO: Show image flags as-is?
+	uint32_t image_flags = (d->xexType != Xbox360_XEX_Private::XexType::XEX1)
+		? be32_to_cpu(d->secInfo.xex2.image_flags)
+		: be32_to_cpu(d->secInfo.xex1.image_flags);
 
 	// Is the encryption key available?
 	bool noKeyAvailable = false;
@@ -1648,8 +1675,15 @@ int Xbox360_XEX::loadFieldData(void)
 		// FIXME: xextool can detect the encryption keys for
 		// delta patches. Figure out how to do that here.
 		if (!(d->xex2Header.module_flags & XEX2_MODULE_FLAG_PATCH_DELTA)) {
+			// TODO: Xeika key?
+			const char *s_xexKeyID;
+			if (unlikely(image_flags & XEX2_IMAGE_FLAG_CARDEA_KEY)) {
+				s_xexKeyID = "XEX1";
+			} else {
+				s_xexKeyID = "XEX2";
+			}
 			d->fields->addField_string(C_("RomData", "Warning"),
-				rp_sprintf(C_("Xbox360_XEX", "The Xbox 360 %s encryption key is not available."), s_xexType),
+				rp_sprintf(C_("Xbox360_XEX", "The Xbox 360 %s encryption key is not available."), s_xexKeyID),
 				RomFields::STRF_WARNING);
 		}
 	}
@@ -1709,13 +1743,6 @@ int Xbox360_XEX::loadFieldData(void)
 		"Xbox360_XEX", module_flags_tbl, ARRAY_SIZE(module_flags_tbl));
 	d->fields->addField_bitfield(C_("Xbox360_XEX", "Module Flags"),
 		v_module_flags, 4, xex2Header->module_flags);
-
-	// Image flags.
-	// NOTE: Same for both XEX1 and XEX2 according to Xenia.
-	// TODO: Show image flags as-is?
-	uint32_t image_flags = (d->xexType != Xbox360_XEX_Private::XexType::XEX1)
-		? be32_to_cpu(d->secInfo.xex2.image_flags)
-		: be32_to_cpu(d->secInfo.xex1.image_flags);
 
 	// Media types
 	// NOTE: Using a string instead of a bitfield because very rarely
@@ -1891,16 +1918,10 @@ int Xbox360_XEX::loadFieldData(void)
 			d->fields->addField_string(C_("RomData", "Publisher"), publisher);
 		}
 
-		// Savegame ID
-		d->fields->addField_string_numeric(C_("Xbox360_XEX", "Savegame ID"),
-			d->executionID.savegame_id,
-			RomFields::Base::Hex, 8, RomFields::STRF_MONOSPACE);
-
 		// Disc number
 		// NOTE: Not shown for single-disc games.
-		const char *const disc_number_title = C_("RomData", "Disc #");
 		if (d->executionID.disc_number != 0 && d->executionID.disc_count > 1) {
-			d->fields->addField_string(disc_number_title,
+			d->fields->addField_string(C_("RomData", "Disc #"),
 				// tr: Disc X of Y (for multi-disc games)
 				rp_sprintf_p(C_("RomData|Disc", "%1$u of %2$u"),
 					d->executionID.disc_number,
@@ -2029,20 +2050,14 @@ int Xbox360_XEX::loadMetaData(void)
 	d->metaData = new RomMetaData();
 	d->metaData->reserve(2);	// Maximum of 2 metadata properties.
 
-	// TODO: Have the RomMetaData object simply ignore empty strings?
-	// (If so, check all RomData subclasses and remove these checks.)
+	// NOTE: RomMetaData ignores empty strings, so we don't need to
+	// check for them here.
 
 	// Title
-	string title = xdbf->getString(Property::Title);
-	if (!title.empty()) {
-		d->metaData->addMetaData_string(Property::Title, title);
-	}
+	d->metaData->addMetaData_string(Property::Title, xdbf->getString(Property::Title));
 
 	// Publisher
-	const string publisher = d->getPublisher();
-	if (!publisher.empty()) {
-		d->metaData->addMetaData_string(Property::Publisher, publisher);
-	}
+	d->metaData->addMetaData_string(Property::Publisher, d->getPublisher());
 
 	// Finished reading the metadata.
 	return static_cast<int>(d->metaData->count());
@@ -2066,6 +2081,42 @@ int Xbox360_XEX::loadInternalImage(ImageType imageType, const rp_image **pImage)
 	}
 
 	return -ENOENT;
+}
+
+/**
+ * Check for "viewed" achievements.
+ *
+ * @return Number of achievements unlocked.
+ */
+int Xbox360_XEX::checkViewedAchievements(void) const
+{
+	RP_D(const Xbox360_XEX);
+	if (!d->isValid) {
+		// XEX is not valid.
+		return 0;
+	}
+
+	// keyInUse should have been initialized somewhere else.
+	// Initializing it here won't work because the file may
+	// have been closed already.
+	// TODO: Initialize the PE Reader in the constructor?
+
+	Achievements *const pAch = Achievements::instance();
+	int ret = 0;
+
+	if (d->keyInUse == 1) {
+		// Debug encryption.
+		pAch->unlock(Achievements::ID::ViewedDebugCryptedFile);
+		ret++;
+	}
+
+	// Check the EXE for achievements.
+	const EXE *exe = const_cast<Xbox360_XEX_Private*>(d)->initEXE();
+	if (exe) {
+		ret += exe->checkViewedAchievements();
+	}
+
+	return ret;
 }
 
 #ifdef ENABLE_DECRYPTION

@@ -2,7 +2,7 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * GameCube.cpp: Nintendo GameCube and Wii disc image reader.              *
  *                                                                         *
- * Copyright (c) 2016-2020 by David Korth.                                 *
+ * Copyright (c) 2016-2021 by David Korth.                                 *
  * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
@@ -22,6 +22,7 @@
 // librpbase, librpfile, librptexture
 #include "librpfile/DualFile.hpp"
 #include "librpfile/RelatedFile.hpp"
+#include "librpbase/Achievements.hpp"
 #include "librpbase/SystemRegion.hpp"
 using namespace LibRpBase;
 using namespace LibRpFile;
@@ -392,6 +393,7 @@ int GameCubePrivate::loadWiiPartitionTables(void)
 	}
 
 	// Done reading the partition tables.
+	wiiPtblLoaded = true;
 	return 0;
 }
 
@@ -626,22 +628,10 @@ const char *GameCubePrivate::wii_getCryptoStatus(WiiPartition *partition)
 		}
 	}
 
-	if (res == KeyManager::VerifyResult::OK) {
+	if (res == KeyManager::VerifyResult::IncrementingValues) {
 		// Debug discs may have incrementing values instead of a
 		// valid update partition.
-		static const uint8_t incr_vals[32] = {
-			0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x04,
-			0x00,0x00,0x00,0x08, 0x00,0x00,0x00,0x0C,
-			0x00,0x00,0x00,0x10, 0x00,0x00,0x00,0x14,
-			0x00,0x00,0x00,0x18, 0x00,0x00,0x00,0x1C,
-		};
-
-		uint8_t data[32];
-		size_t size = partition->seekAndRead(0, data, sizeof(data));
-		if (size == sizeof(incr_vals) && !memcmp(data, incr_vals, sizeof(data))) {
-			// Found incrementing values.
-			return C_("GameCube", "Incrementing values");
-		}
+		return C_("GameCube", "Incrementing values");
 	}
 
 	const char *err = KeyManager::verifyResultToString(res);
@@ -880,24 +870,18 @@ GameCube::GameCube(IRpFile *file)
 		d->wiiPtbl.resize(1);
 		GameCubePrivate::WiiPartEntry &pt = d->wiiPtbl[0];
 
-		// Determine the partition type.
+		// Open the partition.
 		// TODO: Identify channel partitions by the title ID high?
-		Nintendo_TitleID_BE_t tid;
-		size = d->file->seekAndRead(offsetof(RVL_Ticket, title_id), &tid, sizeof(tid));
-		if (size != sizeof(tid)) {
-			// Error reading the title ID.
-			d->wiiPtbl.clear();
-			goto notSupported;
-		}
-
 		pt.start = 0;
 		pt.size = d->file->size();
 		pt.vg = 0;
 		pt.pt = 0;
 		pt.partition = new WiiPartition(d->discReader, pt.start, pt.size);
 
+		// Determine the partition type.
 		// TODO: Super Smash Bros. Brawl "Masterpieces" partitions.
 		// TODO: Check tid.hi?
+		const Nintendo_TitleID_BE_t tid = pt.partition->titleID();
 		if (tid.lo == be32_to_cpu('UPD') ||	// IOS only
 		    tid.lo == be32_to_cpu('UPE') ||	// USA region
 		    tid.lo == be32_to_cpu('UPJ') ||	// JPN region
@@ -1615,7 +1599,7 @@ int GameCube::loadFieldData(void)
 	/** Wii-specific fields. **/
 
 	// Load the Wii partition tables.
-	int wiiPtLoaded = d->loadWiiPartitionTables();
+	const int wiiPtLoaded = d->loadWiiPartitionTables();
 
 	// TMD fields.
 	if (d->gamePartition) {
@@ -1882,7 +1866,7 @@ int GameCube::loadFieldData(void)
 			if ((int)encKey >= 0 && (int)encKey < ARRAY_SIZE(wii_key_tbl)) {
 				s_key_name = dpgettext_expr(RP_I18N_DOMAIN, "GameCube|KeyIdx", wii_key_tbl[(int)encKey]);
 			} else {
-				// WiiPartition::ENCKEY_UNKNOWN
+				// WiiPartition::EncKey::Unknown
 				s_key_name = C_("RomData", "Unknown");
 			}
 			data_row.emplace_back(s_key_name);
@@ -2052,6 +2036,18 @@ int GameCube::loadInternalImage(ImageType imageType, const rp_image **pImage)
 		return -ENOENT;
 	}
 
+	// Verify the disc format.
+	switch (d->discType & GameCubePrivate::DISC_FORMAT_MASK) {
+		default:
+			break;
+
+		case GameCubePrivate::DISC_FORMAT_WIA:
+		case GameCubePrivate::DISC_FORMAT_RVZ:
+			// WIA/RVZ isn't fully supported, so we can't load images.
+			*pImage = nullptr;
+			return -ENOENT;
+	}
+
 	// Load opening.bnr. (GCN/Triforce only)
 	// FIXME: Does Triforce have opening.bnr?
 	if (d->gcn_loadOpeningBnr() != 0) {
@@ -2101,10 +2097,12 @@ int GameCube::extURLs(ImageType imageType, vector<ExtURL> *pExtURLs, int size) c
 	}
 
 	// Check for known unusable game IDs.
-	// - RELSAB: Generic ID used for prototypes and Wii update partitions.
+	// - RELSAB: Generic ID used for GCN prototypes and Wii update partitions.
+	// - RABAxx: Generic ID used for Wii prototypes and devkit updaters.
 	// - _INSZZ: Channel partition.
 	if (d->discHeader.id4[0] == '_' ||
-	    !memcmp(d->discHeader.id6, "RELSAB", 6))
+	    !memcmp(d->discHeader.id6, "RELSAB", 6) ||
+	    !memcmp(d->discHeader.id4, "RABA", 4))
 	{
 		// Cannot download images for this game ID.
 		return -ENOENT;
@@ -2156,7 +2154,7 @@ int GameCube::extURLs(ImageType imageType, vector<ExtURL> *pExtURLs, int size) c
 		 imageTypeName_base, (sizeDef->name ? sizeDef->name : ""));
 
 	// Determine the GameTDB region code(s).
-	vector<const char*> tdb_regions =
+	vector<uint16_t> tdb_lc =
 		GameCubeRegions::gcnRegionToGameTDB(d->gcnRegion, d->discHeader.id4[3]);
 
 	// Game ID.
@@ -2181,7 +2179,7 @@ int GameCube::extURLs(ImageType imageType, vector<ExtURL> *pExtURLs, int size) c
 	// user has high-resolution downloads disabled.
 	// See Nintendo3DS for an example.
 	// (NOTE: For GameTDB, currently only applies to coverfullHQ on GCN/Wii.)
-	size_t vsz = tdb_regions.size();
+	size_t vsz = tdb_lc.size();
 	if (isDisc2) {
 		// Need to increase the initial size.
 		// Increasing the size later invalidates the iterator.
@@ -2190,7 +2188,7 @@ int GameCube::extURLs(ImageType imageType, vector<ExtURL> *pExtURLs, int size) c
 
 	pExtURLs->resize(vsz);
 	auto extURL_iter = pExtURLs->begin();
-	const auto tdb_regions_cend = tdb_regions.cend();
+	const auto tdb_lc_cend = tdb_lc.cend();
 
 	// Is this not the first disc?
 	if (isDisc2) {
@@ -2200,22 +2198,24 @@ int GameCube::extURLs(ImageType imageType, vector<ExtURL> *pExtURLs, int size) c
 		snprintf(discName, sizeof(discName), "%s%u",
 			 imageTypeName, d->discHeader.disc_number+1);
 
-		for (auto tdb_iter = tdb_regions.cbegin();
-		     tdb_iter != tdb_regions_cend; ++tdb_iter, ++extURL_iter)
+		for (auto tdb_iter = tdb_lc.cbegin();
+		     tdb_iter != tdb_lc_cend; ++tdb_iter, ++extURL_iter)
 		{
-			extURL_iter->url = d->getURL_GameTDB("wii", discName, *tdb_iter, id6, ".png");
-			extURL_iter->cache_key = d->getCacheKey_GameTDB("wii", discName, *tdb_iter, id6, ".png");
+			const string lc_str = SystemRegion::lcToStringUpper(*tdb_iter);
+			extURL_iter->url = d->getURL_GameTDB("wii", discName, lc_str.c_str(), id6, ".png");
+			extURL_iter->cache_key = d->getCacheKey_GameTDB("wii", discName, lc_str.c_str(), id6, ".png");
 			extURL_iter->width = sizeDef->width;
 			extURL_iter->height = sizeDef->height;
 		}
 	}
 
 	// First disc, or not a disc scan.
-	for (auto tdb_iter = tdb_regions.cbegin();
-	     tdb_iter != tdb_regions_cend; ++tdb_iter, ++extURL_iter)
+	for (auto tdb_iter = tdb_lc.cbegin();
+	     tdb_iter != tdb_lc_cend; ++tdb_iter, ++extURL_iter)
 	{
-		extURL_iter->url = d->getURL_GameTDB("wii", imageTypeName, *tdb_iter, id6, ".png");
-		extURL_iter->cache_key = d->getCacheKey_GameTDB("wii", imageTypeName, *tdb_iter, id6, ".png");
+		const string lc_str = SystemRegion::lcToStringUpper(*tdb_iter);
+		extURL_iter->url = d->getURL_GameTDB("wii", imageTypeName, lc_str.c_str(), id6, ".png");
+		extURL_iter->cache_key = d->getCacheKey_GameTDB("wii", imageTypeName, lc_str.c_str(), id6, ".png");
 		extURL_iter->width = sizeDef->width;
 		extURL_iter->height = sizeDef->height;
 		extURL_iter->high_res = false;	// Only one size is available.
@@ -2223,6 +2223,65 @@ int GameCube::extURLs(ImageType imageType, vector<ExtURL> *pExtURLs, int size) c
 
 	// All URLs added.
 	return 0;
+}
+
+/**
+ * Check for "viewed" achievements.
+ *
+ * @return Number of achievements unlocked.
+ */
+int GameCube::checkViewedAchievements(void) const
+{
+	RP_D(const GameCube);
+	if (!d->isValid || ((d->discType & GameCubePrivate::DISC_SYSTEM_MASK) != GameCubePrivate::DISC_SYSTEM_WII)) {
+		// Disc is either not valid or is not Wii.
+		return 0;
+	}
+
+	Achievements *const pAch = Achievements::instance();
+
+	const int wiiPtLoaded = const_cast<GameCubePrivate*>(d)->loadWiiPartitionTables();
+	if (wiiPtLoaded != 0) {
+		// Unable to load Wii partition tables.
+		return 0;
+	}
+
+	// Check for the main partition.
+	const WiiPartition *pt = d->gamePartition;
+	if (!pt) {
+		pt = d->updatePartition;
+	}
+	if (!pt) {
+		// No partitions...
+		return 0;
+	}
+
+	int ret = 0;
+	WiiPartition::EncKey encKey;
+	if ((d->discType & GameCubePrivate::DISC_FORMAT_MASK) == GameCubePrivate::DISC_FORMAT_NASOS) {
+		// NASOS disc image.
+		// If this would normally be an encrypted image, use encKeyReal().
+		encKey = (d->discHeader.disc_noCrypto == 0
+			? pt->encKeyReal()
+			: pt->encKey());
+	} else {
+		// Other disc image. Use encKey().
+		encKey = pt->encKey();
+	}
+
+	switch (encKey) {
+		default:
+			break;
+		case WiiPartition::EncKey::RVT_Debug:
+		case WiiPartition::EncKey::RVT_Korean:
+		case WiiPartition::EncKey::CAT_vWii:
+			// Debug encryption.
+			pAch->unlock(Achievements::ID::ViewedDebugCryptedFile);
+			ret++;
+			break;
+	}
+
+	return ret;
 }
 
 }

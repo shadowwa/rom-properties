@@ -11,8 +11,8 @@ https://github.com/benhoyt/inih
 
 */
 
-#ifndef __INI_H__
-#define __INI_H__
+#ifndef INI_H
+#define INI_H
 
 /* Make this header file easier to include in C++ code */
 #ifdef __cplusplus
@@ -26,25 +26,18 @@ extern "C" {
 #define INI_HANDLER_LINENO 0
 #endif
 
-/* rom-properties: using stdcall for internal functions */
-#ifdef _MSC_VER
-# define INIHCALL __cdecl
-#else
-# define INIHCALL
-#endif
-
 /* Typedef for prototype of handler function. */
 #if INI_HANDLER_LINENO
-typedef int (INIHCALL *ini_handler)(void* user, const char* section,
+typedef int (*ini_handler)(void* user, const char* section,
                            const char* name, const char* value,
                            int lineno);
 #else
-typedef int (INIHCALL *ini_handler)(void* user, const char* section,
+typedef int (*ini_handler)(void* user, const char* section,
                            const char* name, const char* value);
 #endif
 
 /* Typedef for prototype of fgets-style reader function. */
-typedef char* (INIHCALL *ini_reader)(char* str, int num, void* stream);
+typedef char* (*ini_reader)(char* str, int num, void* stream);
 
 /* Parse given INI-style file. May have [section]s, name=value pairs
    (whitespace stripped), and comments starting with ';' (semicolon). Section
@@ -148,8 +141,17 @@ int ini_parse_string(const char* string, ini_handler handler, void* user);
 #define INI_ALLOW_NO_VALUE 0
 #endif
 
+/* Nonzero to use custom ini_malloc, ini_free, and ini_realloc memory
+   allocation functions (INI_USE_STACK must also be 0). These functions must
+   have the same signatures as malloc/free/realloc and behave in a similar
+   way. ini_realloc is only needed if INI_ALLOW_REALLOC is set. */
+#ifndef INI_CUSTOM_ALLOCATOR
+#define INI_CUSTOM_ALLOCATOR 0
+#endif
+
+
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* __INI_H__ */
+#endif /* INI_H */

@@ -373,10 +373,14 @@ bool SNESPrivate::isSnesRomHeaderValid(const SNES_RomHeader *romHeader, bool isH
 bool SNESPrivate::isBsxRomHeaderValid(const SNES_RomHeader *romHeader, bool isHiROM)
 {
 	// TODO: Game title may be ASCII or Shift-JIS.
-	// For now, just make sure the first byte isn't 0.
-	if (romHeader->bsx.title[0] == 0) {
-		// Title is empty.
-		return false;
+	// For now, just make sure the first byte isn't 0 or space.
+	switch (romHeader->bsx.title[0]) {
+		case '\0':
+		case ' ':
+			// Title is empty.
+			return false;
+		default:
+			break;
 	}
 
 	// Is the ROM mapping byte valid?
@@ -443,6 +447,18 @@ bool SNESPrivate::isBsxRomHeaderValid(const SNES_RomHeader *romHeader, bool isHi
 	}
 #endif
 
+	// Check the program type.
+	switch (romHeader->bsx.ext.program_type) {
+		case SNES_BSX_PRG_65c816:
+		case SNES_BSX_PRG_SCRIPT:
+		case SNES_BSX_PRG_SA_1:
+			break;
+
+		default:
+			// Invalid program type.
+			return false;
+	}
+
 	// ROM header appears to be valid.
 	// TODO: Check other BS-X fields.
 	return true;
@@ -459,6 +475,7 @@ bool SNESPrivate::isBsxRomHeaderValid(const SNES_RomHeader *romHeader, bool isHi
 string SNESPrivate::getRomTitle(void) const
 {
 	// NOTE: If the region code is JPN, the title might be encoded in Shift-JIS.
+	// NOTE: Some JPN ROMs have a 'J' game ID but not a JPN region code.
 	// TODO: Space elimination; China, Korea encodings?
 	// TODO: Remove leading spaces? (Capcom NFL Football; symlinked on the server for now.)
 
@@ -467,12 +484,14 @@ string SNESPrivate::getRomTitle(void) const
 	const char *title;
 	size_t len;
 	switch (romType) {
-		case RomType::SNES:
-			doSJIS = (romHeader.snes.destination_code == SNES_DEST_JAPAN);
+		case RomType::SNES: {
+			doSJIS = (romHeader.snes.destination_code == SNES_DEST_JAPAN) ||
+			         (romHeader.snes.old_publisher_code == 0x33 && romHeader.snes.ext.id4[3] == 'J');
 			title = romHeader.snes.title;
 			len = sizeof(romHeader.snes.title);
 			getSnesRomMapping(&romHeader, nullptr, &hasExtraChr);
 			break;
+		}
 		case RomType::BSX:
 			// TODO: Extra characters may be needed for:
 			// - Excitebike - Bun Bun Mario Battle - Stadium 3
@@ -768,6 +787,7 @@ SNES::SNES(IRpFile *file)
 					// TODO: Use the size value.
 					// Size is (1024 << (buf[6] & 0x0F))
 					d->romType = SNESPrivate::RomType::BSX;
+					d->mimeType = "application/x-satellaview-rom";	// unofficial, not on fd.o
 					break;
 				}
 			}
@@ -875,6 +895,7 @@ SNES::SNES(IRpFile *file)
 				// BS-X ROM header is valid.
 				d->header_address = *pHeaderAddress;
 				d->romType = SNESPrivate::RomType::BSX;
+				d->mimeType = "application/x-satellaview-rom";	// unofficial, not on fd.o
 				break;
 			}
 		}
@@ -1105,6 +1126,10 @@ const char *const *SNES::supportedMimeTypes_static(void)
 
 		// Unofficial MIME types from FreeDesktop.org.
 		"application/x-snes-rom",
+
+		// Unofficial MIME types.
+		// TODO: Get these upstreamed on FreeDesktop.org.
+		"application/x-satellaview-rom",
 
 		nullptr
 	};

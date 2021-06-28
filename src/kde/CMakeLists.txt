@@ -19,14 +19,23 @@ SET(rom-properties-kde_SRCS
 	RpQImageBackend.cpp
 	DragImageLabel.cpp
 	RpQByteArrayFile.cpp
-	DragImageTreeWidget.cpp
+	DragImageTreeView.cpp
 	MessageSound.cpp
+	ListDataModel.cpp
+	ListDataSortProxyModel.cpp
+	LanguageComboBox.cpp
+	OptionsMenuButton.cpp
 	config/stub-export.cpp
 	config/ConfigDialog.cpp
 	config/ITab.cpp
 	config/ImageTypesTab.cpp
 	config/SystemsTab.cpp
 	config/OptionsTab.cpp
+	config/CacheTab.cpp
+	config/CacheCleaner.cpp
+	config/RpProgressBar.cpp
+	config/AchievementsTab.cpp
+	config/AchievementsItemDelegate.cpp
 	config/AboutTab.cpp
 	)
 SET(rom-properties-kde_H
@@ -38,13 +47,22 @@ SET(rom-properties-kde_H
 	QImageData_qt4.hpp
 	DragImageLabel.hpp
 	RpQByteArrayFile.hpp
-	DragImageTreeWidget.hpp
+	DragImageTreeView.hpp
 	MessageSound.hpp
+	ListDataModel.hpp
+	ListDataSortProxyModel.hpp
+	LanguageComboBox.hpp
+	OptionsMenuButton.hpp
 	config/ConfigDialog.hpp
 	config/ITab.hpp
 	config/ImageTypesTab.hpp
-	config/SystemsTab.cpp
+	config/SystemsTab.hpp
 	config/OptionsTab.hpp
+	config/CacheTab.hpp
+	config/CacheCleaner.hpp
+	config/RpProgressBar.hpp
+	config/AchievementsTab.hpp
+	config/AchievementsItemDelegate.hpp
 	config/AboutTab.hpp
 	)
 SET(rom-properties-kde_UIS
@@ -53,10 +71,13 @@ SET(rom-properties-kde_UIS
 	config/ImageTypesTab.ui
 	config/SystemsTab.ui
 	config/OptionsTab.ui
+	config/CacheTab.ui
+	config/AchievementsTab.ui
 	config/AboutTab.ui
 	)
 SET(rom-properties-kde_RCC_SRCS
 	../res/flags/flags.qrc
+	../res/ach/ach.qrc
 	)
 
 IF(ENABLE_DECRYPTION)
@@ -84,6 +105,12 @@ IF(ENABLE_NLS)
 	SET(rom-properties-kde_SRCS ${rom-properties-kde_SRCS} GettextTranslator.cpp)
 	SET(rom-properties-kde_H    ${rom-properties-kde_H}    GettextTranslator.hpp)
 ENDIF(ENABLE_NLS)
+
+IF(ENABLE_ACHIEVEMENTS)
+	# D-Bus notification for achievements
+	SET(rom-properties-kde-notify_SRCS AchQtDBus.cpp)
+	SET(rom-properties-kde-notify_H    AchQtDBus.hpp)
+ENDIF(ENABLE_ACHIEVEMENTS)
 
 # RpFile_kio requires KDE Frameworks 5.
 # FIXME: Dolphin ends up hanging for some reason...

@@ -2,7 +2,7 @@
  * ROM Properties Page shell extension. (KDE)                              *
  * AboutTab.hpp: About tab for rp-config.                                  *
  *                                                                         *
- * Copyright (c) 2016-2020 by David Korth.                                 *
+ * Copyright (c) 2016-2021 by David Korth.                                 *
  * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
@@ -157,7 +157,7 @@ void AboutTabPrivate::initCreditsTab(void)
 	string sCredits;
 	sCredits.reserve(4096);
 	// NOTE: Copyright is NOT localized.
-	sCredits += "Copyright (c) 2016-2020 by David Korth." BR;
+	sCredits += "Copyright (c) 2016-2021 by David Korth." BR;
 	sCredits += rp_sprintf(
 		// tr: %s is the name of the license.
 		C_("AboutTab|Credits", "This program is licensed under the %s or later."),
@@ -266,7 +266,7 @@ void AboutTabPrivate::initLibrariesTab(void)
 	sLibraries += rp_sprintf(sUsingDll, qtVersion.c_str());
 #endif /* QT_IS_STATIC */
 	sLibraries += BR
-		"Copyright (C) 1995-2020 The Qt Company Ltd. and/or its subsidiaries." BR
+		"Copyright (C) 1995-2021 The Qt Company Ltd. and/or its subsidiaries." BR
 		"<a href='https://www.qt.io/'>https://www.qt.io/</a>" BR;
 	// TODO: Check QT_VERSION at runtime?
 #if QT_VERSION >= QT_VERSION_CHECK(4,5,0)
@@ -281,7 +281,7 @@ void AboutTabPrivate::initLibrariesTab(void)
 	// NOTE: Can't obtain the runtime version for KF5 easily...
 	sLibraries += rp_sprintf(sCompiledWith, "KDE Frameworks " KIO_VERSION_STRING);
 	sLibraries += BR
-		"Copyright (C) 1996-2020 KDE contributors." BR
+		"Copyright (C) 1996-2021 KDE contributors." BR
 		"<a href='https://www.kde.org/'>https://www.kde.org/</a>" BR;
 	sLibraries += rp_sprintf(sLicense, "GNU LGPL v2.1+");
 #else /* QT_VERSION < QT_VERSION_CHECK(5,0,0) */
@@ -298,19 +298,32 @@ void AboutTabPrivate::initLibrariesTab(void)
 	/** zlib **/
 #ifdef HAVE_ZLIB
 	sLibraries += brbr;
+#  ifdef ZLIBNG_VERSION
+	string sZlibVersion = "zlib-ng ";
+	sZlibVersion += zlibngVersion();
+#  else /* !ZLIBNG_VERSION */
 	string sZlibVersion = "zlib ";
 	sZlibVersion += zlibVersion();
+#  endif /* ZLIBNG_VERSION */
 
 #if defined(USE_INTERNAL_ZLIB) && !defined(USE_INTERNAL_ZLIB_DLL)
 	sLibraries += rp_sprintf(sIntCopyOf, sZlibVersion.c_str());
 #else
+#  ifdef ZLIBNG_VERSION
+	sLibraries += rp_sprintf(sCompiledWith, "zlib-ng " ZLIBNG_VERSION);
+#  else /* !ZLIBNG_VERSION */
 	sLibraries += rp_sprintf(sCompiledWith, "zlib " ZLIB_VERSION);
+#  endif /* ZLIBNG_VERSION */
 	sLibraries += br;
 	sLibraries += rp_sprintf(sUsingDll, sZlibVersion.c_str());
 #endif
 	sLibraries += BR
 		"Copyright (C) 1995-2017 Jean-loup Gailly and Mark Adler." BR
 		"<a href='https://zlib.net/'>https://zlib.net/</a>" BR;
+#  ifdef ZLIBNG_VERSION
+	// TODO: Also if zlibVersion() contains "zlib-ng"?
+	sLibraries += "<a href='https://github.com/zlib-ng/zlib-ng'>https://github.com/zlib-ng/zlib-ng</a>" BR;
+#  endif /* ZLIBNG_VERSION */
 	sLibraries += rp_sprintf(sLicense, "zlib license");
 #endif /* HAVE_ZLIB */
 
@@ -405,7 +418,7 @@ void AboutTabPrivate::initLibrariesTab(void)
 	sLibraries += rp_sprintf(sUsingDll, sVerBuf);
 #  endif /* HAVE_NETTLE_VERSION_FUNCTIONS */
 	sLibraries += BR
-		"Copyright (C) 2001-2020 Niels Möller." BR
+		"Copyright (C) 2001-2021 Niels Möller." BR
 		"<a href='https://www.lysator.liu.se/~nisse/nettle/'>https://www.lysator.liu.se/~nisse/nettle/</a>" BR;
 	sLibraries += rp_sprintf(sLicenses, "GNU LGPL v3+, GNU GPL v2+");
 # else /* !HAVE_NETTLE_VERSION_H */
@@ -562,32 +575,4 @@ void AboutTab::changeEvent(QEvent *event)
 
 	// Pass the event to the base class.
 	super::changeEvent(event);
-}
-
-/**
- * Reset the configuration.
- */
-void AboutTab::reset(void)
-{
-	// Nothing to do here.
-}
-
-/**
- * Load the default configuration.
- * This does NOT save, and will only emit modified()
- * if it's different from the current configuration.
- */
-void AboutTab::loadDefaults(void)
-{
-	// Nothing to do here.
-}
-
-/**
- * Save the configuration.
- * @param pSettings QSettings object.
- */
-void AboutTab::save(QSettings *pSettings)
-{
-	// Nothing to do here.
-	Q_UNUSED(pSettings)
 }

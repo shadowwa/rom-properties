@@ -118,6 +118,7 @@ class WiiPartition : public GcnPartition
 			CAT_vWii = 5,		// vWii key (debug)
 
 			None = 6,		// No encryption (RVT-H)
+
 			Max
 		};
 
@@ -145,6 +146,12 @@ class WiiPartition : public GcnPartition
 		 * @return TMD header, or nullptr if unavailable.
 		 */
 		const RVL_TMD_Header *tmdHeader(void) const;
+
+		/**
+		 * Get the title ID. (NOT BYTESWAPPED)
+		 * @return Title ID. (0-0 if unavailable)
+		 */
+		Nintendo_TitleID_BE_t titleID(void) const;
 
 	public:
 		// Encryption key indexes.

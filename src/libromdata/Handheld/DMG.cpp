@@ -2,7 +2,7 @@
  * ROM Properties Page shell extension. (libromdata)                       *
  * DMG.hpp: Game Boy (DMG/CGB/SGB) ROM reader.                             *
  *                                                                         *
- * Copyright (c) 2016-2020 by David Korth.                                 *
+ * Copyright (c) 2016-2021 by David Korth.                                 *
  * Copyright (c) 2016-2018 by Egor.                                        *
  * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
@@ -15,7 +15,7 @@
 // librpbase, librpfile
 #include "librpbase/config/Config.hpp"
 using namespace LibRpBase;
-using LibRpFile::IRpFile;
+using namespace LibRpFile;
 
 // For sections delegated to other RomData subclasses.
 #include "Audio/GBS.hpp"
@@ -399,13 +399,14 @@ void DMGPrivate::getTitleAndGameID(string &s_title, string &s_gameID) const
 			case 'K':	// tilt sensor
 			case 'V':	// rumble
 				switch (romHeader.title15[14]) {
-					case 'A': case 'D':
-					case 'E': case 'F':
-					case 'G': case 'H':
-					case 'I': case 'J':
-					case 'K': case 'P':
-					case 'S': case 'U':
-					case 'X': case 'Y':
+					case 'A': case 'B':	// B == Brazil
+					case 'D': case 'E':
+					case 'F': case 'G':
+					case 'H': case 'I':
+					case 'J': case 'K':
+					case 'P': case 'S':
+					case 'U': case 'X':
+					case 'Y': case 'Z':
 						// Region byte is valid.
 						break;
 
@@ -887,7 +888,7 @@ int DMG::loadFieldData(void)
 	d->getTitleAndGameID(s_title, s_gameID);
 	d->fields->addField_string(C_("RomData", "Title"), s_title);
 	d->fields->addField_string(C_("RomData", "Game ID"),
-		s_gameID.empty() ? s_gameID.c_str() : C_("RomData", "Unknown"));
+		!s_gameID.empty() ? s_gameID.c_str() : C_("RomData", "Unknown"));
 
 	// System
 	const uint32_t dmg_system = d->systemID();
@@ -1188,29 +1189,23 @@ int DMG::loadFieldData(void)
 				// Found the GBS magic number.
 				// Open the GBS.
 				const off64_t fileSize = d->file->size();
-				DiscReader *const reader = new DiscReader(d->file, 0, fileSize);
-				if (reader->isOpen()) {
-					// Create a PartitionFile.
-					const off64_t length = fileSize - jp_addr;
-					PartitionFile *const ptFile = new PartitionFile(reader, jp_addr, length);
-					if (ptFile->isOpen()) {
-						// Open the GBS.
-						GBS *const gbs = new GBS(ptFile);
-						if (gbs->isOpen()) {
-							// Add the fields.
-							const RomFields *const gbsFields = gbs->fields();
-							assert(gbsFields != nullptr);
-							assert(!gbsFields->empty());
-							if (gbsFields && !gbsFields->empty()) {
-								d->fields->addFields_romFields(gbsFields,
-									RomFields::TabOffset_AddTabs);
-							}
+				SubFile *const gbsFile = new SubFile(d->file, jp_addr, fileSize - jp_addr);
+				if (gbsFile->isOpen()) {
+					// Open the GBS.
+					GBS *const gbs = new GBS(gbsFile);
+					if (gbs->isOpen()) {
+						// Add the fields.
+						const RomFields *const gbsFields = gbs->fields();
+						assert(gbsFields != nullptr);
+						assert(!gbsFields->empty());
+						if (gbsFields && !gbsFields->empty()) {
+							d->fields->addFields_romFields(gbsFields,
+								RomFields::TabOffset_AddTabs);
 						}
-						gbs->unref();
 					}
-					ptFile->unref();
+					gbs->unref();
 				}
-				reader->unref();
+				gbsFile->unref();
 			}
 		}
 	}

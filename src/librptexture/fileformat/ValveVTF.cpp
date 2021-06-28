@@ -2,7 +2,7 @@
  * ROM Properties Page shell extension. (librptexture)                     *
  * ValveVTF.cpp: Valve VTF image reader.                                   *
  *                                                                         *
- * Copyright (c) 2017-2020 by David Korth.                                 *
+ * Copyright (c) 2017-2021 by David Korth.                                 *
  * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
@@ -18,6 +18,7 @@
 #include "vtf_structs.h"
 
 // librpbase, librpfile
+#include "libi18n/i18n.h"
 using LibRpBase::rp_sprintf;
 using LibRpBase::RomFields;
 using LibRpFile::IRpFile;
@@ -105,7 +106,7 @@ class ValveVTFPrivate final : public FileFormatPrivate
 
 #if SYS_BYTEORDER == SYS_BIG_ENDIAN
 		/**
-		 * Byteswap a float. (TODO: Move to byteswap.h?)
+		 * Byteswap a float. (TODO: Move to byteswap_rp.h?)
 		 * @param f Float to byteswap.
 		 * @return Byteswapped flaot.
 		 */
@@ -510,13 +511,15 @@ const rp_image *ValveVTFPrivate::loadImage(int mip)
 		case VTF_IMAGE_FORMAT_RGBA8888:
 		case VTF_IMAGE_FORMAT_UVWQ8888:	// handling as RGBA8888
 		case VTF_IMAGE_FORMAT_UVLX8888:	// handling as RGBA8888
-			img = ImageDecoder::fromLinear32(ImageDecoder::PXF_ABGR8888,
+			img = ImageDecoder::fromLinear32(
+				ImageDecoder::PixelFormat::ABGR8888,
 				mdata.width, mdata.height,
 				reinterpret_cast<const uint32_t*>(buf.get()), mdata.size,
 				mdata.row_width * sizeof(uint32_t));
 			break;
 		case VTF_IMAGE_FORMAT_ABGR8888:
-			img = ImageDecoder::fromLinear32(ImageDecoder::PXF_RGBA8888,
+			img = ImageDecoder::fromLinear32(
+				ImageDecoder::PixelFormat::RGBA8888,
 				mdata.width, mdata.height,
 				reinterpret_cast<const uint32_t*>(buf.get()), mdata.size,
 				mdata.row_width * sizeof(uint32_t));
@@ -524,19 +527,22 @@ const rp_image *ValveVTFPrivate::loadImage(int mip)
 		case VTF_IMAGE_FORMAT_ARGB8888:
 			// This is stored as RAGB for some reason...
 			// FIXME: May be a bug in VTFEdit. (Tested versions: 1.2.5, 1.3.3)
-			img = ImageDecoder::fromLinear32(ImageDecoder::PXF_RABG8888,
+			img = ImageDecoder::fromLinear32(
+				ImageDecoder::PixelFormat::RABG8888,
 				mdata.width, mdata.height,
 				reinterpret_cast<const uint32_t*>(buf.get()), mdata.size,
 				mdata.row_width * sizeof(uint32_t));
 			break;
 		case VTF_IMAGE_FORMAT_BGRA8888:
-			img = ImageDecoder::fromLinear32(ImageDecoder::PXF_ARGB8888,
+			img = ImageDecoder::fromLinear32(
+				ImageDecoder::PixelFormat::ARGB8888,
 				mdata.width, mdata.height,
 				reinterpret_cast<const uint32_t*>(buf.get()), mdata.size,
 				mdata.row_width * sizeof(uint32_t));
 			break;
 		case VTF_IMAGE_FORMAT_BGRx8888:
-			img = ImageDecoder::fromLinear32(ImageDecoder::PXF_xRGB8888,
+			img = ImageDecoder::fromLinear32(
+				ImageDecoder::PixelFormat::xRGB8888,
 				mdata.width, mdata.height,
 				reinterpret_cast<const uint32_t*>(buf.get()), mdata.size,
 				mdata.row_width * sizeof(uint32_t));
@@ -544,26 +550,30 @@ const rp_image *ValveVTFPrivate::loadImage(int mip)
 
 		/* 24-bit */
 		case VTF_IMAGE_FORMAT_RGB888:
-			img = ImageDecoder::fromLinear24(ImageDecoder::PXF_BGR888,
+			img = ImageDecoder::fromLinear24(
+				ImageDecoder::PixelFormat::BGR888,
 				mdata.width, mdata.height,
 				buf.get(), mdata.size,
 				mdata.row_width * 3);
 			break;
 		case VTF_IMAGE_FORMAT_BGR888:
-			img = ImageDecoder::fromLinear24(ImageDecoder::PXF_RGB888,
+			img = ImageDecoder::fromLinear24(
+				ImageDecoder::PixelFormat::RGB888,
 				mdata.width, mdata.height,
 				buf.get(), mdata.size,
 				mdata.row_width * 3);
 			break;
 		case VTF_IMAGE_FORMAT_RGB888_BLUESCREEN:
-			img = ImageDecoder::fromLinear24(ImageDecoder::PXF_BGR888,
+			img = ImageDecoder::fromLinear24(
+				ImageDecoder::PixelFormat::BGR888,
 				mdata.width, mdata.height,
 				buf.get(), mdata.size,
 				mdata.row_width * 3);
 			img->apply_chroma_key(0xFF0000FF);
 			break;
 		case VTF_IMAGE_FORMAT_BGR888_BLUESCREEN:
-			img = ImageDecoder::fromLinear24(ImageDecoder::PXF_RGB888,
+			img = ImageDecoder::fromLinear24(
+				ImageDecoder::PixelFormat::RGB888,
 				mdata.width, mdata.height,
 				buf.get(), mdata.size,
 				mdata.row_width * 3);
@@ -572,31 +582,36 @@ const rp_image *ValveVTFPrivate::loadImage(int mip)
 
 		/* 16-bit */
 		case VTF_IMAGE_FORMAT_RGB565:
-			img = ImageDecoder::fromLinear16(ImageDecoder::PXF_BGR565,
+			img = ImageDecoder::fromLinear16(
+				ImageDecoder::PixelFormat::BGR565,
 				mdata.width, mdata.height,
 				reinterpret_cast<const uint16_t*>(buf.get()), mdata.size,
 				mdata.row_width * sizeof(uint16_t));
 			break;
 		case VTF_IMAGE_FORMAT_BGR565:
-			img = ImageDecoder::fromLinear16(ImageDecoder::PXF_RGB565,
+			img = ImageDecoder::fromLinear16(
+				ImageDecoder::PixelFormat::RGB565,
 				mdata.width, mdata.height,
 				reinterpret_cast<const uint16_t*>(buf.get()), mdata.size,
 				mdata.row_width * sizeof(uint16_t));
 			break;
 		case VTF_IMAGE_FORMAT_BGRx5551:
-			img = ImageDecoder::fromLinear16(ImageDecoder::PXF_RGB555,
+			img = ImageDecoder::fromLinear16(
+				ImageDecoder::PixelFormat::RGB555,
 				mdata.width, mdata.height,
 				reinterpret_cast<const uint16_t*>(buf.get()), mdata.size,
 				mdata.row_width * sizeof(uint16_t));
 			break;
 		case VTF_IMAGE_FORMAT_BGRA4444:
-			img = ImageDecoder::fromLinear16(ImageDecoder::PXF_ARGB4444,
+			img = ImageDecoder::fromLinear16(
+				ImageDecoder::PixelFormat::ARGB4444,
 				mdata.width, mdata.height,
 				reinterpret_cast<const uint16_t*>(buf.get()), mdata.size,
 				mdata.row_width * sizeof(uint16_t));
 			break;
 		case VTF_IMAGE_FORMAT_BGRA5551:
-			img = ImageDecoder::fromLinear16(ImageDecoder::PXF_ARGB1555,
+			img = ImageDecoder::fromLinear16(
+				ImageDecoder::PixelFormat::ARGB1555,
 				mdata.width, mdata.height,
 				reinterpret_cast<const uint16_t*>(buf.get()), mdata.size,
 				mdata.row_width * sizeof(uint16_t));
@@ -608,14 +623,16 @@ const rp_image *ValveVTFPrivate::loadImage(int mip)
 			// NOTE: Using A8L8 format, not IA8, which is GameCube-specific.
 			// (Channels are backwards.)
 			// TODO: Add ImageDecoder::fromLinear16() support for IA8 later.
-			img = ImageDecoder::fromLinear16(ImageDecoder::PXF_A8L8,
+			img = ImageDecoder::fromLinear16(
+				ImageDecoder::PixelFormat::A8L8,
 				mdata.width, mdata.height,
 				reinterpret_cast<const uint16_t*>(buf.get()), mdata.size,
 				mdata.row_width * sizeof(uint16_t));
 			break;
 		case VTF_IMAGE_FORMAT_UV88:
 			// We're handling this as a GR88 texture.
-			img = ImageDecoder::fromLinear16(ImageDecoder::PXF_GR88,
+			img = ImageDecoder::fromLinear16(
+				ImageDecoder::PixelFormat::GR88,
 				mdata.width, mdata.height,
 				reinterpret_cast<const uint16_t*>(buf.get()), mdata.size,
 				mdata.row_width * sizeof(uint16_t));
@@ -626,13 +643,15 @@ const rp_image *ValveVTFPrivate::loadImage(int mip)
 			// FIXME: I8 might have the alpha channel set to the I channel,
 			// whereas L8 has A=1.0.
 			// https://www.opengl.org/discussion_boards/showthread.php/151701-GL_LUMINANCE-vs-GL_INTENSITY
-			img = ImageDecoder::fromLinear8(ImageDecoder::PXF_L8,
+			img = ImageDecoder::fromLinear8(
+				ImageDecoder::PixelFormat::L8,
 				mdata.width, mdata.height,
 				buf.get(), mdata.size,
 				mdata.row_width);
 			break;
 		case VTF_IMAGE_FORMAT_A8:
-			img = ImageDecoder::fromLinear8(ImageDecoder::PXF_A8,
+			img = ImageDecoder::fromLinear8(
+				ImageDecoder::PixelFormat::A8,
 				mdata.width, mdata.height,
 				buf.get(), mdata.size,
 				mdata.row_width);
@@ -843,9 +862,7 @@ const char *ValveVTF::pixelFormat(void) const
 		}
 	} else if (fmt < 0) {
 		// Negative == none (usually -1)
-		// TODO: Localization?
-		//return C_("ValveVTF|ImageFormat", "None");
-		return "None";
+		return C_("ValveVTF|ImageFormat", "None");
 	}
 
 	// Invalid pixel format.
@@ -879,10 +896,6 @@ int ValveVTF::mipmapCount(void) const
  */
 int ValveVTF::getFields(LibRpBase::RomFields *fields) const
 {
-	// TODO: Localization.
-#define C_(ctx, str) str
-#define NOP_C_(ctx, str) str
-
 	assert(fields != nullptr);
 	if (!fields)
 		return 0;

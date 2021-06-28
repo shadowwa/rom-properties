@@ -2,14 +2,17 @@
  * ROM Properties Page shell extension. (KDE4/KF5)                         *
  * RomDataView.cpp: RomData viewer.                                        *
  *                                                                         *
- * Copyright (c) 2016-2020 by David Korth.                                 *
+ * Copyright (c) 2016-2021 by David Korth.                                 *
  * SPDX-License-Identifier: GPL-2.0-or-later                               *
  ***************************************************************************/
 
 #include "stdafx.h"
+#include "config.kde.h"
+
 #include "RomDataView.hpp"
 #include "RpQImageBackend.hpp"
 #include "MessageSound.hpp"
+#include "AchQtDBus.hpp"
 
 // librpbase, librpfile, librptexture
 #include "librpbase/TextOut.hpp"
@@ -35,7 +38,11 @@ using std::vector;
 #include <QtGui/QClipboard>
 
 // Custom Qt widgets.
-#include "DragImageTreeWidget.hpp"
+#include "DragImageTreeView.hpp"
+#include "ListDataModel.hpp"
+#include "ListDataSortProxyModel.hpp"
+#include "LanguageComboBox.hpp"
+#include "OptionsMenuButton.hpp"
 
 // KDE4/KF5 includes.
 #if QT_VERSION >= QT_VERSION_CHECK(5,0,0)
@@ -78,22 +85,11 @@ class RomDataViewPrivate
 
 		// RomData object.
 		RomData *romData;
+		bool hasCheckedAchievements;
 
 		// "Options" button.
-		QPushButton *btnOptions;
-		QMenu *menuOptions;
-		int romOps_firstActionIndex;
-#if QT_VERSION < QT_VERSION_CHECK(5,0,0)
-		QSignalMapper *mapperOptionsMenu;
-#endif /* QT_VERSION < QT_VERSION_CHECK(5,0,0) */
+		OptionsMenuButton *btnOptions;
 		QString prevExportDir;
-
-		enum StandardOptionID {
-			OPTION_EXPORT_TEXT = -1,
-			OPTION_EXPORT_JSON = -2,
-			OPTION_COPY_TEXT = -3,
-			OPTION_COPY_JSON = -4,
-		};
 
 		// Tab contents.
 		struct tab {
@@ -119,20 +115,16 @@ class RomDataViewPrivate
 
 		// Multi-language functionality.
 		uint32_t def_lc;
-		QComboBox *cboLanguage;
-
-		/**
-		 * Get the selected language code.
-		 * @return Selected language code, or 0 for none (default).
-		 */
-		inline uint32_t sel_lc(void) const;
+		LanguageComboBox *cboLanguage;
 
 		// RFT_STRING_MULTI value labels.
 		typedef std::pair<QLabel*, const RomFields::Field*> Data_StringMulti_t;
 		vector<Data_StringMulti_t> vecStringMulti;
 
-		// RFT_LISTDATA_MULTI value QTreeWidgets.
-		typedef std::pair<QTreeWidget*, const RomFields::Field*> Data_ListDataMulti_t;
+		// RFT_LISTDATA_MULTI value QTreeViews.
+		// NOTE: The ListDataModel* is kept here too because the QTreeView
+		// might have a QSortFilterProxyModel.
+		typedef std::pair<QTreeView*, ListDataModel*> Data_ListDataMulti_t;
 		vector<Data_ListDataMulti_t> vecListDataMulti;
 
 		/**
@@ -265,12 +257,8 @@ class RomDataViewPrivate
 RomDataViewPrivate::RomDataViewPrivate(RomDataView *q, RomData *romData)
 	: q_ptr(q)
 	, romData(nullptr)
+	, hasCheckedAchievements(false)
 	, btnOptions(nullptr)
-	, menuOptions(nullptr)
-	, romOps_firstActionIndex(-1)
-#if QT_VERSION < QT_VERSION_CHECK(5,0,0)
-	, mapperOptionsMenu(nullptr)
-#endif /* QT_VERSION < QT_VERSION_CHECK(5,0,0) */
 #ifdef HAVE_KMESSAGEWIDGET
 	, messageWidget(nullptr)
 #  ifdef AUTO_TIMEOUT_MESSAGEWIDGET
@@ -284,9 +272,11 @@ RomDataViewPrivate::RomDataViewPrivate(RomDataView *q, RomData *romData)
 		this->romData = romData->ref();
 	}
 
-	// Register RpQImageBackend.
-	// TODO: Static initializer somewhere?
+	// Register RpQImageBackend and AchQtDBus.
 	rp_image::setBackendCreatorFn(RpQImageBackend::creator_fn);
+#if defined(ENABLE_ACHIEVEMENTS) && defined(HAVE_QtDBus_NOTIFY)
+	AchQtDBus::instance();
+#endif /* ENABLE_ACHIEVEMENTS && HAVE_QtDBus_NOTIFY */
 }
 
 RomDataViewPrivate::~RomDataViewPrivate()
@@ -294,42 +284,6 @@ RomDataViewPrivate::~RomDataViewPrivate()
 	ui.lblIcon->clearRp();
 	ui.lblBanner->clearRp();
 	UNREF(romData);
-}
-
-/**
- * Get the selected language code.
- * @return Selected language code, or 0 for none (default).
- */
-inline uint32_t RomDataViewPrivate::sel_lc(void) const
-{
-	if (!cboLanguage) {
-		// No language dropdown...
-		return 0;
-	}
-
-	return cboLanguage->itemData(cboLanguage->currentIndex()).value<uint32_t>();
-}
-
-/**
- * Find direct child widgets only.
- * @param T Type.
- */
-template<typename T>
-static inline T findDirectChild(QObject *obj, const QString &aName = QString())
-{
-#if QT_VERSION >= QT_VERSION_CHECK(5,0,0)
-	return obj->findChild<T>(aName, Qt::FindDirectChildrenOnly);
-#else /* QT_VERSION < QT_VERSION_CHECK(5,0,0) */
-	foreach(QObject *child, obj->children()) {
-		T qchild = qobject_cast<T>(child);
-		if (qchild != nullptr) {
-			if (aName.isEmpty() || qchild->objectName() == aName) {
-				return qchild;
-			}
-		}
-	}
-	return nullptr;
-#endif /* QT_VERSION >= QT_VERSION_CHECK(5,0,0) */
 }
 
 /**
@@ -368,9 +322,8 @@ void RomDataViewPrivate::createOptionsButton(void)
 		return;
 
 	// Create the "Options" button.
-	// tr: "Options" button.
-	const QString s_options = U82Q(C_("RomDataView", "Op&tions"));
-	btnOptions = btnBox->addButton(s_options, QDialogButtonBox::ActionRole);
+	btnOptions = new OptionsMenuButton();
+	btnBox->addButton(btnOptions, QDialogButtonBox::ActionRole);
 	btnOptions->hide();
 
 	// Add a spacer to the QDialogButtonBox.
@@ -392,62 +345,12 @@ void RomDataViewPrivate::createOptionsButton(void)
 		}
 	}
 
-	// Create the menu and (for Qt4) signal mapper.
-	menuOptions = new QMenu(s_options, q);
-	btnOptions->setMenu(menuOptions);
+	// Connect the OptionsMenuButton's triggered(int) signal.
+	QObject::connect(btnOptions, SIGNAL(triggered(int)),
+			 q, SLOT(btnOptions_triggered(int)));
 
-#if QT_VERSION < QT_VERSION_CHECK(5,0,0)
-	mapperOptionsMenu = new QSignalMapper(q);
-	QObject::connect(mapperOptionsMenu, SIGNAL(mapped(int)),
-		q, SLOT(menuOptions_action_triggered(int)));
-#endif /* QT_VERSION < QT_VERSION_CHECK(5,0,0) */
-
-	/** Standard actions. **/
-	static const struct {
-		const char *desc;
-		int id;
-	} stdacts[] = {
-		{NOP_C_("RomDataView|Options", "Export to Text..."),	OPTION_EXPORT_TEXT},
-		{NOP_C_("RomDataView|Options", "Export to JSON..."),	OPTION_EXPORT_JSON},
-		{NOP_C_("RomDataView|Options", "Copy as Text"),		OPTION_COPY_TEXT},
-		{NOP_C_("RomDataView|Options", "Copy as JSON"),		OPTION_COPY_JSON},
-		{nullptr, 0}
-	};
-
-	for (const auto *p = stdacts; p->desc != nullptr; p++) {
-		QAction *const action = menuOptions->addAction(
-			U82Q(dpgettext_expr(RP_I18N_DOMAIN, "RomDataView|Options", p->desc)));
-#if QT_VERSION >= QT_VERSION_CHECK(5,0,0)
-		QObject::connect(action, &QAction::triggered,
-			[q, p] { q->menuOptions_action_triggered(p->id); });
-#else /* QT_VERSION < QT_VERSION_CHECK(5,0,0) */
-		QObject::connect(action, SIGNAL(triggered()),
-			mapperOptionsMenu, SLOT(map()));
-		mapperOptionsMenu->setMapping(action, p->id);
-#endif /* QT_VERSION >= QT_VERSION_CHECK(5,0,0) */
-	}
-
-	/** ROM operations. **/
-	const vector<RomData::RomOp> ops = romData->romOps();
-	if (!ops.empty()) {
-		menuOptions->addSeparator();
-		romOps_firstActionIndex = menuOptions->children().count();
-
-		int i = 0;
-		const auto ops_end = ops.cend();
-		for (auto iter = ops.cbegin(); iter != ops_end; ++iter, i++) {
-			QAction *const action = menuOptions->addAction(U82Q(iter->desc));
-			action->setEnabled(!!(iter->flags & RomData::RomOp::ROF_ENABLED));
-#if QT_VERSION >= QT_VERSION_CHECK(5,0,0)
-			QObject::connect(action, &QAction::triggered,
-				[q, i] { q->menuOptions_action_triggered(i); });
-#else /* QT_VERSION < QT_VERSION_CHECK(5,0,0) */
-			QObject::connect(action, SIGNAL(triggered()),
-				mapperOptionsMenu, SLOT(map()));
-			mapperOptionsMenu->setMapping(action, i);
-#endif /* QT_VERSION >= QT_VERSION_CHECK(5,0,0) */
-		}
-	}
+	// Initialize the menu options.
+	btnOptions->reinitMenu(romData);
 }
 
 /**
@@ -722,7 +625,7 @@ void RomDataViewPrivate::initBitfield(QLabel *lblDesc,
 void RomDataViewPrivate::initListData(QLabel *lblDesc,
 	const RomFields::Field &field, int fieldIdx)
 {
-	// ListData type. Create a QTreeWidget.
+	// ListData type. Create a QTreeView.
 	const auto &listDataDesc = field.desc.list_data;
 	// NOTE: listDataDesc.names can be nullptr,
 	// which means we don't have any column headers.
@@ -784,155 +687,128 @@ void RomDataViewPrivate::initListData(QLabel *lblDesc,
 		// Use the first row.
 		colCount = static_cast<int>(list_data->at(0).size());
 	}
+	assert(colCount > 0);
+	if (colCount <= 0) {
+		// No columns...
+		delete lblDesc;
+		return;
+	}
 
 	Q_Q(RomDataView);
-	QTreeWidget *treeWidget;
-	Qt::ItemFlags itemFlags;
+	QTreeView *treeView;
 	if (hasIcons) {
-		treeWidget = new DragImageTreeWidget(q);
-		treeWidget->setDragEnabled(true);
-		treeWidget->setDefaultDropAction(Qt::CopyAction);
-		treeWidget->setDragDropMode(QAbstractItemView::InternalMove);
-		itemFlags = Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled;
+		treeView = new DragImageTreeView(q);
+		treeView->setDragEnabled(true);
+		treeView->setDefaultDropAction(Qt::CopyAction);
+		treeView->setDragDropMode(QAbstractItemView::InternalMove);
 		// TODO: Get multi-image drag & drop working.
 		//treeWidget->setSelectionMode(QAbstractItemView::ExtendedSelection);
-		treeWidget->setSelectionMode(QAbstractItemView::SingleSelection);
+		treeView->setSelectionMode(QAbstractItemView::SingleSelection);
 	} else {
-		treeWidget = new QTreeWidget(q);
-		itemFlags = Qt::ItemIsEnabled | Qt::ItemIsSelectable;
-		treeWidget->setSelectionMode(QAbstractItemView::SingleSelection);
+		treeView = new QTreeView(q);
+		treeView->setSelectionMode(QAbstractItemView::SingleSelection);
 	}
-	treeWidget->setRootIsDecorated(false);
-	treeWidget->setAlternatingRowColors(true);
+	treeView->setRootIsDecorated(false);
+	treeView->setAlternatingRowColors(true);
 
 	// DISABLED uniform row heights.
 	// Some Xbox 360 achievements take up two lines,
 	// while others might take up three or more.
-	treeWidget->setUniformRowHeights(false);
+	treeView->setUniformRowHeights(false);
 
-	// Format table.
-	// All values are known to fit in uint8_t.
-	// NOTE: Need to include AlignVCenter.
-	static const uint8_t align_tbl[4] = {
-		// Order: TXA_D, TXA_L, TXA_C, TXA_R
-		Qt::AlignLeft | Qt::AlignVCenter,
-		Qt::AlignLeft | Qt::AlignVCenter,
-		Qt::AlignCenter,
-		Qt::AlignRight | Qt::AlignVCenter,
-	};
+	// Item models.
+	// TODO: Subclass QSortFilterProxyModel for custom sorting methods.
+	ListDataModel *const listModel = new ListDataModel(q);
+	ListDataSortProxyModel *const proxyModel = new ListDataSortProxyModel(q);
+	proxyModel->setSortingMethods(listDataDesc.col_attrs.sorting);
+	proxyModel->setSourceModel(listModel);
+	treeView->setModel(proxyModel);
 
-	// Set up the column names.
-	treeWidget->setColumnCount(colCount);
+	if (hasIcons) {
+		// TODO: Ideal icon size? Using 32x32 for now.
+		// NOTE: QTreeView's iconSize only applies to QIcon, not QPixmap.
+		const QSize iconSize(32, 32);
+		treeView->setIconSize(iconSize);
+		listModel->setIconSize(iconSize);
+	}
+
+	// Add the field data to the ListDataModel.
+	listModel->setField(&field);
+
+	// Set up column and header visibility.
 	if (listDataDesc.names) {
 		QStringList columnNames;
 		columnNames.reserve(colCount);
-		QTreeWidgetItem *const header = treeWidget->headerItem();
-		uint32_t align = listDataDesc.alignment.headers;
-		auto iter = listDataDesc.names->cbegin();
-		for (int col = 0; col < colCount; col++, ++iter, align >>= 2) {
-			header->setTextAlignment(col, align_tbl[align & 3]);
-
-			const string &name = *iter;
-			if (!name.empty()) {
-				columnNames.append(U82Q(name));
-			} else {
+		int col = 0;
+		const auto names_cend = listDataDesc.names->cend();
+		for (auto iter = listDataDesc.names->cbegin(); iter != names_cend && col < colCount; ++iter, col++) {
+			if (iter->empty()) {
 				// Don't show this column.
-				columnNames.append(QString());
-				treeWidget->setColumnHidden(col, true);
+				treeView->setColumnHidden(col, true);
 			}
 		}
-		treeWidget->setHeaderLabels(columnNames);
 	} else {
 		// Hide the header.
-		treeWidget->header()->hide();
+		treeView->header()->hide();
 	}
 
-	if (hasIcons) {
-		// TODO: Ideal icon size?
-		// Using 32x32 for now.
-		treeWidget->setIconSize(QSize(32, 32));
-	}
-
-	// Add the row data.
-	// NOTE: For RFT_STRING_MULTI, we're only adding placeholder rows.
-	uint32_t checkboxes = 0;
-	if (hasCheckboxes) {
-		checkboxes = field.data.list_data.mxd.checkboxes;
-	}
-
-	unsigned int row = 0;	// for icons [TODO: Use iterator?]
-	const auto list_data_cend = list_data->cend();
-	for (auto iter = list_data->cbegin(); iter != list_data_cend; ++iter, row++) {
-		const vector<string> &data_row = *iter;
-		// FIXME: Skip even if we don't have checkboxes?
-		// (also check other UI frontends)
-		if (hasCheckboxes && data_row.empty()) {
-			// Skip this row.
-			checkboxes >>= 1;
-			continue;
-		}
-
-		QTreeWidgetItem *const treeWidgetItem = new QTreeWidgetItem(treeWidget);
-		if (hasCheckboxes) {
-			// The checkbox will only show up if setCheckState()
-			// is called at least once, regardless of value.
-			treeWidgetItem->setCheckState(0, (checkboxes & 1) ? Qt::Checked : Qt::Unchecked);
-			checkboxes >>= 1;
-		} else if (hasIcons) {
-			const rp_image *const icon = field.data.list_data.mxd.icons->at(row);
-			if (icon) {
-				treeWidgetItem->setIcon(0, QIcon(
-					QPixmap::fromImage(rpToQImage(icon))));
-				treeWidgetItem->setData(0, DragImageTreeWidget::RpImageRole,
-					QVariant::fromValue((void*)icon));
+	// Set up column sizing.
+#if QT_VERSION >= QT_VERSION_CHECK(5,0,0)
+	if (listDataDesc.col_attrs.sizing != 0) {
+		// Explicit column sizing was specified.
+		// NOTE: RomFields' COLSZ_* enums match QHeaderView::ResizeMode.
+		QHeaderView *const pHeader = treeView->header();
+		assert(pHeader != nullptr);
+		if (pHeader) {
+			pHeader->setStretchLastSection(false);
+			uint32_t sizing = listDataDesc.col_attrs.sizing;
+			for (int i = 0; i < colCount; i++, sizing >>= RomFields::COLSZ_BITS) {
+				pHeader->setSectionResizeMode(i, (QHeaderView::ResizeMode)(sizing & RomFields::COLSZ_MASK));
 			}
 		}
-
-		// Set item flags.
-		treeWidgetItem->setFlags(itemFlags);
-
-		int col = 0;
-		uint32_t align = listDataDesc.alignment.data;
-		const auto data_row_cend = data_row.cend();
-		for (auto iter = data_row.cbegin(); iter != data_row_cend; ++iter) {
-			if (!isMulti) {
-				treeWidgetItem->setData(col, Qt::DisplayRole, U82Q(*iter));
+	} else
+#endif /* QT_VERSION >= QT_VERSION_CHECK(5,0,0) */
+	{
+		// No explicit column sizing.
+		// Use default column sizing, but resize columns to contents initially.
+		if (!isMulti) {
+			// Resize the columns to fit the contents.
+			for (int i = 0; i < colCount; i++) {
+				treeView->resizeColumnToContents(i);
 			}
-			treeWidgetItem->setTextAlignment(col, align_tbl[align & 3]);
-			col++;
-			align >>= 2;
+			treeView->resizeColumnToContents(colCount);
 		}
 	}
 
-	if (!isMulti) {
-		// Resize the columns to fit the contents.
-		for (int i = 0; i < colCount; i++) {
-			treeWidget->resizeColumnToContents(i);
-		}
-		treeWidget->resizeColumnToContents(colCount);
+	// Enable sorting.
+	// NOTE: sort_dir maps directly to Qt::SortOrder.
+	treeView->setSortingEnabled(true);
+	if (listDataDesc.col_attrs.sort_col >= 0) {
+		treeView->sortByColumn(listDataDesc.col_attrs.sort_col,
+			static_cast<Qt::SortOrder>(listDataDesc.col_attrs.sort_dir));
 	}
 
 	if (listDataDesc.flags & RomFields::RFT_LISTDATA_SEPARATE_ROW) {
 		// Separate rows.
 		tabs[field.tabIdx].form->addRow(lblDesc);
-		tabs[field.tabIdx].form->addRow(treeWidget);
+		tabs[field.tabIdx].form->addRow(treeView);
 	} else {
 		// Single row.
-		tabs[field.tabIdx].form->addRow(lblDesc, treeWidget);
+		tabs[field.tabIdx].form->addRow(lblDesc, treeView);
 	}
-	map_fieldIdx.insert(std::make_pair(fieldIdx, treeWidget));
+	map_fieldIdx.insert(std::make_pair(fieldIdx, treeView));
 
 	// Row height is recalculated when the window is first visible
 	// and/or the system theme is changed.
 	// TODO: Set an actual default number of rows, or let Qt handle it?
 	// (Windows uses 5.)
-	treeWidget->setProperty("RFT_LISTDATA_rows_visible", listDataDesc.rows_visible);
+	treeView->setProperty("RFT_LISTDATA_rows_visible", listDataDesc.rows_visible);
 
 	// Install the event filter.
-	treeWidget->installEventFilter(q);
+	treeView->installEventFilter(q);
 
 	if (isMulti) {
-		vecListDataMulti.emplace_back(std::make_pair(treeWidget, &field));
+		vecListDataMulti.emplace_back(std::make_pair(treeView, listModel));
 	}
 }
 
@@ -959,25 +835,25 @@ void RomDataViewPrivate::adjustListData(int tabIdx)
 		return;
 	}
 
-	QTreeWidget *const treeWidget = qobject_cast<QTreeWidget*>(liField->widget());
-	if (!treeWidget) {
-		// Not a QTreeWidget.
+	QTreeView *const treeView = qobject_cast<QTreeView*>(liField->widget());
+	if (!treeView) {
+		// Not a QTreeView.
 		return;
 	}
 
-	// Move the treeWidget to the QVBoxLayout.
+	// Move the treeView to the QVBoxLayout.
 	int newRow = tab.vbox->count();
 	if (tab.lblCredits) {
 		newRow--;
 	}
 	assert(newRow >= 0);
 	tab.form->removeItem(liField);
-	tab.vbox->insertWidget(newRow, treeWidget, 999, Qt::Alignment());
+	tab.vbox->insertWidget(newRow, treeView, 999, Qt::Alignment());
 	delete liField;
 
 	// Unset this property to prevent the event filter from
 	// setting a fixed height.
-	treeWidget->setProperty("RFT_LISTDATA_rows_visible", QVariant());
+	treeView->setProperty("RFT_LISTDATA_rows_visible", QVariant());
 }
 
 /**
@@ -1003,30 +879,31 @@ void RomDataViewPrivate::initDateTime(QLabel *lblDesc,
 	dateTime.setMSecsSinceEpoch(field.data.date_time * 1000);
 
 	QString str;
+	const QLocale locale = QLocale::system();
 	switch (field.desc.flags & RomFields::RFT_DATETIME_HAS_DATETIME_NO_YEAR_MASK) {
 		case RomFields::RFT_DATETIME_HAS_DATE:
 			// Date only.
-			str = dateTime.date().toString(Qt::DefaultLocaleShortDate);
+			str = locale.toString(dateTime.date(), locale.dateFormat(QLocale::ShortFormat));
 			break;
 
 		case RomFields::RFT_DATETIME_HAS_TIME:
 		case RomFields::RFT_DATETIME_HAS_TIME |
 		     RomFields::RFT_DATETIME_NO_YEAR:
 			// Time only.
-			str = dateTime.time().toString(Qt::DefaultLocaleShortDate);
+			str = locale.toString(dateTime.time(), locale.timeFormat(QLocale::ShortFormat));
 			break;
 
 		case RomFields::RFT_DATETIME_HAS_DATE |
 		     RomFields::RFT_DATETIME_HAS_TIME:
 			// Date and time.
-			str = dateTime.toString(Qt::DefaultLocaleShortDate);
+			str = locale.toString(dateTime, locale.dateTimeFormat(QLocale::ShortFormat));
 			break;
 
 		case RomFields::RFT_DATETIME_HAS_DATE |
 		     RomFields::RFT_DATETIME_NO_YEAR:
 			// Date only. (No year)
 			// TODO: Localize this.
-			str = dateTime.date().toString(QLatin1String("MMM d"));
+			str = locale.toString(dateTime.date(), QLatin1String("MMM d"));
 			break;
 
 		case RomFields::RFT_DATETIME_HAS_DATE |
@@ -1163,124 +1040,78 @@ void RomDataViewPrivate::updateMulti(uint32_t user_lc)
 	// RFT_LISTDATA_MULTI
 	const auto vecListDataMulti_cend = vecListDataMulti.cend();
 	for (auto iter = vecListDataMulti.cbegin(); iter != vecListDataMulti_cend; ++iter) {
-		QTreeWidget *const treeWidget = iter->first;
-		const RomFields::Field *const pField = iter->second;
-		const auto *const pListData_multi = pField->data.list_data.data.multi;
-		assert(pListData_multi != nullptr);
-		assert(!pListData_multi->empty());
-		if (!pListData_multi || pListData_multi->empty()) {
-			// Invalid RFT_LISTDATA_MULTI...
-			continue;
-		}
+		QTreeView *const treeView = iter->first;
+		ListDataModel *const listModel = iter->second;
 
-		if (!cboLanguage) {
-			// Need to add all supported languages.
-			// TODO: Do we need to do this for all of them, or just one?
-			const auto pListData_multi_cend = pListData_multi->cend();
-			for (auto iter_sm = pListData_multi->cbegin();
-			     iter_sm != pListData_multi_cend; ++iter_sm)
-			{
-				set_lc.insert(iter_sm->first);
-			}
-		}
-
-		// Get the ListData_t.
-		const auto *const pListData = RomFields::getFromListDataMulti(pListData_multi, def_lc, user_lc);
-		assert(pListData != nullptr);
-		if (pListData != nullptr) {
-			// Update the list.
-			const int rowCount = treeWidget->topLevelItemCount();
-			auto iter_listData = pListData->cbegin();
-			const auto pListData_cend = pListData->cend();
-			for (int row = 0; row < rowCount && iter_listData != pListData_cend; row++, ++iter_listData) {
-				QTreeWidgetItem *const treeWidgetItem = treeWidget->topLevelItem(row);
-
-				int col = 0;
-				const auto iter_listData_cend = iter_listData->cend();
-				for (auto iter_row = iter_listData->cbegin();
-				     iter_row != iter_listData_cend; ++iter_row, col++)
-				{
-					treeWidgetItem->setData(col, Qt::DisplayRole, U82Q(*iter_row));
-				}
-			}
-
-			// Resize the columns to fit the contents.
-			// NOTE: Only done on first load.
+		if (listModel != nullptr) {
 			if (!cboLanguage) {
-				const int colCount = treeWidget->columnCount();
-				for (int i = 0; i < colCount; i++) {
-					treeWidget->resizeColumnToContents(i);
-				}
-				treeWidget->resizeColumnToContents(colCount);
+				// Need to add all supported languages.
+				// TODO: Do we need to do this for all of them, or just one?
+				const set<uint32_t> list_set_lc = listModel->getLCs();
+				set_lc.insert(list_set_lc.cbegin(), list_set_lc.cend());
 			}
+
+			// Set the language code.
+			listModel->setLC(def_lc, user_lc);
+		}
+
+		// Resize the columns to fit the contents.
+		// NOTE: Only done on first load.
+		if (!cboLanguage) {
+			const int colCount = treeView->model()->columnCount();
+#if QT_VERSION >= QT_VERSION_CHECK(5,0,0)
+			// Check if explicit column sizing was used.
+			// If so, only resize columns marked as "interactive".
+			QHeaderView *const pHeader = treeView->header();
+			assert(pHeader != nullptr);
+			if (pHeader && !pHeader->stretchLastSection()) {
+				for (int i = 0; i < colCount; i++) {
+					if (pHeader->sectionResizeMode(i) == QHeaderView::Interactive) {
+						treeView->resizeColumnToContents(i);
+					}
+				}
+			} else
+#endif /* QT_VERSION >= QT_VERSION_CHECK(5,0,0) */
+			{
+				for (int i = 0; i < colCount; i++) {
+					treeView->resizeColumnToContents(i);
+				}
+			}
+			// TODO: Not sure if this should be done for explicit column sizing.
+			treeView->resizeColumnToContents(colCount);
 		}
 	}
 
 	if (!cboLanguage && set_lc.size() > 1) {
 		// Create the language combobox.
 		Q_Q(RomDataView);
-		cboLanguage = new QComboBox(q);
+		cboLanguage = new LanguageComboBox(q);
 		cboLanguage->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
 		ui.hboxHeaderRow->addWidget(cboLanguage);
 
-		// Sprite sheets. (32x32, 24x24, 16x16)
-		const QPixmap spriteSheets[3] = {
-			QPixmap(QLatin1String(":/flags/flags-32x32.png")),
-			QPixmap(QLatin1String(":/flags/flags-24x24.png")),
-			QPixmap(QLatin1String(":/flags/flags-16x16.png")),
-		};
+		// Set the languages.
+		cboLanguage->setLCs(set_lc);
 
-		int sel_idx = -1;
-		const auto set_lc_cend = set_lc.cend();
-		for (auto iter = set_lc.cbegin(); iter != set_lc_cend; ++iter) {
-			const uint32_t lc = *iter;
-			const char *const name = SystemRegion::getLocalizedLanguageName(lc);
-			if (name) {
-				cboLanguage->addItem(U82Q(name), lc);
-			} else {
-				QString s_lc;
-				s_lc.reserve(4);
-				for (uint32_t tmp_lc = lc; tmp_lc != 0; tmp_lc <<= 8) {
-					ushort chr = (ushort)(tmp_lc >> 24);
-					if (chr != 0) {
-						s_lc += QChar(chr);
-					}
-				}
-				cboLanguage->addItem(s_lc, lc);
-			}
-			int cur_idx = cboLanguage->count()-1;
-
-			// Flag icon.
-			int col, row;
-			if (!SystemRegion::getFlagPosition(lc, &col, &row)) {
-				// Found a matching icon.
-				QIcon flag_icon;
-				flag_icon.addPixmap(spriteSheets[0].copy(col*32, row*32, 32, 32));
-				flag_icon.addPixmap(spriteSheets[1].copy(col*24, row*24, 24, 24));
-				flag_icon.addPixmap(spriteSheets[2].copy(col*16, row*16, 16, 16));
-				cboLanguage->setItemIcon(cur_idx, flag_icon);
-			}
-
-			// Save the default index:
-			// - ROM-default language code.
-			// - English if it's not available.
-			if (lc == def_lc) {
-				// Select this item.
-				sel_idx = cur_idx;
-			} else if (lc == 'en') {
-				// English. Select this item if def_lc hasn't been found yet.
-				if (sel_idx < 0) {
-					sel_idx = cur_idx;
-				}
+		// Select the default language.
+		uint32_t lc_to_set = 0;
+		const auto set_lc_end = set_lc.end();
+		if (set_lc.find(def_lc) != set_lc_end) {
+			// def_lc was found.
+			lc_to_set = def_lc;
+		} else if (set_lc.find('en') != set_lc_end) {
+			// 'en' was found.
+			lc_to_set = 'en';
+		} else {
+			// Unknown. Select the first language.
+			if (!set_lc.empty()) {
+				lc_to_set = *(set_lc.cbegin());
 			}
 		}
-
-		// Set the current index.
-		cboLanguage->setCurrentIndex(sel_idx);
+		cboLanguage->setSelectedLC(lc_to_set);
 
 		// Connect the signal after everything's been initialized.
-		QObject::connect(cboLanguage, SIGNAL(currentIndexChanged(int)),
-		                 q, SLOT(cboLanguage_currentIndexChanged_slot(int)));
+		QObject::connect(cboLanguage, SIGNAL(lcChanged(uint32_t)),
+		                 q, SLOT(cboLanguage_lcChanged_slot(uint32_t)));
 	}
 }
 
@@ -1576,6 +1407,14 @@ void RomDataViewPrivate::initDisplayWidgets(void)
 		adjustListData(static_cast<int>(tabs.size()-1));
 	}
 
+	// Add vertical spacers to each QFormLayout.
+	// This is mostly needed for e.g. DSi and 3DS permissions.
+	std::for_each(tabs.cbegin(), tabs.cend(),
+		[](const tab &tab) {
+			tab.form->addItem(new QSpacerItem(0, 0));
+		}
+	);
+
 	// Close the file.
 	// Keeping the file open may prevent the user from
 	// changing the file.
@@ -1632,6 +1471,12 @@ void RomDataView::showEvent(QShowEvent *event)
 		d->btnOptions->show();
 	}
 
+	// Check for "viewed" achievements.
+	if (!d->hasCheckedAchievements) {
+		d->romData->checkViewedAchievements();
+		d->hasCheckedAchievements = true;
+	}
+
 	// Pass the event to the superclass.
 	super::showEvent(event);
 }
@@ -1656,12 +1501,6 @@ void RomDataView::hideEvent(QHideEvent *event)
 	super::hideEvent(event);
 }
 
-/**
- * Event filter for recalculating RFT_LISTDATA row heights.
- * @param object QObject.
- * @param event Event.
- * @return True to filter the event; false to pass it through.
- */
 bool RomDataView::eventFilter(QObject *object, QEvent *event)
 {
 	// Check the event type.
@@ -1678,48 +1517,43 @@ bool RomDataView::eventFilter(QObject *object, QEvent *event)
 			return false;
 	}
 
-	// Make sure this is a QTreeWidget.
-	QTreeWidget *const treeWidget = qobject_cast<QTreeWidget*>(object);
-	if (!treeWidget) {
-		// Not a QTreeWidget.
+	// Make sure this is a QTreeView.
+	QTreeView *const treeView = qobject_cast<QTreeView*>(object);
+	if (!treeView) {
+		// Not a QTreeView.
 		return false;
 	}
 
 	// Get the requested minimum number of rows.
-	// Recalculate the row heights for this QTreeWidget.
-	const int rows_visible = treeWidget->property("RFT_LISTDATA_rows_visible").toInt();
+	// Recalculate the row heights for this QTreeView.
+	const int rows_visible = treeView->property("RFT_LISTDATA_rows_visible").toInt();
 	if (rows_visible <= 0) {
-		// This QTreeWidget doesn't have a fixed number of rows.
+		// This QTreeView doesn't have a fixed number of rows.
 		// Let Qt decide how to manage its layout.
 		return false;
 	}
 
 	// Get the height of the first item.
-	QTreeWidgetItem *const treeWidgetItem = treeWidget->topLevelItem(0);
-	assert(treeWidgetItem != nullptr);
-	if (!treeWidgetItem) {
-		// No items...
-		return false;
-	}
-
-	QRect rect = treeWidget->visualItemRect(treeWidgetItem);
+	QAbstractItemModel *const model = treeView->model();
+	QRect rect = treeView->visualRect(model->index(0, 0));
 	if (rect.height() <= 0) {
-		// Item has no height?!
+		// Item has no height?
 		return false;
 	}
 
 	// Multiply the height by the requested number of visible rows.
 	int height = rect.height() * rows_visible;
 	// Add the header.
-	if (treeWidget->header()->isVisibleTo(treeWidget)) {
-		height += treeWidget->header()->height();
+	QHeaderView *const header = treeView->header();
+	if (header && header->isVisibleTo(treeView)) {
+		height += header->height();
 	}
-	// Add QTreeWidget borders.
-	height += (treeWidget->frameWidth() * 2);
+	// Add QTreeView borders.
+	height += (treeView->frameWidth() * 2);
 
-	// Set the QTreeWidget height.
-	treeWidget->setMinimumHeight(height);
-	treeWidget->setMaximumHeight(height);
+	// Set the QTreeView height.
+	treeView->setMinimumHeight(height);
+	treeView->setMaximumHeight(height);
 
 	// Allow the event to propagate.
 	return false;
@@ -1746,17 +1580,12 @@ void RomDataView::bitfield_clicked_slot(bool checked)
 
 /**
  * The RFT_MULTI_STRING language was changed.
- * @param lc Language code. (Cast to uint32_t)
+ * @param lc Language code.
  */
-void RomDataView::cboLanguage_currentIndexChanged_slot(int index)
+void RomDataView::cboLanguage_lcChanged_slot(uint32_t lc)
 {
 	Q_D(RomDataView);
-	if (index < 0) {
-		// Invalid index...
-		return;
-	}
-
-	d->updateMulti(d->sel_lc());
+	d->updateMulti(lc);
 }
 
 /** Properties. **/
@@ -1808,7 +1637,7 @@ void RomDataView::setRomData(RomData *romData)
  * An "Options" menu action was triggered.
  * @param id Options ID.
  */
-void RomDataView::menuOptions_action_triggered(int id)
+void RomDataView::btnOptions_triggered(int id)
 {
 	// IDs below 0 are for built-in actions.
 	// IDs >= 0 are for RomData-specific actions.
@@ -1826,22 +1655,22 @@ void RomDataView::menuOptions_action_triggered(int id)
 		QString qs_default_ext;
 		const char *s_filter = nullptr;
 		switch (id) {
-			case RomDataViewPrivate::OPTION_EXPORT_TEXT:
+			case OPTION_EXPORT_TEXT:
 				toClipboard = false;
 				qs_title = U82Q(C_("RomDataView", "Export to Text File"));
 				qs_default_ext = QLatin1String(".txt");
 				// tr: Text files filter. (RP format)
 				s_filter = C_("RomDataView", "Text Files|*.txt|text/plain|All Files|*.*|-");
 				break;
-			case RomDataViewPrivate::OPTION_EXPORT_JSON:
+			case OPTION_EXPORT_JSON:
 				toClipboard = false;
 				qs_title = U82Q(C_("RomDataView", "Export to JSON File"));
 				qs_default_ext = QLatin1String(".json");
 				// tr: JSON files filter. (RP format)
 				s_filter = C_("RomDataView", "JSON Files|*.json|application/json|All Files|*.*|-");
 				break;
-			case RomDataViewPrivate::OPTION_COPY_TEXT:
-			case RomDataViewPrivate::OPTION_COPY_JSON:
+			case OPTION_COPY_TEXT:
+			case OPTION_COPY_JSON:
 				toClipboard = true;
 				break;
 			default:
@@ -1877,27 +1706,28 @@ void RomDataView::menuOptions_action_triggered(int id)
 		// TODO: Optimize this such that we can pass ofstream or ostringstream
 		// to a factored-out function.
 
+		const uint32_t sel_lc = (d->cboLanguage ? d->cboLanguage->selectedLC() : 0);
 		switch (id) {
-			case RomDataViewPrivate::OPTION_EXPORT_TEXT: {
+			case OPTION_EXPORT_TEXT: {
 				ofs << "== " << rp_sprintf(C_("RomDataView", "File: '%s'"), rom_filename) << std::endl;
-				ROMOutput ro(d->romData, d->sel_lc());
+				ROMOutput ro(d->romData, sel_lc);
 				ofs << ro;
 				break;
 			}
-			case RomDataViewPrivate::OPTION_EXPORT_JSON: {
+			case OPTION_EXPORT_JSON: {
 				JSONROMOutput jsro(d->romData);
 				ofs << jsro << std::endl;
 				break;
 			}
-			case RomDataViewPrivate::OPTION_COPY_TEXT: {
+			case OPTION_COPY_TEXT: {
 				ostringstream oss;
 				oss << "== " << rp_sprintf(C_("RomDataView", "File: '%s'"), rom_filename) << std::endl;
-				ROMOutput ro(d->romData, d->sel_lc());
+				ROMOutput ro(d->romData, sel_lc);
 				oss << ro;
 				QApplication::clipboard()->setText(U82Q(oss.str()));
 				break;
 			}
-			case RomDataViewPrivate::OPTION_COPY_JSON: {
+			case OPTION_COPY_JSON: {
 				ostringstream oss;
 				JSONROMOutput jsro(d->romData);
 				oss << jsro << std::endl;
@@ -1908,11 +1738,6 @@ void RomDataView::menuOptions_action_triggered(int id)
 				assert(!"Invalid action ID.");
 				return;
 		}
-		return;
-	}
-
-	if (d->romOps_firstActionIndex < 0) {
-		// No ROM operations...
 		return;
 	}
 
@@ -1966,17 +1791,7 @@ void RomDataView::menuOptions_action_triggered(int id)
 		ops = d->romData->romOps();
 		assert(id < (int)ops.size());
 		if (id < (int)ops.size()) {
-			const QObjectList &objList = d->menuOptions->children();
-			int actionIndex = d->romOps_firstActionIndex + id;
-			assert(actionIndex < objList.size());
-			if (actionIndex < objList.size()) {
-				QAction *const action = qobject_cast<QAction*>(objList.at(actionIndex));
-				if (action) {
-					const RomData::RomOp &op = ops[id];
-					action->setText(U82Q(op.desc));
-					action->setEnabled(!!(op.flags & RomData::RomOp::ROF_ENABLED));
-				}
-			}
+			d->btnOptions->updateOp(id, &ops[id]);
 		}
 
 		// Show the message and play the sound.
